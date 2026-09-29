@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
-import { ArrowRight, Leaf, Package, Plus, X } from "lucide-react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
+import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
+import { pantryItemSchema, type PantryItem, type PantryTag } from "@/lib/contracts";
 import {
   inferPantryCategory,
   pantryCategories,
@@ -21,6 +22,7 @@ import { knownIngredientsFromHousehold, normalizeIngredientName, resolveIngredie
 const locations = ["Fridge", "Freezer", "Cupboard", "Garden"] as const;
 const amount = (quantity: number, unit: string) =>
   `${quantity.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${unit}`;
+type ImportRow = { name: string; quantity: number; unit: PantryItem["unit"]; location: PantryItem["location"]; tag: PantryTag; merge: boolean };
 
 export function PantryPanel() {
   const { householdResetVersion } = useHousehold();
@@ -36,6 +38,14 @@ function PantryContent() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [ambiguous, setAmbiguous] = useState<KnownIngredient[]>([]);
   const knownIngredients = knownIngredientsFromHousehold(state);
+  const [bulkText, setBulkText] = useState("");
+  const [photoName, setPhotoName] = useState("");
+  const [defaultQuantity, setDefaultQuantity] = useState(1);
+  const [defaultUnit, setDefaultUnit] = useState<PantryItem["unit"]>("each");
+  const [defaultLocation, setDefaultLocation] = useState<PantryItem["location"]>("Cupboard");
+  const [defaultTag, setDefaultTag] = useState<PantryTag>("special");
+  const [receiptText, setReceiptText] = useState("");
+  const [reviewRows, setReviewRows] = useState<ImportRow[]>([]);
   const useSoon = state.pantry.filter(
     (item) => item.useSoon && item.quantity > 0,
   );
@@ -89,9 +99,11 @@ function PantryContent() {
       id,
       name,
       quantity: Number(form.get("quantity")),
+      restockBelow: Number(form.get("restockBelow")),
       unit: form.get("unit"),
       location: form.get("location"),
       useSoon: form.get("useSoon") === "on",
+      tag: form.get("tag"),
       category: form.get("category"),
     });
     if (!result.success) {
@@ -121,6 +133,64 @@ function PantryContent() {
     setEditor(null);
   }
 
+  function prepareImport(source: "list" | "receipt") {
+    const input = source === "list" ? bulkText : receiptText;
+    const candidates = input.split(/[\n,;]+/).map((line) => {
+      let cleaned = line.trim().replace(/\s+\$\d+(?:\.\d{2})?\s*$/, "");
+      const count = source === "receipt" ? cleaned.match(/^(\d+(?:\.\d+)?)\s+(.+)$/) : null;
+      if (count) cleaned = count[2];
+      return { name: cleaned.trim(), quantity: count ? Number(count[1]) : defaultQuantity };
+    }).filter(({ name }) => name && !/^total|^subtotal|^tax|^change|^payment|^thank you/i.test(name));
+    const unique = [...new Map(candidates.map((item) => [item.name.toLowerCase(), item])).values()];
+    if (!unique.length) {
+      setError("Paste ingredient names or receipt lines first.");
+      return;
+    }
+    setReviewRows(unique.map(({ name, quantity }) => {
+      const duplicate = state.pantry.find((item) => item.name.trim().toLowerCase() === name.toLowerCase() && item.unit === defaultUnit);
+      return { name: name.slice(0, 80), quantity, unit: defaultUnit, location: defaultLocation, tag: duplicate?.tag ?? defaultTag, merge: Boolean(duplicate) };
+    }));
+    setError(null);
+    setMessage("");
+  }
+
+  function saveImport() {
+    const additions: PantryItem[] = [];
+    const updates = new Map<string, PantryItem>();
+    for (const row of reviewRows) {
+      const duplicate = row.merge && state.pantry.find((item) => item.name.trim().toLowerCase() === row.name.trim().toLowerCase() && item.unit === row.unit);
+      if (duplicate) {
+        const current = updates.get(duplicate.id) ?? duplicate;
+        const checked = pantryItemSchema.safeParse({ ...current, quantity: current.quantity + row.quantity, tag: row.tag });
+        if (checked.success) updates.set(duplicate.id, checked.data);
+      } else {
+        const slug = row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "ingredient";
+        let id = slug; let suffix = 2;
+        while (state.pantry.some((item) => item.id === id) || additions.some((item) => item.id === id)) id = `${slug}-${suffix++}`;
+        const checked = pantryItemSchema.safeParse({ id, name: row.name, quantity: row.quantity, unit: row.unit, location: row.location, useSoon: false, tag: row.tag });
+        if (checked.success) additions.push(checked.data);
+      }
+    }
+    if (state.pantry.length + additions.length > 200) {
+      setError(`There is room for ${Math.max(0, 200 - state.pantry.length)} new items. Remove some rows or merge duplicates.`);
+      return;
+    }
+    const updated = state.pantry.map((item) => updates.get(item.id) ?? item);
+    setPantry([...updated, ...additions]);
+    const mergedCount = [...updates.keys()].length;
+    setReviewRows([]); setBulkText(""); setReceiptText(""); setError(null);
+    setMessage(`${additions.length} added and ${mergedCount} existing ${mergedCount === 1 ? "item updated" : "items updated"}.`);
+  }
+
+  function capturePhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    setPhotoName(file.name);
+    setError(null);
+    setMessage("Photo captured. Automatic food, receipt, and barcode recognition needs a connected recognition service; add the identified item below.");
+    setEditor("new");
+  }
+
   return (
     <>
       <header className="page-heading">
@@ -137,6 +207,49 @@ function PantryContent() {
           <Plus size={17} aria-hidden="true" /> Add ingredient
         </button>
       </header>
+
+      <section className="card pantry-import" aria-label="Add pantry items">
+        <div>
+          <h2><ClipboardPaste size={18} aria-hidden="true" /> Add a list</h2>
+          <p className="muted">Paste names separated by commas or new lines, then review before adding.</p>
+          <textarea aria-label="Ingredient names" value={bulkText} onChange={(event) => setBulkText(event.target.value)} placeholder="Apples, rice, black beans" rows={3} />
+          <div className="import-defaults">
+            <label className="field">Default amount<input type="number" min="0.01" max="100000" step="any" value={defaultQuantity} onChange={(event) => setDefaultQuantity(Number(event.target.value))} /></label>
+            <label className="field">Unit<select value={defaultUnit} onChange={(event) => setDefaultUnit(event.target.value as PantryItem["unit"])}><option value="each">each</option><option value="g">grams (g)</option><option value="ml">milliliters (ml)</option></select></label>
+            <label className="field">Storage<select value={defaultLocation} onChange={(event) => setDefaultLocation(event.target.value as PantryItem["location"])}>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
+            <label className="field">Pantry tag<select value={defaultTag} onChange={(event) => setDefaultTag(event.target.value as PantryTag)}><option value="staple">Staple</option><option value="seasonal">Seasonal</option><option value="special">Special</option></select></label>
+          </div>
+          <button className="button secondary" onClick={() => prepareImport("list")}>Review list</button>
+          <h3 className="receipt-title">Paste receipt text</h3>
+          <p className="muted">Paste or type receipt lines. Totals and common payment lines are filtered; check the preview.</p>
+          <textarea aria-label="Receipt text" value={receiptText} onChange={(event) => setReceiptText(event.target.value)} placeholder={'Milk  $3.49\nApples  $4.20'} rows={3} />
+          <button className="button secondary" onClick={() => prepareImport("receipt")}>Review receipt items</button>
+        </div>
+        <div>
+          <h2><Camera size={18} aria-hidden="true" /> Use your camera</h2>
+          <p className="muted">Take a photo of an item, receipt, or barcode on your phone, then enter the identified item.</p>
+          <label className="button secondary camera-button">
+            <Camera size={16} aria-hidden="true" /> Take a photo
+            <input type="file" accept="image/*" capture="environment" onChange={capturePhoto} aria-label="Take a pantry photo" />
+          </label>
+          {photoName ? <p className="small muted">Captured: {photoName}</p> : null}
+        </div>
+      </section>
+      {reviewRows.length > 0 ? <section className="card import-review" aria-labelledby="review-import-heading">
+        <div className="section-heading"><div><p className="eyebrow">CHECK BEFORE SAVING</p><h2 id="review-import-heading">Review pantry items</h2></div><button className="icon-button" aria-label="Close import review" onClick={() => setReviewRows([])}><X size={20} /></button></div>
+        {reviewRows.map((row, index) => <div className="import-review-row" key={`${row.name}-${index}`}>
+          <label className="field">Item name<input value={row.name} maxLength={80} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label>
+          <label className="field">Amount<input type="number" min="0.01" max="100000" step="any" value={row.quantity} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, quantity: Number(event.target.value) } : item))} /></label>
+          <label className="field">Unit<select value={row.unit} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, unit: event.target.value as PantryItem["unit"] } : item))}><option value="each">each</option><option value="g">g</option><option value="ml">ml</option></select></label>
+          <label className="field">Storage<select value={row.location} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, location: event.target.value as PantryItem["location"] } : item))}>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
+          <label className="field">Tag<select value={row.tag} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, tag: event.target.value as PantryTag } : item))}><option value="staple">Staple</option><option value="seasonal">Seasonal</option><option value="special">Special</option></select></label>
+          {state.pantry.some((item) => item.name.trim().toLowerCase() === row.name.trim().toLowerCase() && item.unit === row.unit) ? <label className="checkbox-label"><input type="checkbox" checked={row.merge} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, merge: event.target.checked } : item))} /> Add to existing amount</label> : null}
+          <button className="text-button" onClick={() => setReviewRows((rows) => rows.filter((_, i) => i !== index))}>Remove</button>
+        </div>)}
+        <div className="actions"><button className="button secondary" onClick={() => setReviewRows([])}>Cancel</button><button className="button" disabled={!reviewRows.length} onClick={saveImport}>Save reviewed items</button></div>
+      </section> : null}
+      {error ? <p className="error-message" role="alert">{error}</p> : null}
+      <p className="status-message" role="status">{message}</p>
 
       <div className="stats-strip" aria-label="Pantry overview">
         <div className="stat">
@@ -243,7 +356,11 @@ function PantryContent() {
                 </select>
               </label>
               <label className="field">
-                Storage
+                Restock staple below
+                <input name="restockBelow" type="number" min="0" max="100000" step="any" defaultValue={editing?.restockBelow ?? 0} />
+              </label>
+            <label className="field">
+              Storage
                 <select
                   name="location"
                   defaultValue={editing?.location ?? "Fridge"}
@@ -254,6 +371,11 @@ function PantryContent() {
                 </select>
               </label>
               <label className="field">
+                Pantry tag
+                <select name="tag" defaultValue={editing?.tag ?? "special"}>
+                  <option value="staple">Staple</option>
+                  <option value="seasonal">Seasonal</option>
+                  <option value="special">Special</option>
                 Food group
                 <select
                   name="category"
@@ -363,6 +485,7 @@ function PantryContent() {
                   <th scope="col">On hand</th>
                   <th scope="col">Food group</th>
                   <th scope="col">Storage</th>
+                  <th scope="col">Tag</th>
                   <th scope="col">Keep in mind</th>
                   <th scope="col">
                     <span className="sr-only">Actions</span>
@@ -390,6 +513,7 @@ function PantryContent() {
                     <td>
                       <span className="location-label">{item.location}</span>
                     </td>
+                    <td><span className={`pantry-tag tag-${item.tag}`}>{item.tag}</span></td>
                     <td>
                       {item.quantity === 0 ? (
                         <span className="muted small">Out of stock</span>
