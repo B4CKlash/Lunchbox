@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { mealFailureMessage, mealRequestError } from "@/features/meals/client-request";
+import { rememberRecipeNames } from "@/features/meals/suggestion-history";
 import {
   suggestMealsResponseSchema,
   type SuggestMealsResponse,
@@ -17,6 +18,7 @@ export function useMealSuggestions(request: string, kitchenKey = request) {
   const [result, setResult] = useState<SuggestionResult | null>(null);
   const latestRequest = useRef(request);
   const activeRequest = useRef<AbortController | null>(null);
+  const recentRecipeNames = useRef<string[]>([]);
   const requestKey = `${retry}:${kitchenKey}`;
   const loading = result?.key !== requestKey;
   const current = loading ? null : result;
@@ -32,7 +34,10 @@ export function useMealSuggestions(request: string, kitchenKey = request) {
         const response = await fetch("/api/meals/suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: latestRequest.current,
+          body: JSON.stringify({
+            ...JSON.parse(latestRequest.current),
+            recentRecipeNames: recentRecipeNames.current,
+          }),
           signal: AbortSignal.any([
             controller.signal,
             AbortSignal.timeout(50000),
@@ -47,8 +52,13 @@ export function useMealSuggestions(request: string, kitchenKey = request) {
           throw new Error(
             "Those meal ideas weren’t quite right. Please try again.",
           );
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          recentRecipeNames.current = rememberRecipeNames(
+            recentRecipeNames.current,
+            parsed.data.recipes,
+          );
           setResult({ key: requestKey, response: parsed.data });
+        }
       } catch (error) {
         if (!controller.signal.aborted)
           setResult({

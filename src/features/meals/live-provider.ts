@@ -30,7 +30,7 @@ const outputSchema = z.object({
   recipeRefs: z.array(z.string()).max(3),
   servings: z.number().int().min(1).max(12),
 });
-type MealContext = ChatMealsRequest & { knownIngredients?: KnownIngredient[] };
+type MealContext = ChatMealsRequest & { knownIngredients?: KnownIngredient[]; recentRecipeNames?: string[] };
 export type LiveProviderOptions = { signal?: AbortSignal; model?: LanguageModel };
 
 function ingredientReferences(context: MealContext): KnownIngredient[] {
@@ -54,6 +54,8 @@ export function createMealTools(context: MealContext) {
   const proposals = new Map<string, { recipe: Recipe; servings: number }>();
   let evaluated = 0;
   let generated = false;
+  const recipeNameKey = (name: string) => name.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ");
+  const excludedNames = new Set((context.recentRecipeNames ?? []).map(recipeNameKey));
 
   function findSavedRecipes({ query, servings = context.preferences.servings }: { query: string; servings?: number }) {
     const words = query.toLocaleLowerCase("en-US").split(/\s+/).filter(Boolean);
@@ -75,6 +77,10 @@ export function createMealTools(context: MealContext) {
     if (evaluated > 6) return { recipes: [], errors: ["Recipe evaluation limit reached. Finish with the already evaluated recipes or explain the issue."] };
     const errors: string[] = [];
     const recipes = parsed.recipes.flatMap((candidate) => {
+      if (excludedNames.has(recipeNameKey(candidate.name))) {
+        errors.push(`${candidate.name}: already suggested. Create a different dish, not just a renamed version, while keeping the current preferences.`);
+        return [];
+      }
       if (candidate.minutes > context.preferences.maxMinutes) {
         errors.push(`${candidate.name}: exceeds the selected ${context.preferences.maxMinutes}-minute limit.`);
         return [];
@@ -130,6 +136,7 @@ export function createMealTools(context: MealContext) {
     proposals,
     known,
     toolPhaseComplete: () => generated,
+    attemptedGeneration: () => evaluated > 0,
     findSavedRecipes,
     evaluateRecipes,
     reviewPlan,
@@ -147,6 +154,7 @@ Full plan shortages include low pantry staples: items marked restock cover the g
 The supplied plan can be a calendar draft or the committed calendar, as identified by planStatus. Draft shortages are a preview only; do not say they are already on the grocery list. Users must place every meal and press Commit plan to update groceries. If asked for the actual grocery list while a draft is supplied, explain that you can inspect the preview and direct the user to Shopping for committed requirements. Unknown planStatus means preview only; do not assume it is committed. Calendar dates and meal slots are informational and cannot be changed through chat.
 Keep recipe quantities at their stated base servings. Final servings means the portion count displayed and planned. New ideas default to preferences.servings; discussion of the focused recipe defaults to focusedServings. Honor an explicit portion request from 1 to 12 for this answer only. Ask for clarification outside that range. Evaluate proposed recipes at the same final servings. Preferences and pantry never change through chat.
 Honor dietaryNeeds and dislikedIngredients as requested recipe constraints, and use goals, nutritionFocus, flavorPreferences, cuisinePreferences, and cookingStyles to guide ideas. Avoid declared allergy ingredients, but do not claim allergen safety, absence of cross-contact, or verified nutrition; remind users to check relevant labels when discussing an allergy. If preferences conflict or cannot be met, ask for clarification rather than claiming compliance.
+Honor customNotes as food preferences within the same constraints. The current pantry and preferences override older conversation context. Zero-quantity pantry items are out of stock, not available ingredients. For suggestions, create fresh dishes rather than resurface favorites. recentRecipeNames lists dishes already shown: avoid those dishes, including cosmetic renames, and vary cooking method or ingredient combinations while preserving dietary and time constraints. An empty pantry still allows new dishes with grocery shortages.
 Only g, ml, and each are supported. Never convert volume to weight, cooked to dry, or count to weight. Distinguish physical forms. For an ingredient already known, use its exact ingredientId and name; for an unfamiliar ingredient use ingredientId null. All ingredients required by a proposed recipe must be represented with positive amounts. Respect the selected maximum time for new ideas. Explain ambiguity instead of guessing a pantry match.
 You have no purchasing, cooking deduction, inventory mutation, account, browsing, or import tools. Do not say you saved, added, removed, purchased, cooked, committed, or changed anything. Users use the cards' Save and Add to calendar buttons. Add to calendar adds to an editable draft; it does not immediately change groceries. Do not promise allergen safety, clinical nutrition accuracy, or claim a recipe meets a medical constraint. Explain those limits when relevant.
 Be concise. Return at most three recipe refs. An explanation or clarification can have no recipe refs. When revising a recipe, evaluate a new snapshot. Recipe steps should refer to the ingredient list rather than repeat quantities that would become wrong when servings change. Finish with the required structured result within the tool budget.`;
@@ -156,6 +164,7 @@ async function run(context: MealContext, operation: "chat" | "suggest", options:
   const prompt = JSON.stringify({
     pantry: context.pantry,
     preferences: context.preferences,
+    recentRecipeNames: context.recentRecipeNames ?? [],
     knownIngredients: toolkit.known,
     savedRecipes: context.recipeBox.map((entry) => ({ name: entry.recipe.name, minutes: entry.recipe.minutes })),
     planStatus: context.planStatus ?? "unspecified",
@@ -165,13 +174,25 @@ async function run(context: MealContext, operation: "chat" | "suggest", options:
     recentConversation: context.messages.slice(-8).map((message) => ({ role: message.role, text: message.text, recipeNames: message.recipes.map((recipe) => recipe.name), servings: message.servings })),
     currentRequest: context.message,
   });
-  const output = await generateStructured({ schema: outputSchema, instructions, prompt, tools: toolkit.tools, toolPhaseComplete: toolkit.toolPhaseComplete, operation, ...options });
+  const output = await generateStructured({
+    schema: outputSchema,
+    instructions,
+    prompt,
+    // Suggestions have no saved recipes or plan to inspect. Keep that budget
+    // for creating and, if needed, repairing a new recipe proposal.
+    tools: operation === "suggest" ? { evaluateRecipes: toolkit.tools.evaluateRecipes } : toolkit.tools,
+    toolPhaseComplete: toolkit.toolPhaseComplete,
+    operation,
+    ...options,
+  });
   if (new Set(output.recipeRefs).size !== output.recipeRefs.length) throw new AiRuntimeError("invalid_output");
   const recipes = output.recipeRefs.map((ref) => {
     const proposal = toolkit.proposals.get(ref);
     if (!proposal || proposal.servings !== output.servings) throw new AiRuntimeError("invalid_output");
     return proposal.recipe;
   });
+  if (operation === "suggest" && toolkit.attemptedGeneration() && recipes.length === 0)
+    throw new AiRuntimeError("invalid_output");
   return chatMealsResponseSchema.parse({ source: "ai", reply: output.reply, recipes, servings: output.servings });
 }
 
@@ -181,7 +202,7 @@ export async function liveChatAboutMeals(input: ChatMealsRequest, options: LiveP
 
 export async function liveSuggestMeals(input: SuggestMealsRequest, options: LiveProviderOptions = {}) {
   const parsed = suggestMealsRequestSchema.parse(input);
-  const response = await run({ ...parsed, meals: [], recipeBox: [], messages: [], message: "Suggest up to three meal ideas matching these preferences. Use available use-soon ingredients when prioritized, but allow missing ingredients for the grocery list." }, "suggest", options);
+  const response = await run({ ...parsed, meals: [], recipeBox: [], messages: [], message: "Generate up to three new, distinct recipes from the current pantry and preferences. Call evaluateRecipes to create the recipe cards, then return its valid references. Avoid the dishes in recentRecipeNames, not just their titles. Use available use-soon ingredients when prioritized, but allow missing ingredients for the grocery list. Only return no recipes when the food preferences need clarification, and explain the specific conflict." }, "suggest", options);
   if (response.servings !== parsed.preferences.servings) throw new AiRuntimeError("invalid_output");
-  return suggestMealsResponseSchema.parse({ source: "ai", recipes: response.recipes });
+  return suggestMealsResponseSchema.parse({ source: "ai", recipes: response.recipes, ...(response.recipes.length === 0 ? { explanation: response.reply } : {}) });
 }

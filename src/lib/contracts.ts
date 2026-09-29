@@ -216,10 +216,13 @@ export const suggestMealsRequestSchema = z.object({
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   knownIngredients: z.array(knownIngredientSchema).max(2000).optional(),
+  // Request-only variety context; never added to persisted household state.
+  recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
 });
 export const suggestMealsResponseSchema = z.object({
   source: recipeSourceSchema,
   recipes: z.array(recipeSchema).max(10),
+  explanation: z.string().min(1).max(2000).optional(),
 });
 export const chatMealsRequestSchema = z.object({
   pantry: z.array(pantryItemSchema).max(200),
