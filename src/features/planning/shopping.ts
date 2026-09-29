@@ -14,6 +14,7 @@ const round = (quantity: number) =>
 export function buildShoppingList(
   pantry: PantryItem[],
   meals: PlannedMeal[],
+  { includeRestock = true }: { includeRestock?: boolean } = {},
 ): ShoppingItem[] {
   const stock = new Map<string, number>();
   for (const item of pantry) {
@@ -44,7 +45,7 @@ export function buildShoppingList(
 
   const stapleThresholds = new Map<string, { item: PantryItem; threshold: number }>();
   for (const item of pantry) {
-    if (item.tag !== "staple") continue;
+    if (!includeRestock || item.tag !== "staple") continue;
     const key = keyFor(item.id, item.unit);
     const threshold = item.restockBelow ?? 0;
     const previous = stapleThresholds.get(key);
