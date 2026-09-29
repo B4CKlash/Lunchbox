@@ -27,6 +27,7 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
   const activeRequest = useRef<AbortController | null>(null);
   const known = knownIngredientsFromHousehold(state);
   const draft = result?.draft;
+  const calendarMeals = state.workspace.calendar.draft ?? state.meals;
 
   useEffect(() => () => activeRequest.current?.abort(), []);
 
@@ -95,7 +96,9 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
       const recipe = finalizeImportDraft(result.draft, result.provenance, known);
       saveRecipe(recipe, "import");
       if (plan) addMeal(recipe, recipe.servings);
-      onNotice(`${recipe.name} saved to your recipe box${plan ? " and added to your plan" : ""}.`);
+      onNotice(plan
+        ? `${recipe.name} saved to your recipe box and added to your calendar draft. Choose a day, then commit the calendar to update shopping.`
+        : `${recipe.name} saved to your recipe box.`);
       setResult(null);
       setText("");
       setUrl("");
@@ -206,7 +209,7 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
           {draft.steps.length < 20 ? <button className="text-button" type="button" onClick={() => setResult({ ...result, draft: { ...draft, steps: [...draft.steps, ""] } })}>Add a step</button> : null}
           <div className="actions import-save-actions">
             <button className="button" disabled={state.workspace.recipeBox.length >= 100} onClick={() => save(false)}>Save recipe</button>
-            <button className="button secondary" disabled={state.workspace.recipeBox.length >= 100 || state.meals.length >= 50} onClick={() => save(true)}>Save & add to plan</button>
+            <button className="button secondary" disabled={state.workspace.recipeBox.length >= 100 || calendarMeals.length >= 50} onClick={() => save(true)}>Save & add to calendar</button>
             <button className="text-button" onClick={() => { setResult(null); setError(null); }}>Back to original input</button>
           </div>
         </div>

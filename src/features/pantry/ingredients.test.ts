@@ -22,6 +22,18 @@ test("unknown ingredients have stable normalized IDs independent of units", () =
   if (a.status === "resolved" && b.status === "resolved") assert.notEqual(a.ingredient.unit, b.ingredient.unit);
 });
 
+test("draft calendar recipe identities are reusable before committing groceries", () => {
+  const state = createSampleHousehold();
+  state.workspace.calendar.draft = [{ id: "draft-1", servings: 2, recipe: {
+    id: "favorite-1", name: "Family dish", description: "", servings: 2, minutes: 20,
+    ingredients: [{ ingredientId: "legacy-family-paste", name: "Family paste", quantity: 25, unit: "g" }],
+    steps: ["Cook."],
+  } }];
+  const match = resolveIngredient({ name: "Family paste", unit: "g" }, knownIngredientsFromHousehold(state));
+  assert.equal(match.status === "resolved" && match.ingredient.ingredientId, "legacy-family-paste");
+  assert.deepEqual(buildShoppingList(state.pantry, state.meals), []);
+});
+
 test("multiple legacy identities require a choice instead of merging", () => {
   const known = [
     { ingredientId: "legacy-a", name: "Tomatoes", unit: "g" as const },

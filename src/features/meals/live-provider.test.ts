@@ -126,6 +126,28 @@ test("reviewPlan combines demand once and focused inspection respects selected s
   assert.equal(input.pantry[0].quantity, 200);
 });
 
+test("calendar drafts and committed plans share the math but keep grocery scope explicit", () => {
+  const input = context();
+  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false }];
+  input.meals = [{ id: "a", recipe: favorite(), servings: 4, date: "2026-10-05", slot: "dinner" }];
+  input.planStatus = "draft";
+  const before = structuredClone(input);
+  const preview = createMealTools(input).reviewPlan();
+  const committed = createMealTools({ ...input, planStatus: "committed" }).reviewPlan();
+  assert.ok("planStatus" in preview);
+  assert.ok("planStatus" in committed);
+  assert.deepEqual(preview.shortages, committed.shortages);
+  assert.equal(preview.shortages?.[0].quantity, 100);
+  assert.equal(preview.planStatus, "draft");
+  assert.match(preview.scope ?? "", /preview only/);
+  assert.match(preview.nextStep ?? "", /Commit plan/);
+  assert.equal(committed.planStatus, "committed");
+  assert.match(committed.scope ?? "", /current grocery requirements/);
+  assert.equal(preview.meals?.[0].date, "2026-10-05");
+  assert.equal(preview.meals?.[0].slot, "dinner");
+  assert.deepEqual(input, before);
+});
+
 test("model IDs cannot override a contradictory physical form or ambiguous name", () => {
   for (const ingredient of [
     { ingredientId: "rice", name: "Cooked rice", quantity: 150, unit: "g" as const },

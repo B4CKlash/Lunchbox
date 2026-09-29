@@ -13,10 +13,15 @@ const imported: Recipe = {
 };
 
 test("import attribution survives save, discuss, plan, and storage without changing stock", () => {
+  const recipe = structuredClone(imported);
   const initial = createSampleHousehold();
-  let state = applyHouseholdAction(initial, { type: "saveRecipe", recipe: imported, source: "import" });
-  state = applyHouseholdAction(state, { type: "discussRecipe", recipe: imported, servings: 4 });
-  state = applyHouseholdAction(state, { type: "addMeal", id: "meal", recipe: imported, servings: 4 });
+  let state = applyHouseholdAction(initial, { type: "saveRecipe", recipe, source: "import" });
+  state = applyHouseholdAction(state, { type: "discussRecipe", recipe, servings: 4 });
+  state = applyHouseholdAction(state, { type: "addMeal", id: "meal", recipe, servings: 4 });
+  assert.equal(state.meals.length, 0);
+  assert.deepEqual(state.workspace.calendar.draft?.[0].recipe.provenance, recipe.provenance);
+  state = applyHouseholdAction(state, { type: "setCalendarDraft", meals: [{ ...state.workspace.calendar.draft![0], date: "2026-10-05", slot: "dinner" }] });
+  state = applyHouseholdAction(state, { type: "commitCalendar" });
   let stored = "";
   saveHousehold({ setItem: (_key, value) => { stored = value; } }, state);
   const loaded = loadHousehold({ getItem: () => stored });
@@ -26,7 +31,7 @@ test("import attribution survives save, discuss, plan, and storage without chang
   assert.deepEqual(loaded.meals[0].recipe.provenance, imported.provenance);
   assert.equal(loaded.workspace.recipeBox[0].source, "import");
   assert.deepEqual(loaded.pantry, initial.pantry);
-  imported.ingredients[0].quantity = 201;
+  recipe.ingredients[0].quantity = 201;
   assert.equal(loaded.meals[0].recipe.ingredients[0].quantity, 200);
 });
 

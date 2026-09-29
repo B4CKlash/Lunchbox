@@ -1,9 +1,11 @@
 import {
   chatMessageSchema,
   householdStateSchema,
+  type CalendarSettings,
   type ChatMessage,
   type HouseholdState,
   type PantryItem,
+  type PlannedMeal,
   type Preferences,
   type Recipe,
   type RecipeSource,
@@ -14,9 +16,28 @@ export type HouseholdAction =
   | { type: "replace"; state: HouseholdState }
   | { type: "setPantry"; pantry: PantryItem[] }
   | { type: "setPreferences"; preferences: Preferences }
-  | { type: "addMeal"; id: string; recipe: Recipe; servings: number }
-  | { type: "removeMeal"; id: string }
-  | { type: "setMealServings"; id: string; servings: number }
+  | {
+      type: "addMeal";
+      id: string;
+      recipe: Recipe;
+      servings: number;
+      calendarStartDate?: string;
+    }
+  | { type: "removeMeal"; id: string; calendarStartDate?: string }
+  | {
+      type: "setMealServings";
+      id: string;
+      servings: number;
+      calendarStartDate?: string;
+    }
+  | { type: "setCalendarSettings"; patch: Partial<CalendarSettings> }
+  | {
+      type: "setCalendarDraft";
+      meals: PlannedMeal[];
+      calendarStartDate?: string;
+    }
+  | { type: "commitCalendar" }
+  | { type: "discardCalendarDraft" }
   | { type: "setWorkspaceMode"; mode: WorkspaceMode }
   | { type: "saveRecipe"; recipe: Recipe; source: RecipeSource }
   | { type: "removeSavedRecipe"; recipeId: string }
@@ -24,13 +45,35 @@ export type HouseholdAction =
   | { type: "discussRecipe"; recipe: Recipe; servings: number }
   | { type: "clearRecipeFocus" }
   | { type: "appendChatMessages"; messages: ChatMessage[] }
-  | { type: "completeChatTurn"; messages: ChatMessage[]; submittedDraft: string }
+  | {
+      type: "completeChatTurn";
+      messages: ChatMessage[];
+      submittedDraft: string;
+    }
   | { type: "clearChat" };
 
 function nextHousehold(
   current: HouseholdState,
   action: HouseholdAction,
 ): HouseholdState {
+  const editableMeals = current.workspace.calendar.draft ?? current.meals;
+  const withDraft = (draft: PlannedMeal[] | null): HouseholdState => ({
+    ...current,
+    workspace: {
+      ...current.workspace,
+      calendar: {
+        ...current.workspace.calendar,
+        // The provider supplies the event's local week so saved drafts do not
+        // shift when reopened later, while reducer results stay deterministic.
+        startDate:
+          current.workspace.calendar.startDate ??
+          ("calendarStartDate" in action
+            ? (action.calendarStartDate ?? null)
+            : null),
+        draft,
+      },
+    },
+  });
   switch (action.type) {
     case "replace":
       return action.state;
@@ -39,25 +82,44 @@ function nextHousehold(
     case "setPreferences":
       return { ...current, preferences: action.preferences };
     case "addMeal":
-      return {
-        ...current,
-        meals: [
-          ...current.meals,
-          { id: action.id, recipe: action.recipe, servings: action.servings },
-        ],
-      };
+      return withDraft([
+        ...editableMeals,
+        { id: action.id, recipe: action.recipe, servings: action.servings },
+      ]);
     case "removeMeal":
-      return {
-        ...current,
-        meals: current.meals.filter((meal) => meal.id !== action.id),
-      };
+      return withDraft(editableMeals.filter((meal) => meal.id !== action.id));
     case "setMealServings":
-      return {
-        ...current,
-        meals: current.meals.map((meal) =>
+      return withDraft(
+        editableMeals.map((meal) =>
           meal.id === action.id ? { ...meal, servings: action.servings } : meal,
         ),
+      );
+    case "setCalendarSettings":
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          calendar: {
+            ...current.workspace.calendar,
+            ...action.patch,
+            draft: current.workspace.calendar.draft,
+          },
+        },
       };
+    case "setCalendarDraft":
+      return withDraft(action.meals);
+    case "commitCalendar": {
+      const draft = current.workspace.calendar.draft;
+      if (draft === null) return current;
+      if (draft.some((meal) => !meal.date || !meal.slot)) {
+        throw new Error(
+          "Place every recipe on the calendar before committing.",
+        );
+      }
+      return { ...withDraft(null), meals: draft };
+    }
+    case "discardCalendarDraft":
+      return withDraft(null);
     case "setWorkspaceMode":
       return {
         ...current,
@@ -178,7 +240,9 @@ export function householdReducer(
     return {
       ...current,
       updateError:
-        "That change could not be applied. Check quantities, servings, and message length. Limits are 200 ingredients, 50 planned meals, and 100 saved recipes.",
+        action.type === "commitCalendar"
+          ? "Place every recipe in a calendar slot before committing your plan."
+          : "That change could not be applied. Check quantities, servings, dates, and message length. Each calendar slot holds one meal. Limits are 200 ingredients, 50 planned meals, and 100 saved recipes.",
     };
   }
 }

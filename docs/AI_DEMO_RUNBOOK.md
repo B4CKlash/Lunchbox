@@ -18,7 +18,7 @@ Each request has a 45-second total deadline, a maximum of three model steps, 4,0
 
 Assistant source (`demo` or `ai`) is separate from recipe provenance (`demo`, `ai`, or `import`). Import attribution is carried on recipe snapshots through saving, discussion, planning, and reload. All household state still uses the existing version-1 adapter; old saves gain additive defaults. State remains local to the current browser.
 
-The shared ingredient resolver uses existing household identities, authored catalog aliases, and stable custom IDs. It never uses fuzzy names as shopping keys, converts units, or merges old IDs. Ambiguous matches require a choice. Pantry entry reuses identities from saved and planned recipes. Shopping scales base quantities to planned servings, combines ingredient/unit requirements, and subtracts stock once. Planning never deducts inventory.
+The shared ingredient resolver uses existing household identities, authored catalog aliases, and stable custom IDs. It never uses fuzzy names as shopping keys, converts units, or merges old IDs. Ambiguous matches require a choice. Pantry entry reuses identities from saved recipes, calendar drafts, and committed meals. Shopping scales base quantities to committed servings, combines ingredient/unit requirements, and subtracts stock once. Planning never deducts inventory. Add to calendar stages a draft; place meals and Commit plan to update groceries. Chat labels draft shortages as a preview.
 
 Imports always open a review form. Source ingredient lines remain visible. Missing servings, time, quantities, and units stay unresolved; only positive quantities in `g`, `ml`, or `each` can be saved. Unsupported measures, ranges, and “to taste” require a person's correction. Users can edit names and steps or add a missing ingredient. The final validated recipe uses the same Save/Add to plan actions as recommendations.
 
@@ -28,11 +28,11 @@ Public URL imports support Schema.org Recipe JSON-LD objects, arrays, graphs, an
 
 Use a fresh demo browser household so personal saved state is untouched. Complete these steps on a protected preview, then repeat on the canonical production URL after merging:
 
-1. Ask for a dish that needs something absent from the pantry, such as a simple lasagna. If needed, increase the preparation-time preference first. Confirm the AI label, quantities, and missing ingredients. Discuss a revision, Save, and Add to plan.
-2. Open Add recipe → Paste text. Use a short recipe with an explicit Ingredients section, base servings, time, and steps. Include an unsupported measure to demonstrate the review requirement, then enter a measured quantity and supported unit. Save and add it to the plan.
+1. Ask for a dish that needs something absent from the pantry, such as a simple lasagna. If needed, increase the preparation-time preference first. Confirm the AI label, quantities, and missing ingredients. Discuss a revision, Save, and Add to calendar.
+2. Open Add recipe → Paste text. Use a short recipe with an explicit Ingredients section, base servings, time, and steps. Include an unsupported measure to demonstrate the review requirement, then enter a measured quantity and supported unit. Save and add it to the calendar draft.
 3. Import a real public recipe URL. `https://www.bbcgoodfood.com/recipes/easy-pancakes` exposes supported recipe data. Its yield is a pancake count, so base servings must be reviewed; spoon measures and optional ingredients also need measured corrections. Preserve the original link and author, then save and plan the recipe.
 4. In chat, ask to find the saved AI recipe. Verify that its original quantities and ID are reused even when stock is insufficient.
-5. View the combined shopping list, change a planned meal's servings, and confirm shortages change while pantry quantities remain unchanged. Add a missing ingredient through the pantry form and confirm that stock reduces the existing shortage.
+5. Place all three meals into calendar slots and Commit plan. View the combined shopping list, change a planned meal's servings, commit again, and confirm shortages change while pantry quantities remain unchanged. Add a missing ingredient through the pantry form and confirm that stock reduces the existing shortage.
 6. Reload and check favorites, imports, attribution, and plan snapshots. Verify desktop and mobile layout plus loading, cancellation, unavailable-credit, validation, and empty states.
 
 Run `npm run check` and `npm run build` before the integration PR. The quoted test glob includes nested API/feature tests; tests use injected model responses and never consume Gateway credits.

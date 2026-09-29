@@ -10,9 +10,11 @@ import {
   type ReactNode,
 } from "react";
 import {
+  type CalendarSettings,
   type ChatMessage,
   type HouseholdState,
   type PantryItem,
+  type PlannedMeal,
   type Preferences,
   type Recipe,
   type RecipeSource,
@@ -24,6 +26,7 @@ import {
 } from "@/features/meals/workspace-state";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { loadHousehold, saveHousehold } from "@/features/pantry/storage";
+import { nextWeekStart } from "@/features/planning/calendar";
 
 type HouseholdContextValue = {
   state: HouseholdState;
@@ -37,6 +40,10 @@ type HouseholdContextValue = {
   addMeal: (recipe: Recipe, servings: number) => void;
   removeMeal: (id: string) => void;
   setMealServings: (id: string, servings: number) => void;
+  setCalendarSettings: (patch: Partial<CalendarSettings>) => void;
+  setCalendarDraft: (meals: PlannedMeal[]) => void;
+  commitCalendar: () => void;
+  discardCalendarDraft: () => void;
   setWorkspaceMode: (mode: WorkspaceMode) => void;
   saveRecipe: (recipe: Recipe, source: RecipeSource) => void;
   removeSavedRecipe: (recipeId: string) => void;
@@ -60,7 +67,10 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   const [{ state, updateError }, update] = useReducer(
     householdReducer,
     undefined,
-    (): HouseholdStore => ({ state: createSampleHousehold(), updateError: null }),
+    (): HouseholdStore => ({
+      state: createSampleHousehold(),
+      updateError: null,
+    }),
   );
   const [ready, setReady] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -113,11 +123,37 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
           update({ type: "setPreferences", preferences }),
         addMeal: (recipe, servings) => {
           const id = crypto.randomUUID();
-          update({ type: "addMeal", id, recipe: withSavedProvenance(recipe, state), servings });
+          update({
+            type: "addMeal",
+            id,
+            recipe: withSavedProvenance(recipe, state),
+            servings,
+            calendarStartDate: nextWeekStart(),
+          });
         },
-        removeMeal: (id) => update({ type: "removeMeal", id }),
+        removeMeal: (id) =>
+          update({
+            type: "removeMeal",
+            id,
+            calendarStartDate: nextWeekStart(),
+          }),
         setMealServings: (id, servings) =>
-          update({ type: "setMealServings", id, servings }),
+          update({
+            type: "setMealServings",
+            id,
+            servings,
+            calendarStartDate: nextWeekStart(),
+          }),
+        setCalendarSettings: (patch) =>
+          update({ type: "setCalendarSettings", patch }),
+        setCalendarDraft: (meals) =>
+          update({
+            type: "setCalendarDraft",
+            meals: meals.map((meal) => ({ ...meal, recipe: withSavedProvenance(meal.recipe, state) })),
+            calendarStartDate: nextWeekStart(),
+          }),
+        commitCalendar: () => update({ type: "commitCalendar" }),
+        discardCalendarDraft: () => update({ type: "discardCalendarDraft" }),
         setWorkspaceMode: (mode) => update({ type: "setWorkspaceMode", mode }),
         saveRecipe: (recipe, source) =>
           update({ type: "saveRecipe", recipe: { ...recipe, provenance: recipe.provenance ?? { source } }, source }),

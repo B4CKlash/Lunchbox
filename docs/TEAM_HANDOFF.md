@@ -26,9 +26,13 @@ npm run build
 
 ## Recipe workspace extension
 
-The `/meals` screen offers Suggestions, Chat, and My plan, with a saved recipe box and reviewed text/link imports inside Suggestions. Read [the AI demo runbook](AI_DEMO_RUNBOOK.md) for provider configuration, credits, release verification, and rollback. All views use shared recipe cards and household actions. The provider mode selects live AI or a clearly labeled deterministic demo.
+The `/meals` screen offers Suggestions, Chat, and Calendar, with a saved recipe box and reviewed text/link imports inside Suggestions. Read [the AI demo runbook](AI_DEMO_RUNBOOK.md) for provider configuration, credits, release verification, and rollback. All views use shared recipe cards and household actions. The provider mode selects live AI or a clearly labeled deterministic demo.
 
 The suggestion endpoint contract is unchanged. The additive `/api/meals/chat` endpoint accepts kitchen/conversation context and returns `{ source, reply, recipes, servings }`; both providers live behind `src/features/meals/providers.ts`. Existing version-1 saves gain default workspace state without losing pantry/preferences/planned meals. Saved recipes, focused portions, the last 20 chat messages, and drafts use the same storage adapter and key. Shared contract and route changes in this release are coordinated as one integration PR.
+
+## Calendar planning extension
+
+Read [Calendar planning](CALENDAR_PLANNING.md) for the arrange → commit → groceries flow. Recipe actions add to a saved calendar draft; `state.meals` holds the committed plan used by Shopping. Legacy undated meals remain preserved in the unscheduled tray. Date/slot contracts and additive draft persistence are preserved by the AI integration.
 
 ## Ownership and first tasks
 

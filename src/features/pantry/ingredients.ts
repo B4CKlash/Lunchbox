@@ -124,6 +124,7 @@ export function knownIngredientsFromHousehold(state: HouseholdState): KnownIngre
   const refs: KnownIngredient[] = state.pantry.map((item) => ({ ingredientId: item.id, name: item.name, unit: item.unit }));
   const recipes = [
     ...state.meals.map((meal) => meal.recipe),
+    ...(state.workspace.calendar.draft ?? []).map((meal) => meal.recipe),
     ...state.workspace.recipeBox.map((saved) => saved.recipe),
     ...state.workspace.chatMessages.flatMap((message) => message.recipes),
     ...(state.workspace.focusedRecipe ? [state.workspace.focusedRecipe] : []),

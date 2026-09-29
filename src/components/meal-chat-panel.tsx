@@ -41,7 +41,8 @@ export function MealChatPanel({
   const context = JSON.stringify({
     pantry: state.pantry,
     preferences: state.preferences,
-    meals: state.meals,
+    meals: workspace.calendar.draft ?? state.meals,
+    planStatus: workspace.calendar.draft !== null ? "draft" : "committed",
     recipeBox: workspace.recipeBox,
     focusedRecipe: workspace.focusedRecipe ?? undefined,
     focusedServings: workspace.focusedServings ?? undefined,
@@ -151,7 +152,7 @@ export function MealChatPanel({
         </div>
         <p className="muted">
           {aiMode === "ai"
-            ? "Ask for a favorite dish, use what’s in your kitchen, revise a recipe, or talk through your plan. Missing ingredients go on your shopping list when you add a meal."
+            ? "Ask for a favorite dish, use what’s in your kitchen, revise a recipe, or talk through your plan. Missing ingredients go on your shopping list when you commit your calendar."
             : "Explore sample recipes, check ingredients, or talk through your plan. This guided demo supports the prompts below and ingredient searches like “recipes with rice.”"}
         </p>
         <div className="prompt-chips">
