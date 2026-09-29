@@ -7,12 +7,12 @@ This integration extends the existing `no-name-4c11/lunchbox` project and its Gi
 - `LUNCHBOX_AI_MODE=ai` selects the live provider. Omitted or `demo` selects honest sample suggestions/chat. Imports require the live connection.
 - `LUNCHBOX_AI_MODEL=google/gemini-2.5-flash` is the initial model. Check the [eligible model catalog](https://vercel.com/ai-gateway/models?freeTier=true) before changing it.
 - Deployed functions use the project's enabled Vercel OIDC identity. Local development can obtain its short-lived identity through `vercel env pull .env.local`. Keep this file ignored and refresh expired identity tokens.
-- Use existing Gateway credits only. Verify the available allowance and that automatic top-ups are disabled in the [team Gateway dashboard](https://vercel.com/no-name-4c11/~/ai-gateway) before live tests. Do not buy credits, enable top-ups, or add separately billed provider keys. See [Gateway pricing](https://vercel.com/docs/ai-gateway/pricing).
+- Use existing Gateway credits only. Verify the available allowance, disabled automatic top-ups, and no enabled team BYOK credentials in the [team Gateway dashboard](https://vercel.com/no-name-4c11/~/ai-gateway) before live tests. Do not buy credits, enable top-ups, or add separately billed provider keys. See [Gateway pricing](https://vercel.com/docs/ai-gateway/pricing).
 - Apply one project firewall rule matching `/api/meals/suggest`, `/api/meals/chat`, and `/api/meals/import`, counting by IP, with a fixed 60-second window and limit 20. Exceeding it returns 429. Vercel counters are regional; this is not a global account spending cap.
 
 ## Behavior and boundaries
 
-Suggestions and chat use AI SDK 7.0.122 and a server-only `ToolLoopAgent`. Its three read-only tools find stored favorites, validate new recipe proposals, and calculate plan shortages. Recipes are returned only through validated tool references. Existing favorites retain their IDs, base ingredient quantities, and provenance; revisions get new IDs.
+Suggestions and chat use AI SDK 7.0.122 and a server-only `ToolLoopAgent`. Its three read-only tools find stored favorites, validate new recipe proposals, and calculate plan shortages. Recipes are returned only through validated tool references. Existing favorites retain their IDs, base ingredient quantities, and provenance; revisions get new IDs. Gemini 2.5 uses a preparation phase with tools followed by a separate structured-response phase without tools; the entire interaction stays within three model calls.
 
 Each request has a 45-second total deadline, a maximum of three model steps, 4,000 output tokens per step, no application retries, a 50-second browser timeout, and a 60-second function allowance. Cancellation propagates to body reading, URL retrieval, and generation. Logs include operation, model, timing, usage, and error category, without pantry contents, recipe text, or secrets. AI failures return public errors, never sample recipes relabeled as AI.
 

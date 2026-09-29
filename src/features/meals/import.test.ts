@@ -135,6 +135,28 @@ test("finalization requires corrections and preserves import provenance", () => 
   assert.throws(() => finalizeImportDraft(draft(), { source: "import" }, ambiguous), /Choose which pantry/);
 });
 
+test("finalization requires an explicit listed candidate and accepts a corrected unit plus choice", () => {
+  const candidates = [
+    { ingredientId: "legacy-rice-one", name: "Jasmine rice", unit: "g" as const },
+    { ingredientId: "legacy-rice-two", name: "Jasmine rice", unit: "g" as const },
+  ];
+  const review = draft();
+  review.ingredients[0].candidates = candidates;
+  // The current catalog could resolve this name automatically, but the review
+  // still has an outstanding choice even when its candidates are now stale.
+  assert.throws(() => finalizeImportDraft(review, { source: "import" }, known), /Choose which pantry/);
+  review.ingredients[0].ingredientId = "rice";
+  assert.throws(() => finalizeImportDraft(review, { source: "import" }, known), /Choose which pantry/);
+  review.ingredients[0].ingredientId = candidates[1].ingredientId;
+  review.ingredients[0].unit = null;
+  assert.throws(() => finalizeImportDraft(review, { source: "import" }, candidates), /amount, and g, ml, or each/);
+  review.ingredients[0].unit = "g";
+  const recipe = finalizeImportDraft(review, { source: "import" }, candidates);
+  assert.equal(recipe.ingredients[0].ingredientId, candidates[1].ingredientId);
+  assert.equal(recipe.ingredients[0].unit, "g");
+  assert.equal(recipe.ingredients[0].quantity, 100);
+});
+
 test("URL import preserves source instructions/amounts despite AI modifications", async () => {
   const result = await importRecipe({ kind: "url", url: "https://example.com/recipe", knownIngredients: known }, {
     fetchPage: async () => ({ html: html(metadata()), url: "https://example.com/recipe" }),

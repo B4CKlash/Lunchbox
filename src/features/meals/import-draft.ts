@@ -64,6 +64,10 @@ export function finalizeImportDraft(
       issues.push({ path: `ingredients.${index}`, message: `Review ${label}: a name, amount, and g, ml, or each are required.` });
       return null;
     }
+    if (item.candidates?.length && !item.candidates.some((candidate) => candidate.ingredientId === item.ingredientId)) {
+      issues.push({ path: `ingredients.${index}.ingredientId`, message: `Choose which pantry ingredient matches ${label}.` });
+      return null;
+    }
     const resolution = resolveIngredient({ ...item, unit: item.unit }, known);
     if (resolution.status === "ambiguous") {
       issues.push({ path: `ingredients.${index}.ingredientId`, message: `Choose which pantry ingredient matches ${label}.` });
