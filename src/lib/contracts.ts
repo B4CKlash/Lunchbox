@@ -21,10 +21,72 @@ export const pantryItemSchema = z.object({
   // Optional so households saved before categories were introduced still load.
   category: pantryCategorySchema.optional(),
 });
+export const mealGoalSchema = z.enum([
+  "healthy-macros",
+  "save-time",
+  "reduce-waste",
+  "save-money",
+  "meal-prep",
+]);
+export const dietaryNeedSchema = z.enum([
+  "vegetarian",
+  "vegan",
+  "pescatarian",
+  "flexitarian",
+  "omnivore",
+  "gluten-free",
+  "dairy-free",
+  "nut-free",
+]);
+export const nutritionFocusSchema = z.enum([
+  "high-protein",
+  "lower-carb",
+  "calorie-conscious",
+  "more-vegetables",
+  "high-fiber",
+  "balanced",
+]);
+export const flavorPreferenceSchema = z.enum([
+  "spicy",
+  "mild",
+  "savory",
+  "bright-fresh",
+  "rich-comforting",
+  "smoky",
+]);
+export const cuisinePreferenceSchema = z.enum([
+  "mediterranean",
+  "mexican",
+  "italian",
+  "indian-inspired",
+  "east-asian-inspired",
+  "middle-eastern-inspired",
+  "american-comfort",
+]);
+export const cookingStyleSchema = z.enum([
+  "fast",
+  "flavorful",
+  "one-pot",
+  "under-30",
+  "big-batch",
+  "meal-prep",
+]);
 export const preferencesSchema = z.object({
   servings: z.number().int().min(1).max(12),
   maxMinutes: z.number().int().min(10).max(120),
   prioritizeUseSoon: z.boolean(),
+  onboardingComplete: z.boolean().optional(),
+  goals: z.array(mealGoalSchema).max(5).optional(),
+  dietaryNeeds: z.array(dietaryNeedSchema).max(8).optional(),
+  allergies: z.array(z.string().trim().min(1).max(40)).max(12).optional(),
+  dislikedIngredients: z
+    .array(z.string().trim().min(1).max(40))
+    .max(20)
+    .optional(),
+  nutritionFocus: z.array(nutritionFocusSchema).max(6).optional(),
+  flavorPreferences: z.array(flavorPreferenceSchema).max(6).optional(),
+  cuisinePreferences: z.array(cuisinePreferenceSchema).max(7).optional(),
+  cookingStyles: z.array(cookingStyleSchema).max(6).optional(),
 });
 export const recipeIngredientSchema = z.object({
   ingredientId: z.string().min(1).max(80),
@@ -103,6 +165,12 @@ export const chatMealsResponseSchema = z.object({
 
 export type Unit = z.infer<typeof unitSchema>;
 export type PantryCategory = z.infer<typeof pantryCategorySchema>;
+export type MealGoal = z.infer<typeof mealGoalSchema>;
+export type DietaryNeed = z.infer<typeof dietaryNeedSchema>;
+export type NutritionFocus = z.infer<typeof nutritionFocusSchema>;
+export type FlavorPreference = z.infer<typeof flavorPreferenceSchema>;
+export type CuisinePreference = z.infer<typeof cuisinePreferenceSchema>;
+export type CookingStyle = z.infer<typeof cookingStyleSchema>;
 export type PantryItem = z.infer<typeof pantryItemSchema>;
 export type Preferences = z.infer<typeof preferencesSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
