@@ -17,6 +17,7 @@ const calendarDate = (date: string) =>
     timeZone: "UTC",
   });
 type Retailer = "qfc" | "safeway" | "whole-foods";
+const retailerNames: Record<Retailer, string> = { qfc: "QFC", safeway: "Safeway", "whole-foods": "Whole Foods" };
 const retailerNames: Record<Retailer, string> = {
   qfc: "QFC",
   safeway: "Safeway",
@@ -34,6 +35,23 @@ export function ShoppingPanel() {
   const [scope, setScope] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [retailer, setRetailer] = useState<Retailer>("qfc");
+  const [integrationError, setIntegrationError] = useState("");
+  const [orderUrl, setOrderUrl] = useState("");
+  const [handoffMessage, setHandoffMessage] = useState("");
+  const [demoUsername, setDemoUsername] = useState("");
+  const [demoPassword, setDemoPassword] = useState("");
+  const [demoLoginMessage, setDemoLoginMessage] = useState("");
+  const today = new Date();
+  const dateKey = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  const dayAfter = new Date(today); dayAfter.setDate(today.getDate() + 2);
+  const weekEnd = new Date(today); weekEnd.setDate(today.getDate() + 6);
+  const datedMeals = state.meals.filter((meal) => meal.date);
+  const selectedMeals = state.meals.filter((meal) => {
+    if (scope === "selected") return selected.includes(meal.id);
+    if (scope === "tomorrow") return meal.date === dateKey(tomorrow);
+    if (scope === "two-days") return meal.date === dateKey(tomorrow) || meal.date === dateKey(dayAfter);
+    if (scope === "week") return Boolean(meal.date && meal.date >= dateKey(today) && meal.date <= dateKey(weekEnd));
   const [handoffMessage, setHandoffMessage] = useState("");
   const [integrationError, setIntegrationError] = useState("");
   const [orderUrl, setOrderUrl] = useState("");
@@ -189,6 +207,8 @@ export function ShoppingPanel() {
               <ShoppingBasket size={24} aria-hidden="true" />
             </div>
             <p className="muted shopping-intro">
+              Matching ingredients are combined across your committed meals.
+              {scope !== "all" ? " Filtered to the selected planning window." : ""}
               {selectedMeals.length
                 ? `Ingredients combined across ${selectedMeals.length === 1 ? "the selected meal" : `${selectedMeals.length} selected meals`}.`
                 : "Pantry staples below their restock levels."}
@@ -207,6 +227,7 @@ export function ShoppingPanel() {
                 </select>
               </label>
               {scope === "selected" ? <fieldset className="shopping-recipe-picker"><legend>Select committed meals</legend>{state.meals.map((meal) => <label key={meal.id}><input type="checkbox" checked={selected.includes(meal.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, meal.id] : current.filter((id) => id !== meal.id))} /> {meal.recipe.name} <span>{meal.date ? calendarDate(meal.date) : "No date"}</span></label>)}</fieldset> : null}
+              {scope !== "selected" && scope !== "all" && !datedMeals.length ? <p className="muted small">Add meals to the calendar and commit them to use date filters.</p> : null}
               {scope !== "selected" && scope !== "all" && !datedMeals.length ? <p className="muted small">Schedule meals in the calendar to use timeframe filters.</p> : null}
             </div>
             {shopping.length ? (
@@ -249,6 +270,65 @@ export function ShoppingPanel() {
               This list updates when you commit your calendar or change your
               pantry. Draft edits stay in the calendar until you commit them.
             </p>
+            <section className="store-handoff" aria-labelledby="store-handoff-heading">
+              <div>
+                <p className="eyebrow">READY FOR THE STORE</p>
+                <h3 id="store-handoff-heading">Take this list with you</h3>
+                <p className="muted small">Search items at a retailer or copy the list. Store links open search pages; they don’t add products to a cart.</p>
+              </div>
+              <label className="field">Choose a store
+                <select value={retailer} onChange={(event) => setRetailer(event.target.value as Retailer)}>
+                  <option value="qfc">QFC</option>
+                  <option value="safeway">Safeway</option>
+                  <option value="whole-foods">Whole Foods</option>
+                </select>
+              </label>
+              <div className="actions">
+                <button className="button secondary" disabled={!shopping.length} onClick={async () => {
+                  const text = shopping.map((item) => `${item.name} — ${amount(item.quantity, item.unit)}`).join("\n");
+                  try { await navigator.clipboard.writeText(text); setHandoffMessage("Shopping list copied."); }
+                  catch { setIntegrationError("Clipboard access is unavailable in this browser."); }
+                }}><Copy size={15} aria-hidden="true" /> Copy list</button>
+                <button className="button secondary" disabled={!shopping.length} onClick={() => {
+                  const rows = [["Item", "Quantity", "Unit"], ...shopping.map((item) => [item.name, String(item.quantity), item.unit])];
+                  const csv = rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(",")).join("\n");
+                  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+                  const anchor = document.createElement("a"); anchor.href = url; anchor.download = "lunchbox-shopping-list.csv"; anchor.click();
+                  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }}><Download size={15} aria-hidden="true" /> Download CSV</button>
+              </div>
+              {handoffMessage ? <p className="muted small" role="status">{handoffMessage}</p> : null}
+              <form className="demo-login" onSubmit={(event) => {
+                event.preventDefault();
+                setDemoUsername(""); setDemoPassword("");
+                setDemoLoginMessage("Demo preview only. No store sign-in was attempted and nothing was sent or saved.");
+              }}>
+                <p className="eyebrow">FUTURE GROCERY APP CONNECTION</p>
+                <h4>Sign-in screen preview</h4>
+                <p className="demo-login-notice">Visual mockup only. Don’t enter real store credentials. These fields stay in this page and are cleared on submit.</p>
+                <div className="demo-login-fields">
+                  <label className="field">Username<input value={demoUsername} onChange={(event) => setDemoUsername(event.target.value)} autoComplete="off" placeholder="Demo username" /></label>
+                  <label className="field">Password<input type="password" value={demoPassword} onChange={(event) => setDemoPassword(event.target.value)} autoComplete="new-password" placeholder="Demo password" /></label>
+                </div>
+                <button className="button secondary" type="submit">Preview connection</button>
+                {demoLoginMessage ? <p className="muted small" role="status">{demoLoginMessage}</p> : null}
+              </form>
+              <div className="shopping-export">
+                <button className="button" disabled={!shopping.some((item) => item.quantity > 0)} onClick={async () => {
+                  setIntegrationError(""); setOrderUrl("");
+                  try {
+                    const items = shopping.filter((item) => item.quantity > 0).map(({ name, quantity, unit }) => ({ name, quantity, unit }));
+                    const response = await fetch("/api/shopping/instacart", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error ?? "Could not create your Instacart list.");
+                    setOrderUrl(data.url);
+                  } catch (error) { setIntegrationError(error instanceof Error ? error.message : "Could not create your Instacart list."); }
+                }}>Create Instacart list</button>
+                {orderUrl ? <a className="button secondary" href={orderUrl} target="_blank" rel="noreferrer">Open grocery list <ArrowRight size={16} aria-hidden="true" /></a> : null}
+                {integrationError ? <p className="error-message" role="alert">{integrationError}</p> : null}
+                <p className="muted small">Instacart list creation requires an approved server-side API key.</p>
+              </div>
+            </section>
           </section>
 
           <aside className="shopping-aside" aria-label="Plan summary">
@@ -263,6 +343,9 @@ export function ShoppingPanel() {
                 <div>
                   <strong>{selectedMeals.length}</strong>
                   <span>
+                    {selectedMeals.length === 1
+                      ? "committed meal"
+                      : "committed meals"}
                     {selectedMeals.length === 1 ? "selected meal" : "selected meals"}
                   </span>
                 </div>
