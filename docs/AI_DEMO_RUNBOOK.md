@@ -13,6 +13,8 @@ This integration extends the existing `no-name-4c11/lunchbox` project and its Gi
 
 ## Behavior and boundaries
 
+Open Meals after reloading any tab left open before AI was enabled; the header should say **AI kitchen assistant**. In Suggestions, change servings, cooking time, or use-soon priority and select **Update ideas**. Saving changes in Your preferences or Your pantry also refreshes ideas when you return to Meals. **Update ideas** can request a fresh set without changing settings. Saved recipes and calendar snapshots stay unchanged until the user acts on them.
+
 Suggestions and chat use AI SDK 7.0.122 and a server-only `ToolLoopAgent`. Its three read-only tools find stored favorites, validate new recipe proposals, and calculate plan shortages. Recipes are returned only through validated tool references. Existing favorites retain their IDs, base ingredient quantities, and provenance; revisions get new IDs. Gemini 2.5 uses a preparation phase with tools followed by a separate structured-response phase without tools; the entire interaction stays within three model calls.
 
 Each request has a 45-second total deadline, a maximum of three model steps, 4,000 output tokens per step, no application retries, a 50-second browser timeout, and a 60-second function allowance. Cancellation propagates to body reading, URL retrieval, and generation. Logs include operation, model, timing, usage, and error category, without pantry contents, recipe text, or secrets. AI failures return public errors, never sample recipes relabeled as AI.
@@ -22,6 +24,8 @@ Assistant source (`demo` or `ai`) is separate from recipe provenance (`demo`, `a
 The shared ingredient resolver uses existing household identities, authored catalog aliases, and stable custom IDs. It never uses fuzzy names as shopping keys, converts units, or merges old IDs. Ambiguous matches require a choice. Pantry entry reuses identities from saved recipes, calendar drafts, and committed meals. Shopping scales base quantities to committed servings, combines ingredient/unit requirements, and subtracts stock once. Planning never deducts inventory. Add to calendar stages a draft; place meals and Commit plan to update groceries. Chat labels draft shortages as a preview.
 
 Imports always open a review form. Source ingredient lines remain visible. Missing servings, time, quantities, and units stay unresolved; only positive quantities in `g`, `ml`, or `each` can be saved. Unsupported measures, ranges, and “to taste” require a person's correction. Users can edit names and steps or add a missing ingredient. The final validated recipe uses the same Save/Add to plan actions as recommendations.
+
+The model receives a small extraction schema for recipe text, ingredient names, original lines, and steps. Amounts, units, identity choices, servings, and time are resolved from the source by the app and checked against the complete shared draft schema. Sending the entire editable review schema to Gemini can exceed its structured-output complexity limit.
 
 Public URL imports support Schema.org Recipe JSON-LD objects, arrays, graphs, and ordered instruction sections. Fetching permits HTTPS public hosts only, pins the validated address, checks every redirect, allows at most three redirects, and enforces a ten-second deadline and two-megabyte decoded response limit. Blocked, restricted, ambiguous, or unsupported pages offer paste-text input while retaining the URL. No browser automation or paywall access is used. Source content is data, never agent instructions.
 

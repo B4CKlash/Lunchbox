@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { MockLanguageModelV4 } from "ai/test";
+import { z } from "zod";
 import type { RecipeDraft } from "@/lib/contracts";
 import { finalizeImportDraft, ImportDraftError, parseImportedAmount } from "./import-draft";
 import { extractRecipeJsonLd } from "./import-jsonld";
@@ -28,6 +30,74 @@ const metadata = () => ({
   ] }], author: { name: "Demo cook" },
 });
 const html = (value: unknown) => `<script type="application/ld+json">${JSON.stringify(value)}</script>`;
+const extraction = () => ({
+  name: draft().name, description: draft().description, steps: draft().steps,
+  ingredients: draft().ingredients.map(({ originalLine, name }) => ({ originalLine, name })),
+});
+const generated = (output: unknown) => ({
+  content: [{ type: "text" as const, text: JSON.stringify(output) }],
+  finishReason: { unified: "stop" as const, raw: undefined },
+  usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } },
+  warnings: [],
+});
+
+test("AI import sends a compact extraction schema and retains all uncertain ingredient lines for review", async () => {
+  const previous = process.env.LUNCHBOX_AI_MODE;
+  process.env.LUNCHBOX_AI_MODE = "ai";
+  try {
+    const source = text.replace("2 onions\n", "2 onions\nSalt to taste\n");
+    const output = extraction();
+    output.ingredients.push({ originalLine: "Salt to taste", name: "Salt" });
+    const model = new MockLanguageModelV4({ doGenerate: generated(output) });
+    const result = await importRecipe({ kind: "text", text: source, knownIngredients: known }, { model });
+    assert.equal(model.doGenerateCalls.length, 1);
+    const call = model.doGenerateCalls[0];
+    assert.equal(call.maxOutputTokens, 4000);
+    assert.equal(call.tools?.length ?? 0, 0);
+    assert.equal(call.responseFormat?.type, "json");
+    const schema = call.responseFormat?.type === "json" ? call.responseFormat.schema : undefined;
+    assert.ok(schema);
+    assert.deepEqual(Object.keys(schema.properties ?? {}).sort(), ["description", "ingredients", "name", "steps"]);
+    const serialized = JSON.stringify(schema);
+    for (const field of ["candidates", "ingredientId", "quantity", "unit", "servings", "minutes", "anyOf", "maxItems", "minItems", "maxLength", "minimum", "maximum", "exclusiveMinimum"])
+      assert.ok(!serialized.includes(`"${field}"`), `Provider schema must omit ${field}`);
+    assert.equal(result.draft.servings, 2);
+    assert.equal(result.draft.minutes, 20);
+    assert.deepEqual(result.draft.ingredients[0], { ...draft().ingredients[0], ingredientId: "rice" });
+    assert.equal(result.draft.ingredients[1].unit, "each");
+    assert.deepEqual(result.draft.ingredients[2], { originalLine: "Salt to taste", name: "Salt", ingredientId: null, quantity: null, unit: null });
+    assert.ok(result.warnings.some((warning) => warning.includes("amounts need your review")));
+    assert.throws(() => finalizeImportDraft(result.draft, result.provenance, known), ImportDraftError);
+  } finally {
+    if (previous === undefined) delete process.env.LUNCHBOX_AI_MODE;
+    else process.env.LUNCHBOX_AI_MODE = previous;
+  }
+});
+
+test("compact model schema still rejects out-of-bounds drafts before returning an import", async () => {
+  const previous = process.env.LUNCHBOX_AI_MODE;
+  process.env.LUNCHBOX_AI_MODE = "ai";
+  try {
+    const invalid = [
+      { ...extraction(), name: "x".repeat(121) },
+      { ...extraction(), ingredients: Array.from({ length: 41 }, () => extraction().ingredients[0]) },
+      { ...extraction(), steps: [""] },
+    ];
+    for (const output of invalid) {
+      const model = new MockLanguageModelV4({ doGenerate: generated(output) });
+      await assert.rejects(importRecipe({ kind: "text", text }, { model }), z.ZodError);
+      assert.equal(model.doGenerateCalls.length, 1);
+    }
+    const model = new MockLanguageModelV4({ doGenerate: generated(invalid[0]) });
+    const handler = createImportHandler((input, options) => importRecipe(input, { ...options, model }));
+    const response = await handler(new Request("https://example.com/api/meals/import", { method: "POST", body: JSON.stringify({ kind: "text", text }) }));
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, "invalid_output");
+  } finally {
+    if (previous === undefined) delete process.env.LUNCHBOX_AI_MODE;
+    else process.env.LUNCHBOX_AI_MODE = previous;
+  }
+});
 
 test("only explicit supported units and whole-item counts enter a draft", () => {
   for (const line of ["1 cup flour", "2 tbsp oil", "1 can beans", "Salt to taste", "100–200 g rice", "100 g to 200 g rice", "100 g sugar or to taste", "100 g flour plus more for dusting", "100 g rice (approx.)", "1-2 onions", "1 kg rice", "1 bunch spinach", "0 g salt", "1/0 g rice"])
