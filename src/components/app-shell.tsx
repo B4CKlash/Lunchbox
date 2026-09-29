@@ -14,7 +14,6 @@ import {
 import { useHousehold } from "@/components/household-provider";
 
 const navigation = [
-  { href: "/account", label: "Your account", step: "", icon: UserRound },
   { href: "/pantry", label: "Your pantry", step: "01", icon: PackageOpen },
   { href: "/meals", label: "Meals & plan", step: "02", icon: Utensils },
   {
@@ -23,6 +22,7 @@ const navigation = [
     step: "03",
     icon: ShoppingBasket,
   },
+  { href: "/account", label: "Your account", step: "", icon: UserRound },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
