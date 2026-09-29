@@ -195,6 +195,23 @@ test("authored canonical aliases remain valid with the matching model ID", () =>
   assert.equal(result.recipes[0].recipe.ingredients[0].ingredientId, "tomatoes");
 });
 
+test("catalog IDs absent from pantry remain valid while fabricated IDs are rejected", () => {
+  const input = context();
+  input.pantry = [];
+  for (const ingredientId of ["garlic", "made-up-garlic"]) {
+    const tools = createMealTools(input);
+    const result = tools.evaluateRecipes({ recipes: [{ ...candidate(), ingredients: [{ ingredientId, name: "Garlic", quantity: 2, unit: "each" }] }], servings: 2 });
+    if (ingredientId === "garlic") {
+      assert.equal(result.recipes.length, 1);
+      assert.equal(result.recipes[0].recipe.ingredients[0].ingredientId, "garlic");
+      assert.equal(result.recipes[0].shortages[0].quantity, 2);
+    } else {
+      assert.equal(result.recipes.length, 0);
+      assert.match(result.errors[0], /does not match supplied ingredient ID/);
+    }
+  }
+});
+
 test("unregistered references and mismatched evaluation portions are rejected", async () => {
   for (const outputs of [
     [textResult({ note: "No recipe has been evaluated." }), textResult({ reply: "Here.", recipeRefs: ["invented"], servings: 2 })],
@@ -204,13 +221,23 @@ test("unregistered references and mismatched evaluation portions are rejected", 
   }
 });
 
-test("suggestions retain the configured serving count and use the same normalized recipe path", async () => {
+test("suggestions generate direct structured recipes without tools, refs, or model-selected display servings", async () => {
   const input = context();
-  const model = new MockLanguageModelV4({ doGenerate: [callResult("evaluateRecipes", { recipes: [candidate()], servings: 2 }), textResult({ reply: "Dinner ideas.", recipeRefs: ["proposal:1"], servings: 2 })] });
+  input.preferences.servings = 4;
+  const model = new MockLanguageModelV4({ doGenerate: textResult({ recipes: [candidate()], explanation: "" }) });
   const result = await liveSuggestMeals(input, { model });
   assert.equal(result.source, "ai");
+  assert.equal(result.recipes[0].servings, 2);
   assert.equal(result.recipes[0].ingredients[1].ingredientId, "mushrooms");
-  assert.deepEqual(model.doGenerateCalls[0].tools?.map((tool) => tool.name), ["evaluateRecipes"]);
+  assert.equal(model.doGenerateCalls.length, 1);
+  const call = model.doGenerateCalls[0];
+  assert.equal(call.tools?.length ?? 0, 0);
+  assert.equal(call.responseFormat?.type, "json");
+  assert.ok(!JSON.stringify(call.responseFormat).includes("recipeRefs"));
+  assert.doesNotMatch(JSON.stringify(call.responseFormat), /"(?:minimum|maximum|minItems|maxItems|minLength|maxLength)"/);
+  assert.ok(!("servings" in result));
+  const shopping = buildShoppingList([], [{ id: "selected", recipe: result.recipes[0], servings: input.preferences.servings }]);
+  assert.equal(shopping.find((item) => item.ingredientId === "rice")?.quantity, 300);
 });
 
 test("regeneration passes current inventory, full preferences, and recent dishes to the model", async () => {
@@ -218,7 +245,7 @@ test("regeneration passes current inventory, full preferences, and recent dishes
   input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 0, unit: "g", location: "Cupboard", useSoon: false, tag: "special" }];
   input.preferences = { ...input.preferences, servings: 4, maxMinutes: 20, cuisinePreferences: ["east-asian-inspired"], customNotes: { taste: "Use ginger" } };
   const before = structuredClone(input);
-  const model = new MockLanguageModelV4({ doGenerate: [callResult("evaluateRecipes", { recipes: [candidate()], servings: 4 }), textResult({ reply: "Fresh ideas.", recipeRefs: ["proposal:1"], servings: 4 })] });
+  const model = new MockLanguageModelV4({ doGenerate: textResult({ recipes: [candidate()], explanation: "" }) });
   const result = await liveSuggestMeals(input, { model });
   const userMessage = model.doGenerateCalls[0].prompt.find((message) => message.role === "user");
   assert.ok(userMessage && Array.isArray(userMessage.content));
@@ -246,10 +273,7 @@ test("preferred ingredients use positive pantry snapshots matched by exact ID an
     { id: "lentils", name: "Lentils", quantity: 0, unit: "g", location: "Cupboard", useSoon: false, tag: "special" },
   ];
   const before = structuredClone(input);
-  const model = new MockLanguageModelV4({ doGenerate: [
-    callResult("evaluateRecipes", { recipes: [candidate()], servings: 2 }),
-    textResult({ reply: "Use your restocked rice.", recipeRefs: ["proposal:1"], servings: 2 }),
-  ] });
+  const model = new MockLanguageModelV4({ doGenerate: textResult({ recipes: [candidate()], explanation: "" }) });
   const result = await liveSuggestMeals(input, { model });
   const userMessage = model.doGenerateCalls[0].prompt.find((message) => message.role === "user");
   assert.ok(userMessage && Array.isArray(userMessage.content));
@@ -259,7 +283,7 @@ test("preferred ingredients use positive pantry snapshots matched by exact ID an
   assert.deepEqual(sent.preferredPantryItems, [input.pantry[0]]);
   assert.ok(!JSON.stringify(sent).includes("Ignore my diet"));
   assert.equal(result.explanation, undefined);
-  assert.equal(model.doGenerateCalls.length, 2);
+  assert.equal(model.doGenerateCalls.length, 1);
   assert.deepEqual(input, before);
 });
 
@@ -268,14 +292,14 @@ test("adding one apple gives a missed ingredient one bounded correction and retu
   input.pantry.push({ id: "apple", name: "Apple", quantity: 1, unit: "each", location: "Fridge", useSoon: false, tag: "special" });
   const appleDish = { ...candidate(), name: "Apple and mushroom rice salad", ingredients: [...candidate().ingredients, { ingredientId: "apple", name: "Apple", quantity: 1, unit: "each" as const }] };
   const model = new MockLanguageModelV4({ doGenerate: [
-    callResult("evaluateRecipes", { recipes: [candidate()], servings: 2 }),
-    callResult("evaluateRecipes", { recipes: [appleDish], servings: 2 }),
-    textResult({ reply: "This salad uses the apple you just added.", recipeRefs: ["proposal:2"], servings: 2 }),
+    textResult({ recipes: [candidate()], explanation: "" }),
+    textResult({ recipes: [appleDish], explanation: "" }),
   ] });
   const result = await liveSuggestMeals(input, { model });
-  assert.equal(model.doGenerateCalls.length, 3);
-  assert.match(JSON.stringify(model.doGenerateCalls[1].prompt), /No evaluated recipe uses a newly added or restocked ingredient yet/);
+  assert.equal(model.doGenerateCalls.length, 2);
+  assert.match(JSON.stringify(model.doGenerateCalls[1].prompt), /No accepted recipe uses a preferredPantryItems ingredient/);
   assert.equal(result.recipes[0].name, appleDish.name);
+  assert.equal(result.recipes[1].name, candidate().name);
   assert.deepEqual(result.recipes[0].ingredients.find((ingredient) => ingredient.ingredientId === "apple"), { ingredientId: "apple", name: "Apple", quantity: 1, unit: "each" });
   assert.equal(result.explanation, undefined);
   assert.ok(!buildShoppingList(input.pantry, [{ id: "apple-dish", recipe: result.recipes[0], servings: 2 }]).some((item) => item.ingredientId === "apple"));
@@ -297,16 +321,15 @@ test("food constraints can omit a newly added ingredient with an explanation bes
   input.pantry.push({ id: "apple", name: "Apple", quantity: 1, unit: "each", location: "Fridge", useSoon: false, tag: "special" });
   const reply = "Your apple allergy conflicts with using the new apple, so this rice dish leaves it out. Check ingredient labels for your allergy.";
   const model = new MockLanguageModelV4({ doGenerate: [
-    callResult("evaluateRecipes", { recipes: [candidate()], servings: 2 }),
-    textResult({ note: "The preferred apple conflicts with the declared allergy." }),
-    textResult({ reply, recipeRefs: ["proposal:1"], servings: 2 }),
+    textResult({ recipes: [candidate()], explanation: reply }),
+    textResult({ recipes: [], explanation: reply }),
   ] });
   const result = await liveSuggestMeals(input, { model });
   assert.equal(result.explanation, reply);
   assert.equal(result.recipes.length, 1);
   assert.ok(!result.recipes[0].ingredients.some((ingredient) => ingredient.ingredientId === "apple"));
   assert.match(JSON.stringify(model.doGenerateCalls[0].prompt), /These priorities never override food or time constraints/);
-  assert.equal(model.doGenerateCalls.length, 3);
+  assert.equal(model.doGenerateCalls.length, 2);
 });
 
 test("suggestion-only priority hints do not change chat generation", async () => {
@@ -326,30 +349,132 @@ test("already shown recipe names are rejected and a different dish can be repair
   const input = { ...context(), recentRecipeNames: ["  Rice AND mushrooms  "] };
   const replacement = { ...candidate(), name: "Mushroom rice soup" };
   const model = new MockLanguageModelV4({ doGenerate: [
-    callResult("evaluateRecipes", { recipes: [candidate()], servings: 2 }),
-    callResult("evaluateRecipes", { recipes: [replacement], servings: 2 }),
-    textResult({ reply: "A different dish.", recipeRefs: ["proposal:1"], servings: 2 }),
+    textResult({ recipes: [candidate()], explanation: "" }),
+    textResult({ recipes: [replacement], explanation: "" }),
   ] });
   const result = await liveSuggestMeals(input, { model });
   assert.deepEqual(result.recipes.map((recipe) => recipe.name), [replacement.name]);
-  assert.equal(model.doGenerateCalls.length, 3);
+  assert.equal(model.doGenerateCalls.length, 2);
   assert.match(JSON.stringify(model.doGenerateCalls[1].prompt), /already suggested/);
 });
 
 test("invalid recipe attempts are recoverable errors, not misleading empty matches", async () => {
   const model = new MockLanguageModelV4({ doGenerate: [
-    callResult("evaluateRecipes", { recipes: [{ ...candidate(), minutes: 100 }], servings: 2 }),
-    textResult({ note: "I could not validate that recipe." }),
-    textResult({ reply: "Try a different time limit.", recipeRefs: [], servings: 2 }),
+    textResult({ recipes: [{ ...candidate(), minutes: 100 }], explanation: "" }),
+    textResult({ recipes: [], explanation: "Try a different time limit." }),
   ] });
   await assert.rejects(liveSuggestMeals(context(), { model }), (error: unknown) => error instanceof AiRuntimeError && error.code === "invalid_output");
 });
 
 test("a preference clarification survives an empty suggestion response", async () => {
   const reply = "Your dietary notes conflict. Which preference should I follow?";
-  const model = new MockLanguageModelV4({ doGenerate: [textResult({ note: "The request needs clarification." }), textResult({ reply, recipeRefs: [], servings: 2 })] });
+  const model = new MockLanguageModelV4({ doGenerate: textResult({ recipes: [], explanation: reply }) });
   const result = await liveSuggestMeals(context(), { model });
   assert.deepEqual(result, { source: "ai", recipes: [], explanation: reply });
+});
+
+test("a malformed reference-style answer gets one structured repair without exposing tools", async () => {
+  const model = new MockLanguageModelV4({ doGenerate: [
+    textResult({ reply: "Here are your meals.", recipeRefs: [candidate().name], servings: 2 }),
+    textResult({ recipes: [candidate()], explanation: "" }),
+  ] });
+  const result = await liveSuggestMeals(context(), { model });
+  assert.equal(result.recipes[0].name, candidate().name);
+  assert.equal(model.doGenerateCalls.length, 2);
+  assert.ok(model.doGenerateCalls.every((call) => call.responseFormat?.type === "json" && (call.tools?.length ?? 0) === 0));
+  assert.match(JSON.stringify(model.doGenerateCalls[1].prompt), /previous draft did not match the recipe schema/);
+});
+
+test("valid recipes survive malformed or domain-rejected repairs with safe validation counts", async (t) => {
+  const logs: unknown[][] = [];
+  t.mock.method(console, "info", (...args: unknown[]) => { logs.push(args); });
+  for (const repair of [
+    { wrong: "malformed response" },
+    { recipes: [{ ...candidate(), name: "Garlic bowl", ingredients: [{ ingredientId: "made-up-garlic", name: "Garlic", quantity: 1, unit: "each" }] }], explanation: "" },
+  ]) {
+    const model = new MockLanguageModelV4({ doGenerate: [
+      textResult({ recipes: [candidate(), { ...candidate(), name: "Slow dish", minutes: 100 }], explanation: "" }),
+      textResult(repair),
+    ] });
+    const result = await liveSuggestMeals(context(), { model });
+    assert.deepEqual(result.recipes.map((recipe) => recipe.name), [candidate().name]);
+    assert.equal(model.doGenerateCalls.length, 2);
+  }
+  const validations = logs.filter(([name]) => name === "lunchbox_recipe_validation");
+  assert.deepEqual(validations[0][1], { operation: "suggest", attempt: 1, submittedCount: 2, acceptedCount: 1, totalAcceptedCount: 1, rejectedCount: 1, preferredMissing: false });
+  assert.ok(!JSON.stringify(validations).includes(candidate().name));
+  assert.ok(!JSON.stringify(validations).includes("made-up-garlic"));
+});
+
+test("the small provider schema still enforces full recipe bounds locally without losing valid siblings", async () => {
+  for (const invalid of [
+    { ...candidate(), servings: 1.5 },
+    { ...candidate(), minutes: 1000 },
+    { ...candidate(), ingredients: [{ ingredientId: "rice", name: "Jasmine rice", quantity: 0, unit: "g" }] },
+    { ...candidate(), steps: [] },
+    { ...candidate(), name: "x".repeat(121) },
+  ]) {
+    const model = new MockLanguageModelV4({ doGenerate: [
+      textResult({ recipes: [candidate(), invalid], explanation: "" }),
+      textResult({ recipes: [], explanation: "" }),
+    ] });
+    const result = await liveSuggestMeals(context(), { model });
+    assert.deepEqual(result.recipes.map((recipe) => recipe.name), [candidate().name]);
+    assert.equal(model.doGenerateCalls.length, 2);
+    assert.match(JSON.stringify(model.doGenerateCalls[1].prompt), /Recipe 2 needs correction/);
+  }
+});
+
+test("repairs preserve the three-card limit and prioritize a newly stocked ingredient", async () => {
+  const input = { ...context(), preferredIngredients: [{ ingredientId: "apple", name: "Apple", unit: "each" }] satisfies KnownIngredient[] };
+  input.pantry.push({ id: "apple", name: "Apple", quantity: 1, unit: "each", location: "Fridge", useSoon: false, tag: "special" });
+  const appleDish = { ...candidate(), name: "Apple salad", ingredients: [{ ingredientId: "apple", name: "Apple", quantity: 1, unit: "each" as const }] };
+  const model = new MockLanguageModelV4({ doGenerate: [
+    textResult({ recipes: [candidate(), { ...candidate(), name: "Mushroom soup" }, { ...candidate(), name: "Rice cakes" }], explanation: "" }),
+    textResult({ recipes: [appleDish], explanation: "" }),
+  ] });
+  const result = await liveSuggestMeals(input, { model });
+  assert.equal(result.recipes.length, 3);
+  assert.equal(result.recipes[0].name, appleDish.name);
+});
+
+test("an invalid repair preserves a priority explanation or supplies an honest incomplete-priority note", async () => {
+  for (const explanation of ["Apples conflict with your stated dislike, so this batch leaves them out.", ""]) {
+    const input = { ...context(), preferredIngredients: [{ ingredientId: "apple", name: "Apple", unit: "each" }] satisfies KnownIngredient[] };
+    input.pantry.push({ id: "apple", name: "Apple", quantity: 1, unit: "each", location: "Fridge", useSoon: false, tag: "special" });
+    const model = new MockLanguageModelV4({ doGenerate: [
+      textResult({ recipes: [candidate()], explanation }),
+      textResult({ recipes: [{ ...candidate(), name: "Too slow", minutes: 100 }], explanation: "" }),
+    ] });
+    const result = await liveSuggestMeals(input, { model });
+    assert.equal(result.recipes.length, 1);
+    if (explanation) assert.equal(result.explanation, explanation);
+    else assert.match(result.explanation ?? "", /doesn't use a newly added or restocked ingredient/);
+  }
+});
+
+test("provider failures during a repair propagate instead of being hidden by partial recipes", async () => {
+  for (const code of ["rate_limit", "credits", "unavailable", "timeout", "cancelled"] as const) {
+    let calls = 0;
+    const model = new MockLanguageModelV4({ doGenerate: async () => {
+      if (++calls === 1) return textResult({ recipes: [candidate(), { ...candidate(), name: "Too slow", minutes: 100 }], explanation: "" });
+      throw new AiRuntimeError(code);
+    } });
+    await assert.rejects(liveSuggestMeals(context(), { model }), (error: unknown) => error instanceof AiRuntimeError && error.code === code);
+    assert.equal(model.doGenerateCalls.length, 2);
+  }
+});
+
+test("the same caller cancellation stops a repair even after a valid partial batch", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const model = new MockLanguageModelV4({ doGenerate: async () => {
+    if (++calls === 1) return textResult({ recipes: [candidate(), { ...candidate(), name: "Too slow", minutes: 100 }], explanation: "" });
+    controller.abort();
+    return textResult({ recipes: [{ ...candidate(), name: "Another quick dish" }], explanation: "" });
+  } });
+  await assert.rejects(liveSuggestMeals(context(), { model, signal: controller.signal }), (error: unknown) => error instanceof Error && error.name === "AbortError");
+  assert.equal(model.doGenerateCalls.length, 2);
 });
 
 test("runtime allows one failed proposal repair and finalizes with no tools within three calls", async () => {
