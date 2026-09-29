@@ -26,7 +26,7 @@ npm run build
 
 ## Recipe workspace extension
 
-The `/meals` screen now offers Suggestions, Chat, and My plan, with a saved recipe box inside Suggestions. Read [the recipe workspace plan](RECIPE_WORKSPACE_PLAN.md) for the delivery scope, next slices, ownership, and acceptance cases. All views use shared recipe cards and household actions. Chat is a clearly labeled deterministic demo, not a live AI connection.
+The `/meals` screen offers Suggestions, Chat, and My plan, with a saved recipe box and reviewed text/link imports inside Suggestions. Read [the AI demo runbook](AI_DEMO_RUNBOOK.md) for provider configuration, credits, release verification, and rollback. All views use shared recipe cards and household actions. The provider mode selects live AI or a clearly labeled deterministic demo.
 
 The suggestion endpoint contract is unchanged. The additive `/api/meals/chat` endpoint accepts kitchen/conversation context and returns `{ source, reply, recipes, servings }`; both providers live behind `src/features/meals/providers.ts`. Existing version-1 saves gain default workspace state without losing pantry/preferences/planned meals. Saved recipes, focused portions, the last 20 chat messages, and drafts use the same storage adapter and key. Shared contract and route changes in this release are coordinated as one integration PR.
 

@@ -11,20 +11,31 @@ import {
 } from "@/features/pantry/categories";
 import {
   pantryItemSchema,
+  unitSchema,
+  type KnownIngredient,
   type PantryCategory,
   type PantryItem,
 } from "@/lib/contracts";
+import { knownIngredientsFromHousehold, normalizeIngredientName, resolveIngredient } from "@/features/pantry/ingredients";
 
 const locations = ["Fridge", "Freezer", "Cupboard", "Garden"] as const;
 const amount = (quantity: number, unit: string) =>
   `${quantity.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${unit}`;
 
 export function PantryPanel() {
+  const { householdResetVersion } = useHousehold();
+  return <PantryContent key={householdResetVersion} />;
+}
+
+function PantryContent() {
   const { state, setPantry } = useHousehold();
   const [editor, setEditor] = useState<PantryItem | "new" | null>(null);
   const [filter, setFilter] = useState<"all" | "soon" | PantryCategory>("all");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [ambiguous, setAmbiguous] = useState<KnownIngredient[]>([]);
+  const knownIngredients = knownIngredientsFromHousehold(state);
   const useSoon = state.pantry.filter(
     (item) => item.useSoon && item.quantity > 0,
   );
@@ -41,24 +52,38 @@ export function PantryPanel() {
     setError(null);
     setMessage("");
     setEditor(item);
+    setEditingIndex(item === "new" ? null : state.pantry.indexOf(item));
+    setAmbiguous([]);
   }
 
   function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
+    const unit = unitSchema.safeParse(form.get("unit"));
+    if (!unit.success || !name) { setError("Enter an ingredient name and a supported unit."); return; }
     let id = editing?.id;
+    if (editing && normalizeIngredientName(name) !== normalizeIngredientName(editing.name)) {
+      const renamed = resolveIngredient({ name, unit: unit.data }, knownIngredients);
+      if (renamed.status !== "resolved" || renamed.ingredient.ingredientId !== editing.id) {
+        setError("This name describes a different ingredient. Add it as a new pantry item so existing recipes keep the right stock.");
+        return;
+      }
+    }
     if (!id) {
-      const slug =
-        name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-          .slice(0, 60) || "ingredient";
-      id = slug;
-      let suffix = 2;
-      while (state.pantry.some((item) => item.id === id))
-        id = `${slug}-${suffix++}`;
+      const resolution = resolveIngredient({ name, unit: unit.data, ingredientId: String(form.get("ingredientId") ?? "") || undefined }, knownIngredients);
+      if (resolution.status === "ambiguous") {
+        setAmbiguous(resolution.candidates);
+        setError("Choose the ingredient you mean below. Existing entries will stay separate.");
+        return;
+      }
+      id = resolution.ingredient.ingredientId;
+      const existing = state.pantry.find((item) => item.id === id && item.unit === unit.data);
+      if (existing) {
+        openEditor(existing);
+        setMessage("This ingredient is already in your pantry. Update its total amount below.");
+        return;
+      }
     }
     const result = pantryItemSchema.safeParse({
       id,
@@ -79,10 +104,14 @@ export function PantryPanel() {
       setError("This sample kitchen can hold up to 200 ingredients.");
       return;
     }
+    if (editing && editing.unit !== unit.data && state.pantry.some((item, index) => index !== editingIndex && item.id === id && item.unit === unit.data)) {
+      setError("This ingredient already has an entry in that unit. Edit that entry instead.");
+      return;
+    }
     setPantry(
       editing
-        ? state.pantry.map((item) =>
-            item.id === editing.id ? result.data : item,
+        ? state.pantry.map((item, index) =>
+            index === editingIndex ? result.data : item,
           )
         : [...state.pantry, result.data],
     );
@@ -167,18 +196,31 @@ export function PantryPanel() {
               <X size={20} />
             </button>
           </div>
-          <form key={editing?.id ?? "new"} onSubmit={saveItem}>
+          <form key={editing ? `${editing.id}:${editing.unit}:${editingIndex}` : "new"} onSubmit={saveItem}>
             <div className="ingredient-fields">
               <label className="field ingredient-name">
                 Ingredient name
                 <input
                   name="name"
+                  list="known-ingredient-names"
                   placeholder="e.g. Cherry tomatoes"
                   defaultValue={editing?.name ?? ""}
                   maxLength={80}
                   required
                   autoFocus
+                  onChange={(event) => {
+                    setAmbiguous([]);
+                    if (editing) return;
+                    const exact = knownIngredients.filter((item) => normalizeIngredientName(item.name) === normalizeIngredientName(event.currentTarget.value));
+                    if (exact.length === 1) {
+                      const unitInput = event.currentTarget.form?.elements.namedItem("unit");
+                      if (unitInput instanceof HTMLSelectElement) unitInput.value = exact[0].unit;
+                    }
+                  }}
                 />
+                <datalist id="known-ingredient-names">
+                  {knownIngredients.map((item) => <option key={`${item.ingredientId}:${item.unit}`} value={item.name}>{item.unit}</option>)}
+                </datalist>
               </label>
               <label className="field">
                 Amount
@@ -227,6 +269,13 @@ export function PantryPanel() {
                 </select>
               </label>
             </div>
+            {ambiguous.length > 0 ? <label className="field">
+              Match this ingredient
+              <select name="ingredientId" required defaultValue="">
+                <option value="" disabled>Choose an existing ingredient</option>
+                {ambiguous.map((item) => <option key={item.ingredientId} value={item.ingredientId}>{item.name} ({item.unit})</option>)}
+              </select>
+            </label> : null}
             <div className="form-footer">
               <label className="checkbox-label">
                 <input
@@ -322,7 +371,7 @@ export function PantryPanel() {
               </thead>
               <tbody>
                 {shown.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={`${item.id}:${item.unit}:${state.pantry.indexOf(item)}`}>
                     <td>
                       <span
                         className={`ingredient-dot ${item.useSoon && item.quantity > 0 ? "soon" : ""}`}

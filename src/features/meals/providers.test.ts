@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { MockLanguageModelV4 } from "ai/test";
+import { createSampleHousehold } from "@/features/pantry/seed";
+import { chatAboutMeals, suggestMeals } from "./providers";
+import { AiRuntimeError, generateStructured, getAiMode, getAiModel } from "./ai-runtime";
+import { z } from "zod";
+
+test("demo mode never calls an injected model; explicit AI failures never return demo", async () => {
+  const previous = process.env.LUNCHBOX_AI_MODE;
+  try {
+    const state = createSampleHousehold();
+    const input = { ...state, recipeBox: [], messages: [], message: "What can I make tonight?" };
+    const model = new MockLanguageModelV4({ doGenerate: async () => { throw Object.assign(new Error("private provider details"), { statusCode: 429 }); } });
+    process.env.LUNCHBOX_AI_MODE = "demo";
+    assert.equal((await suggestMeals(state, { model })).source, "demo");
+    assert.equal((await chatAboutMeals(input, { model })).source, "demo");
+    assert.equal(model.doGenerateCalls.length, 0);
+    process.env.LUNCHBOX_AI_MODE = "ai";
+    await assert.rejects(chatAboutMeals(input, { model }), (error: unknown) => error instanceof AiRuntimeError && error.code === "rate_limit");
+    assert.equal(model.doGenerateCalls.length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.LUNCHBOX_AI_MODE;
+    else process.env.LUNCHBOX_AI_MODE = previous;
+  }
+});
+
+test("unconfigured runtime fails before a network call and configuration defaults are explicit", async () => {
+  const names = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "LUNCHBOX_AI_MODE", "LUNCHBOX_AI_MODEL"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of names) delete process.env[name];
+    assert.equal(getAiMode(), "demo");
+    assert.equal(getAiModel(), "google/gemini-2.5-flash");
+    await assert.rejects(generateStructured({ schema: z.object({ ok: z.boolean() }), prompt: "Test", instructions: "Test", operation: "chat" }), (error: unknown) => error instanceof AiRuntimeError && error.code === "configuration");
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
+test("generation cancellation interrupts a pending model with a retryable public timeout", async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async ({ abortSignal }) => new Promise((_resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Test exceeded its bound")), 1000);
+    abortSignal?.addEventListener("abort", () => { clearTimeout(timer); reject(abortSignal.reason); }, { once: true });
+  }) });
+  await assert.rejects(generateStructured({ schema: z.object({ ok: z.boolean() }), instructions: "Test", prompt: "Test", operation: "chat", model, signal: AbortSignal.timeout(10) }), (error: unknown) => error instanceof AiRuntimeError && error.code === "timeout");
+  assert.equal(model.doGenerateCalls.length, 1);
+});

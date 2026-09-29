@@ -10,6 +10,7 @@ import {
   ListChecks,
   LoaderCircle,
   MessageCircle,
+  Plus,
   RefreshCw,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
@@ -17,6 +18,8 @@ import { MealChatPanel } from "@/components/meal-chat-panel";
 import { MealPlanPanel } from "@/components/meal-plan-panel";
 import { RecipeCard } from "@/components/recipe-card";
 import { selectedPreferenceLabels } from "@/features/meals/recommendation-options";
+import { RecipeImportPanel } from "@/components/recipe-import-panel";
+import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
 import { useMealSuggestions } from "@/features/meals/use-meal-suggestions";
 import { buildShoppingList } from "@/features/planning/shopping";
 import { preferencesSchema } from "@/lib/contracts";
@@ -27,15 +30,20 @@ const modes = [
   { id: "plan", label: "My plan", icon: ListChecks },
 ] as const;
 
-export function MealsPanel() {
-  const { state, setPreferences, setWorkspaceMode } = useHousehold();
+export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
+  const { state, setPreferences, setWorkspaceMode, householdResetVersion } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
   );
   const [message, setMessage] = useState("");
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
-  const { loading, current, refresh } = useMealSuggestions(
-    JSON.stringify({ pantry: state.pantry, preferences: state.preferences }),
+  const [importOpen, setImportOpen] = useState(false);
+  const [importSeed, setImportSeed] = useState({ url: "", resetVersion: householdResetVersion, request: 0 });
+  const importUrl = importSeed.resetVersion === householdResetVersion ? importSeed.url : "";
+  const kitchen = { pantry: state.pantry, preferences: state.preferences };
+  const { loading, current, refresh, cancel } = useMealSuggestions(
+    JSON.stringify({ ...kitchen, knownIngredients: knownIngredientsFromHousehold(state) }),
+    JSON.stringify(kitchen),
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
   const mode = state.workspace.mode;
@@ -76,7 +84,7 @@ export function MealsPanel() {
           <h1>Find your next good meal.</h1>
           <p>Browse an idea, talk it through, make it a plan.</p>
         </div>
-        <span className="pill demo-pill">Your recipe workspace</span>
+        <span className="pill demo-pill">{aiMode === "ai" ? "AI kitchen assistant" : "Demo recipe workspace"}</span>
       </header>
       <section
         className={`personalization-banner${state.preferences.onboardingComplete ? " complete" : ""}`}
@@ -141,6 +149,16 @@ export function MealsPanel() {
           Your recipe box holds up to 100 recipes. Unsave one to make room.
         </p>
       ) : null}
+      <div hidden={!importOpen}>
+        <RecipeImportPanel
+          key={`${householdResetVersion}:${importSeed.request}`}
+          initialUrl={importUrl}
+          aiMode={aiMode}
+          onClose={() => setImportOpen(false)}
+          onNotice={setMessage}
+          onSaved={() => { setCollection("saved"); setWorkspaceMode("suggestions"); setImportOpen(false); }}
+        />
+      </div>
       <div hidden={mode !== "suggestions"}>
         <section
           className="preferences-card"
@@ -231,11 +249,12 @@ export function MealsPanel() {
             <p className="muted">
               {collection === "saved"
                 ? "Keep the good ideas close. Plan them whenever you like."
-                : current?.response?.source === "ai"
+                : aiMode === "ai"
                   ? "Ideas based on your kitchen and preferences."
                   : "Sample recipes, matched to your pantry and time."}
             </p>
           </div>
+          <div className="collection-actions">
           <div
             className="collection-switch"
             role="group"
@@ -254,6 +273,13 @@ export function MealsPanel() {
               <Bookmark size={13} aria-hidden="true" />
               Recipe box {state.workspace.recipeBox.length}
             </button>
+          </div>
+          <button className="button secondary" onClick={() => {
+            setImportOpen(true);
+            requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
+          }}>
+            <Plus size={16} aria-hidden="true" /> Add recipe
+          </button>
           </div>
         </div>
         <section
@@ -297,6 +323,7 @@ export function MealsPanel() {
               <LoaderCircle className="spinning" size={28} aria-hidden="true" />
               <h3>Looking in your kitchen…</h3>
               <p role="status">Finding meals that fit your preferences.</p>
+              <button className="button secondary" onClick={cancel}>Stop search</button>
             </div>
           ) : current?.error ? (
             <div className="card empty-state">
@@ -326,15 +353,18 @@ export function MealsPanel() {
               <Clock3 size={28} aria-hidden="true" />
               <h3>A little more time opens things up.</h3>
               <p>
-                No recipes fit this time limit. Try 25 minutes or more for the
-                sample recipes.
+                {aiMode === "ai" ? "No recipes matched this request. Adjust your time limit or ask the assistant for a dish you’d like." : "No recipes fit this time limit. Try 25 minutes or more for the sample recipes."}
               </p>
             </div>
           )}
         </section>
       </div>
       <div hidden={mode !== "chat"}>
-        <MealChatPanel onNotice={setMessage} />
+        <MealChatPanel aiMode={aiMode} onNotice={setMessage} onImportUrl={(url) => {
+          setImportSeed((previous) => ({ url, resetVersion: householdResetVersion, request: previous.request + 1 }));
+          setImportOpen(true);
+          requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
+        }} />
       </div>
       <div hidden={mode !== "plan"}>
         <MealPlanPanel onNotice={setMessage} />

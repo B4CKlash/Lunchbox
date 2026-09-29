@@ -7,7 +7,7 @@ import {
 } from "@/lib/contracts";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { chatAboutMeals } from "./chat-provider";
-import { suggestMeals } from "./providers";
+import { suggestMeals } from "./demo-provider";
 
 function input(message: string): ChatMealsRequest {
   const { pantry, preferences } = createSampleHousehold();
