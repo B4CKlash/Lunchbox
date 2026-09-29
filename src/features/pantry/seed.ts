@@ -1,4 +1,4 @@
-import type { HouseholdState } from "@/lib/contracts";
+import { recipeWorkspaceSchema, type HouseholdState } from "@/lib/contracts";
 
 /** A fresh, independent household each time; ingredient IDs are shared with recipes. */
 export function createSampleHousehold(): HouseholdState {
@@ -98,5 +98,6 @@ export function createSampleHousehold(): HouseholdState {
     ],
     preferences: { servings: 2, maxMinutes: 30, prioritizeUseSoon: true },
     meals: [],
+    workspace: recipeWorkspaceSchema.parse({}),
   };
 }

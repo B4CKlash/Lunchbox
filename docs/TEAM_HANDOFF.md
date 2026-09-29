@@ -24,6 +24,12 @@ npm run build
 
 `check` runs lint, type checking, and tests. `build` verifies the production app separately. Use `npm run start` after a build to run that production build locally.
 
+## Recipe workspace extension
+
+The `/meals` screen now offers Suggestions, Chat, and My plan, with a saved recipe box inside Suggestions. Read [the recipe workspace plan](RECIPE_WORKSPACE_PLAN.md) for the delivery scope, next slices, ownership, and acceptance cases. All views use shared recipe cards and household actions. Chat is a clearly labeled deterministic demo, not a live AI connection.
+
+The suggestion endpoint contract is unchanged. The additive `/api/meals/chat` endpoint accepts kitchen/conversation context and returns `{ source, reply, recipes, servings }`; both providers live behind `src/features/meals/providers.ts`. Existing version-1 saves gain default workspace state without losing pantry/preferences/planned meals. Saved recipes, focused portions, the last 20 chat messages, and drafts use the same storage adapter and key. Shared contract and route changes in this release are coordinated as one integration PR.
+
 ## Ownership and first tasks
 
 | Person | Owns | First task | Done when |

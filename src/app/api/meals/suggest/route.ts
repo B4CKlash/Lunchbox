@@ -1,4 +1,4 @@
-import { suggestMeals } from "@/features/meals/demo-provider";
+import { suggestMeals } from "@/features/meals/providers";
 import {
   suggestMealsRequestSchema,
   suggestMealsResponseSchema,
