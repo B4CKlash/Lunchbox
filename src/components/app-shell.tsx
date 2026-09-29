@@ -10,6 +10,7 @@ import {
   ShoppingBasket,
   SlidersHorizontal,
   Utensils,
+  UserRound,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 
@@ -28,6 +29,7 @@ const navigation = [
     step: "03",
     icon: ShoppingBasket,
   },
+  { href: "/account", label: "Your account", step: "", icon: UserRound },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
