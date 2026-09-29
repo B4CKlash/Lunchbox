@@ -1,0 +1,4 @@
+.card { max-width: 680px; padding: 28px; }
+.card form { display: grid; gap: 16px; margin: 20px 0; }
+.card h2 { margin-top: 24px; }
+.card p { overflow-wrap: anywhere; }
