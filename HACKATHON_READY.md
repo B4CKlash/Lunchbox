@@ -45,7 +45,7 @@ Homebrew is currently blocked by an unaccepted Xcode license. The prepared Node 
 - Grant the Vercel GitHub App access to `B4CKlash/Lunchbox` and import it from the intended Vercel team. For a personal GitHub repository, its owner must do the import; a collaborator cannot. Organization repositories require suitable organization membership and repository access. App repository access and account login linking are separate checks. See [Vercel's GitHub integration requirements](https://vercel.com/docs/git/vercel-for-github).
 - Before pushing, confirm the local Git commit email is a verified address on your GitHub account. Your existing Git identity was preserved, but the current GitHub API credential could not verify the account's email list.
 
-The initial commit is local only. When ready to publish the concept/design files and preparation notes to the public repository, run `git push -u origin main`. This first push also establishes upstream tracking; the empty remote has no branch to track yet.
+The repository's entry point is [README.md](README.md). The first push uses `git push -u origin main` to publish the committed files and establish upstream tracking. Subsequent commits can be published with `git push`.
 
 **Team deployment caveat:** Vercel Hobby does not support collaboration on private repositories. Friends' commits can be blocked from deployment. Public-repository collaboration is free; private collaboration requires an appropriate Pro team setup and may add paid seats. Choose the arrangement with your friends or Vercel staff before importing. No plan upgrade or public repository was created during preparation. See [Vercel's collaboration troubleshooting](https://vercel.com/docs/deployments/troubleshoot-project-collaboration).
 
@@ -86,5 +86,6 @@ LunchBox's existing concept demonstrates the pantry → meal plan → shopping �
 - Installed and verified the official Node 24.21.0 LTS distribution outside the workspace.
 - Added Node version pins, a terminal launcher, an environment activation helper, a readiness check, and a secrets/build-output `.gitignore`.
 - Kept the existing concept/design artifacts intact.
-- Connected the local folder to Nate's GitHub repository and saved the existing files in an initial local commit. No files were pushed to GitHub.
+- Connected the local folder to Nate's GitHub repository and saved the existing files in an initial commit.
+- Added a README covering the concept, its current limitations, local setup, and team workflow.
 - No app scaffold, deployment, credit redemption, API key creation, or paid plan change was performed.
