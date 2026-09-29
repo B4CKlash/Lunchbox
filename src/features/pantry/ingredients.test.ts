@@ -56,6 +56,6 @@ test("missing custom ingredient combines across meals and later pantry stock cle
   const stocked = resolveIngredient({ name: "Aji amarillo paste", unit: "g" }, knownIngredientsFromHousehold(state));
   assert.deepEqual(stocked, item);
   assert.equal(buildShoppingList([], meals)[0].quantity, 60);
-  assert.equal(buildShoppingList([{ id: item.ingredient.ingredientId, name: item.ingredient.name, quantity: 50, unit: "g", location: "Fridge", useSoon: false }], meals)[0].quantity, 10);
-  assert.equal(buildShoppingList([{ id: item.ingredient.ingredientId, name: item.ingredient.name, quantity: 100, unit: "ml", location: "Fridge", useSoon: false }], meals)[0].quantity, 60);
+  assert.equal(buildShoppingList([{ id: item.ingredient.ingredientId, name: item.ingredient.name, quantity: 50, unit: "g", location: "Fridge", useSoon: false, tag: "special" }], meals)[0].quantity, 10);
+  assert.equal(buildShoppingList([{ id: item.ingredient.ingredientId, name: item.ingredient.name, quantity: 100, unit: "ml", location: "Fridge", useSoon: false, tag: "special" }], meals)[0].quantity, 60);
 });

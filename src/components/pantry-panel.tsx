@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
-import { pantryItemSchema, type PantryItem, type PantryTag } from "@/lib/contracts";
 import {
   inferPantryCategory,
   pantryCategories,
@@ -16,13 +15,14 @@ import {
   type KnownIngredient,
   type PantryCategory,
   type PantryItem,
+  type PantryTag,
 } from "@/lib/contracts";
 import { knownIngredientsFromHousehold, normalizeIngredientName, resolveIngredient } from "@/features/pantry/ingredients";
+import { applyPantryImport, PantryImportError, preparePantryImport, resolvePantryImportRow, type PantryImportRow } from "@/features/pantry/import";
 
 const locations = ["Fridge", "Freezer", "Cupboard", "Garden"] as const;
 const amount = (quantity: number, unit: string) =>
   `${quantity.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${unit}`;
-type ImportRow = { name: string; quantity: number; unit: PantryItem["unit"]; location: PantryItem["location"]; tag: PantryTag; merge: boolean };
 
 export function PantryPanel() {
   const { householdResetVersion } = useHousehold();
@@ -45,7 +45,7 @@ function PantryContent() {
   const [defaultLocation, setDefaultLocation] = useState<PantryItem["location"]>("Cupboard");
   const [defaultTag, setDefaultTag] = useState<PantryTag>("special");
   const [receiptText, setReceiptText] = useState("");
-  const [reviewRows, setReviewRows] = useState<ImportRow[]>([]);
+  const [reviewRows, setReviewRows] = useState<PantryImportRow[]>([]);
   const useSoon = state.pantry.filter(
     (item) => item.useSoon && item.quantity > 0,
   );
@@ -134,61 +134,50 @@ function PantryContent() {
   }
 
   function prepareImport(source: "list" | "receipt") {
-    const input = source === "list" ? bulkText : receiptText;
-    const candidates = input.split(/[\n,;]+/).map((line) => {
-      let cleaned = line.trim().replace(/\s+\$\d+(?:\.\d{2})?\s*$/, "");
-      const count = source === "receipt" ? cleaned.match(/^(\d+(?:\.\d+)?)\s+(.+)$/) : null;
-      if (count) cleaned = count[2];
-      return { name: cleaned.trim(), quantity: count ? Number(count[1]) : defaultQuantity };
-    }).filter(({ name }) => name && !/^total|^subtotal|^tax|^change|^payment|^thank you/i.test(name));
-    const unique = [...new Map(candidates.map((item) => [item.name.toLowerCase(), item])).values()];
-    if (!unique.length) {
-      setError("Paste ingredient names or receipt lines first.");
-      return;
+    try {
+      setReviewRows(preparePantryImport(source === "list" ? bulkText : receiptText, source, {
+        quantity: defaultQuantity, unit: defaultUnit, location: defaultLocation, tag: defaultTag,
+      }, state.pantry, knownIngredients));
+      setError(null);
+      setMessage("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Check the pasted ingredients and try again.");
     }
-    setReviewRows(unique.map(({ name, quantity }) => {
-      const duplicate = state.pantry.find((item) => item.name.trim().toLowerCase() === name.toLowerCase() && item.unit === defaultUnit);
-      return { name: name.slice(0, 80), quantity, unit: defaultUnit, location: defaultLocation, tag: duplicate?.tag ?? defaultTag, merge: Boolean(duplicate) };
+  }
+
+  function updateImportRow(index: number, change: Partial<PantryImportRow>, resolve = false) {
+    setReviewRows((rows) => rows.map((row, i) => {
+      if (i !== index) return row;
+      const next = { ...row, ...change };
+      return resolve ? resolvePantryImportRow(next, knownIngredients) : next;
     }));
     setError(null);
-    setMessage("");
   }
 
   function saveImport() {
-    const additions: PantryItem[] = [];
-    const updates = new Map<string, PantryItem>();
-    for (const row of reviewRows) {
-      const duplicate = row.merge && state.pantry.find((item) => item.name.trim().toLowerCase() === row.name.trim().toLowerCase() && item.unit === row.unit);
-      if (duplicate) {
-        const current = updates.get(duplicate.id) ?? duplicate;
-        const checked = pantryItemSchema.safeParse({ ...current, quantity: current.quantity + row.quantity, tag: row.tag });
-        if (checked.success) updates.set(duplicate.id, checked.data);
-      } else {
-        const slug = row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "ingredient";
-        let id = slug; let suffix = 2;
-        while (state.pantry.some((item) => item.id === id) || additions.some((item) => item.id === id)) id = `${slug}-${suffix++}`;
-        const checked = pantryItemSchema.safeParse({ id, name: row.name, quantity: row.quantity, unit: row.unit, location: row.location, useSoon: false, tag: row.tag });
-        if (checked.success) additions.push(checked.data);
+    try {
+      const result = applyPantryImport(state.pantry, reviewRows, knownIngredients);
+      setPantry(result.pantry);
+      setEditor(null);
+      setEditingIndex(null);
+      setAmbiguous([]);
+      setReviewRows([]); setBulkText(""); setReceiptText(""); setError(null);
+      setMessage(`${result.added} added and ${result.updated} existing ${result.updated === 1 ? "item updated" : "items updated"}.`);
+    } catch (reason) {
+      if (reason instanceof PantryImportError && reason.rowIndex !== undefined && reason.candidates) {
+        const index = reason.rowIndex;
+        setReviewRows((rows) => rows.map((row, i) => i === index ? { ...row, ingredientId: null, candidates: reason.candidates! } : row));
       }
+      setError(reason instanceof Error ? reason.message : "These pantry items could not be saved. Check the review rows.");
     }
-    if (state.pantry.length + additions.length > 200) {
-      setError(`There is room for ${Math.max(0, 200 - state.pantry.length)} new items. Remove some rows or merge duplicates.`);
-      return;
-    }
-    const updated = state.pantry.map((item) => updates.get(item.id) ?? item);
-    setPantry([...updated, ...additions]);
-    const mergedCount = [...updates.keys()].length;
-    setReviewRows([]); setBulkText(""); setReceiptText(""); setError(null);
-    setMessage(`${additions.length} added and ${mergedCount} existing ${mergedCount === 1 ? "item updated" : "items updated"}.`);
   }
 
   function capturePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
     setPhotoName(file.name);
-    setError(null);
+    openEditor("new");
     setMessage("Photo captured. Automatic food, receipt, and barcode recognition needs a connected recognition service; add the identified item below.");
-    setEditor("new");
   }
 
   return (
@@ -237,15 +226,27 @@ function PantryContent() {
       </section>
       {reviewRows.length > 0 ? <section className="card import-review" aria-labelledby="review-import-heading">
         <div className="section-heading"><div><p className="eyebrow">CHECK BEFORE SAVING</p><h2 id="review-import-heading">Review pantry items</h2></div><button className="icon-button" aria-label="Close import review" onClick={() => setReviewRows([])}><X size={20} /></button></div>
-        {reviewRows.map((row, index) => <div className="import-review-row" key={`${row.name}-${index}`}>
-          <label className="field">Item name<input value={row.name} maxLength={80} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label>
-          <label className="field">Amount<input type="number" min="0.01" max="100000" step="any" value={row.quantity} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, quantity: Number(event.target.value) } : item))} /></label>
-          <label className="field">Unit<select value={row.unit} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, unit: event.target.value as PantryItem["unit"] } : item))}><option value="each">each</option><option value="g">g</option><option value="ml">ml</option></select></label>
-          <label className="field">Storage<select value={row.location} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, location: event.target.value as PantryItem["location"] } : item))}>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
-          <label className="field">Tag<select value={row.tag} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, tag: event.target.value as PantryTag } : item))}><option value="staple">Staple</option><option value="seasonal">Seasonal</option><option value="special">Special</option></select></label>
-          {state.pantry.some((item) => item.name.trim().toLowerCase() === row.name.trim().toLowerCase() && item.unit === row.unit) ? <label className="checkbox-label"><input type="checkbox" checked={row.merge} onChange={(event) => setReviewRows((rows) => rows.map((item, i) => i === index ? { ...item, merge: event.target.checked } : item))} /> Add to existing amount</label> : null}
-          <button className="text-button" onClick={() => setReviewRows((rows) => rows.filter((_, i) => i !== index))}>Remove</button>
-        </div>)}
+        {reviewRows.map((row, index) => {
+          const existing = state.pantry.find((item) => item.id === row.ingredientId && item.unit === row.unit);
+          return <div className="import-review-row" key={index}>
+            <label className="field">Item name<input value={row.name} maxLength={80} onChange={(event) => updateImportRow(index, { name: event.target.value, ingredientId: null, candidates: [], merge: false })} onBlur={() => updateImportRow(index, {}, true)} /></label>
+            <label className="field">Amount<input type="number" min="0.01" max="100000" step="any" value={row.quantity} onChange={(event) => updateImportRow(index, { quantity: Number(event.target.value) })} /></label>
+            <label className="field">Unit<select value={row.unit} onChange={(event) => updateImportRow(index, { unit: event.target.value as PantryItem["unit"], ingredientId: null, candidates: [], merge: false }, true)}><option value="each">each</option><option value="g">g</option><option value="ml">ml</option></select></label>
+            <label className="field">Storage<select value={row.location} onChange={(event) => updateImportRow(index, { location: event.target.value as PantryItem["location"] })}>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
+            <label className="field">Tag<select value={row.tag} onChange={(event) => updateImportRow(index, { tag: event.target.value as PantryTag })}><option value="staple">Staple</option><option value="seasonal">Seasonal</option><option value="special">Special</option></select></label>
+            {row.candidates.length > 0 ? <label className="field">Match this ingredient
+              <select value={row.ingredientId ?? ""} onChange={(event) => updateImportRow(index, { ingredientId: event.target.value || null, merge: false })}>
+                <option value="">Choose an existing ingredient</option>
+                {row.candidates.map((candidate) => {
+                  const stock = state.pantry.find((item) => item.id === candidate.ingredientId && item.unit === candidate.unit);
+                  return <option key={candidate.ingredientId} value={candidate.ingredientId}>{candidate.name} · {stock ? `${amount(stock.quantity, stock.unit)} in ${stock.location}` : `saved recipe (${candidate.unit})`}</option>;
+                })}
+              </select>
+            </label> : null}
+            {existing ? <label className="checkbox-label"><input type="checkbox" checked={row.merge} onChange={(event) => updateImportRow(index, { merge: event.target.checked, ...(event.target.checked ? { tag: existing.tag } : {}) })} /> Add to existing {amount(existing.quantity, existing.unit)} in {existing.location}</label> : null}
+            <button className="text-button" onClick={() => setReviewRows((rows) => rows.filter((_, i) => i !== index))}>Remove</button>
+          </div>;
+        })}
         <div className="actions"><button className="button secondary" onClick={() => setReviewRows([])}>Cancel</button><button className="button" disabled={!reviewRows.length} onClick={saveImport}>Save reviewed items</button></div>
       </section> : null}
       {error ? <p className="error-message" role="alert">{error}</p> : null}
@@ -376,6 +377,9 @@ function PantryContent() {
                   <option value="staple">Staple</option>
                   <option value="seasonal">Seasonal</option>
                   <option value="special">Special</option>
+                </select>
+              </label>
+              <label className="field">
                 Food group
                 <select
                   name="category"

@@ -40,7 +40,6 @@ export function ShoppingPanel() {
         </Link>
       </header>
 
-      {!state.meals.length && !shopping.length ? (
       {state.workspace.calendar.draft !== null ? (
         <p className="status-message" role="status">
           You have a calendar draft. This list includes only committed meals.{" "}
@@ -54,7 +53,7 @@ export function ShoppingPanel() {
         </p>
       ) : null}
 
-      {!state.meals.length ? (
+      {!state.meals.length && !shopping.length ? (
         <section className="card empty-state spacious">
           <span className="empty-symbol">
             <ShoppingBasket size={30} aria-hidden="true" />
@@ -90,9 +89,8 @@ export function ShoppingPanel() {
             </div>
             <p className="muted shopping-intro">
               {state.meals.length
-                ? "Matching ingredients are combined across your plan."
+                ? "Matching ingredients are combined across your committed meals, including staple restock reminders."
                 : "Staples below your restock level."}
-              Matching ingredients are combined across your committed meals.
             </p>
             {shopping.length ? (
               <ul className="shopping-list">
