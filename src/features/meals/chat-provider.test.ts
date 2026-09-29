@@ -11,7 +11,14 @@ import { suggestMeals } from "./providers";
 
 function input(message: string): ChatMealsRequest {
   const { pantry, preferences } = createSampleHousehold();
-  return { pantry, preferences, meals: [], recipeBox: [], messages: [], message };
+  return {
+    pantry,
+    preferences,
+    meals: [],
+    recipeBox: [],
+    messages: [],
+    message,
+  };
 }
 
 const riceRecipe = (id = "rice-meal"): Recipe => ({
@@ -35,6 +42,7 @@ test("demo chat returns the same validated recipe proposals as suggestions", asy
   assert.equal(result.servings, request.preferences.servings);
   assert.deepEqual(result.recipes, (await suggestMeals(request)).recipes);
   assert.match(result.reply, /2 servings and up to 30 minutes/);
+  assert.match(result.reply, /calendar draft/);
   assert.deepEqual(request, before);
 });
 
@@ -68,9 +76,16 @@ test("quicker suggestions are strictly quicker and respect the current time limi
 
 test("plan review scales meals and subtracts combined pantry stock only once", async () => {
   const request = input("Review my plan");
-  request.pantry = [{
-    id: "rice", name: "Rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false,
-  }];
+  request.pantry = [
+    {
+      id: "rice",
+      name: "Rice",
+      quantity: 200,
+      unit: "g",
+      location: "Cupboard",
+      useSoon: false,
+    },
+  ];
   request.meals = [
     { id: "one", recipe: riceRecipe(), servings: 4 },
     { id: "two", recipe: riceRecipe(), servings: 2 },
@@ -79,6 +94,8 @@ test("plan review scales meals and subtracts combined pantry stock only once", a
   const result = await chatAboutMeals(request);
   assert.match(result.reply, /250 g Rice/);
   assert.match(result.reply, /counting pantry stock once/);
+  assert.match(result.reply, /calendar preview/);
+  assert.match(result.reply, /Commit your calendar to update the grocery list/);
   assert.deepEqual(result.recipes, []);
   assert.deepEqual(request, before);
 });
@@ -88,14 +105,36 @@ test("focused recipe gaps match ingredient ID and unit and scale current serving
   request.focusedRecipe = riceRecipe();
   request.preferences.servings = 4;
   request.pantry = [
-    { id: "rice", name: "Rice", quantity: 1000, unit: "ml", location: "Cupboard", useSoon: false },
-    { id: "beans", name: "Rice", quantity: 1000, unit: "g", location: "Cupboard", useSoon: false },
-    { id: "rice", name: "Rice", quantity: 100, unit: "g", location: "Cupboard", useSoon: false },
+    {
+      id: "rice",
+      name: "Rice",
+      quantity: 1000,
+      unit: "ml",
+      location: "Cupboard",
+      useSoon: false,
+    },
+    {
+      id: "beans",
+      name: "Rice",
+      quantity: 1000,
+      unit: "g",
+      location: "Cupboard",
+      useSoon: false,
+    },
+    {
+      id: "rice",
+      name: "Rice",
+      quantity: 100,
+      unit: "g",
+      location: "Cupboard",
+      useSoon: false,
+    },
   ];
   const result = await chatAboutMeals(request);
   assert.match(result.reply, /4 servings/);
   assert.match(result.reply, /200 g Rice/);
   assert.match(result.reply, /this recipe on its own/);
+  assert.match(result.reply, /only committed meals/);
   assert.deepEqual(result.recipes, [request.focusedRecipe]);
 });
 
@@ -143,14 +182,20 @@ test("ordinary proposals use preferences even while discussing a differently por
     assert.ok(result.recipes.length > 0, message);
     assert.equal(result.servings, 3, message);
     assert.match(result.reply, /3 servings/, message);
-    assert.ok(result.recipes.every((recipe) => recipe.servings === 2), message);
+    assert.ok(
+      result.recipes.every((recipe) => recipe.servings === 2),
+      message,
+    );
   }
 });
 
 test("specific ingredient searches use the complete phrase and preserve recipe quantities", async () => {
   const request = input("Recipes with tomatoes");
   const result = await chatAboutMeals(request);
-  assert.deepEqual(result.recipes.map((recipe) => recipe.id), ["r1"]);
+  assert.deepEqual(
+    result.recipes.map((recipe) => recipe.id),
+    ["r1"],
+  );
   assert.equal(result.recipes[0].servings, 2);
   assert.equal(result.recipes[0].ingredients[0].quantity, 400);
   request.message = "Recipes with tomatoes but no rice";
@@ -180,7 +225,9 @@ test("unsupported constraints and autonomous changes receive an honest fallback"
 });
 
 test("empty plans, empty results, and invalid empty messages have explicit outcomes", async () => {
-  assert.match((await chatAboutMeals(input("Review my plan"))).reply, /plan is empty/);
+  const emptyReview = await chatAboutMeals(input("Review my plan"));
+  assert.match(emptyReview.reply, /calendar is empty/);
+  assert.match(emptyReview.reply, /Add to calendar/);
   const request = input("What can I make tonight?");
   request.preferences.maxMinutes = 10;
   const result = await chatAboutMeals(request);

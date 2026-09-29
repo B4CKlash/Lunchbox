@@ -7,7 +7,7 @@ import {
   Bookmark,
   Clock3,
   LayoutGrid,
-  ListChecks,
+  CalendarDays,
   LoaderCircle,
   MessageCircle,
   RefreshCw,
@@ -24,7 +24,7 @@ import { preferencesSchema } from "@/lib/contracts";
 const modes = [
   { id: "suggestions", label: "Suggestions", icon: LayoutGrid },
   { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "plan", label: "My plan", icon: ListChecks },
+  { id: "plan", label: "Calendar", icon: CalendarDays },
 ] as const;
 
 export function MealsPanel() {
@@ -39,6 +39,7 @@ export function MealsPanel() {
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
   const mode = state.workspace.mode;
+  const draftMeals = state.workspace.calendar.draft ?? state.meals;
   const profileLabels = selectedPreferenceLabels([
     ...(state.preferences.goals ?? []),
     ...(state.preferences.dietaryNeeds ?? []),
@@ -70,10 +71,20 @@ export function MealsPanel() {
 
   return (
     <>
-      <header className="page-heading">
+      <header
+        className={
+          mode === "plan"
+            ? "page-heading calendar-page-heading"
+            : "page-heading"
+        }
+      >
         <div>
           <p className="eyebrow">ONE KITCHEN. MANY POSSIBILITIES.</p>
-          <h1>Find your next good meal.</h1>
+          <h1>
+            {mode === "plan"
+              ? "A good week starts here."
+              : "Find your next good meal."}
+          </h1>
           <p>Browse an idea, talk it through, make it a plan.</p>
         </div>
         <span className="pill demo-pill">Your recipe workspace</span>
@@ -102,7 +113,9 @@ export function MealsPanel() {
           </p>
         </div>
         <Link className="button secondary" href="/onboarding">
-          {state.preferences.onboardingComplete ? "Edit preferences" : "Personalize meals"}
+          {state.preferences.onboardingComplete
+            ? "Edit preferences"
+            : "Personalize meals"}
           <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </section>
@@ -122,7 +135,7 @@ export function MealsPanel() {
             <Icon size={18} aria-hidden="true" />
             {label}
             {id === "plan" ? (
-              <span className="workspace-count">{state.meals.length}</span>
+              <span className="workspace-count">{draftMeals.length}</span>
             ) : null}
           </button>
         ))}
@@ -131,7 +144,7 @@ export function MealsPanel() {
       <p className="status-message" role="status">
         {message}
       </p>
-      {state.meals.length >= 50 ? (
+      {draftMeals.length >= 50 ? (
         <p className="error-message" role="status">
           Your plan holds up to 50 meals. Remove one to add another.
         </p>
@@ -337,21 +350,27 @@ export function MealsPanel() {
         <MealChatPanel onNotice={setMessage} />
       </div>
       <div hidden={mode !== "plan"}>
-        <MealPlanPanel onNotice={setMessage} />
+        <MealPlanPanel
+          onNotice={setMessage}
+          suggestions={current?.response}
+          loading={loading}
+          error={current?.error}
+          onRefresh={refresh}
+        />
       </div>
       {mode !== "plan" ? (
         <aside className="workspace-plan-strip" aria-label="Plan overview">
           <div>
             <span className="eyebrow">IT ALL COMES TOGETHER</span>
             <h2>
-              {state.meals.length
-                ? `${state.meals.length} ${state.meals.length === 1 ? "meal" : "meals"} in your plan`
+              {draftMeals.length
+                ? `${draftMeals.length} ${draftMeals.length === 1 ? "meal" : "meals"} in your calendar`
                 : "A little inspiration. A plan that fits."}
             </h2>
             <p>
               {state.meals.length
-                ? `${shopping.length} ${shopping.length === 1 ? "ingredient" : "ingredients"} to pick up · pantry amounts stay unchanged`
-                : "Recipes from every view meet in the same plan and shopping list."}
+                ? `${shopping.length} ${shopping.length === 1 ? "ingredient" : "ingredients"} for committed meals · arrange drafts in your calendar`
+                : "Arrange recipes from every view, then commit your calendar to update groceries."}
             </p>
           </div>
           <div className="actions">
@@ -359,7 +378,7 @@ export function MealsPanel() {
               className="button secondary"
               onClick={() => setWorkspaceMode("plan")}
             >
-              Open my plan <ArrowRight size={15} aria-hidden="true" />
+              Open calendar <ArrowRight size={15} aria-hidden="true" />
             </button>
             {state.meals.length > 0 ? (
               <Link href="/shopping" className="text-link">

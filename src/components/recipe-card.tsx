@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   Bookmark,
   Check,
   Clock3,
@@ -67,11 +68,13 @@ export function RecipeCard({
     removeSavedRecipe,
     discussRecipe,
     setChatDraft,
+    setWorkspaceMode,
   } = useHousehold();
   const saved = state.workspace.recipeBox.some(
     (entry) => entry.recipe.id === recipe.id,
   );
-  const planned = state.meals.filter(
+  const calendarMeals = state.workspace.calendar.draft ?? state.meals;
+  const planned = calendarMeals.filter(
     (meal) => meal.recipe.id === recipe.id,
   ).length;
   const inStock = recipe.ingredients.filter(
@@ -118,20 +121,31 @@ export function RecipeCard({
         <RecipeDetails recipe={recipe} servings={servings} />
         <button
           className="button"
-          disabled={state.meals.length >= 50}
+          disabled={calendarMeals.length >= 50}
           onClick={() => {
             addMeal(recipe, servings);
-            onNotice(`${recipe.name} added to your plan for ${servings}.`);
+            onNotice(
+              `${recipe.name} added to your calendar draft for ${servings} servings. Choose a day, then commit when you’re ready.`,
+            );
           }}
         >
           <Plus size={16} aria-hidden="true" />
-          {planned ? "Add another meal" : "Add to plan"}
+          Add to calendar
         </button>
         {planned > 0 ? (
-          <p className="recipe-planned">
-            <Check size={12} aria-hidden="true" />
-            In your plan {planned > 1 ? `× ${planned}` : ""}
-          </p>
+          <>
+            <p className="recipe-planned">
+              <Check size={12} aria-hidden="true" />
+              In your calendar {planned > 1 ? `× ${planned}` : ""}
+            </p>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setWorkspaceMode("plan")}
+            >
+              Open calendar <ArrowRight size={14} aria-hidden="true" />
+            </button>
+          </>
         ) : null}
         <div className="recipe-secondary-actions">
           <button
