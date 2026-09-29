@@ -34,6 +34,7 @@ type HouseholdContextValue = {
   storageError: string | null;
   updateError: string | null;
   chatResetVersion: number;
+  householdResetVersion: number;
   setPantry: (pantry: PantryItem[]) => void;
   setPreferences: (preferences: Preferences) => void;
   addMeal: (recipe: Recipe, servings: number) => void;
@@ -56,6 +57,12 @@ type HouseholdContextValue = {
 };
 const HouseholdContext = createContext<HouseholdContextValue | null>(null);
 
+function withSavedProvenance(recipe: Recipe, state: HouseholdState): Recipe {
+  if (recipe.provenance) return recipe;
+  const saved = state.workspace.recipeBox.find((entry) => entry.recipe.id === recipe.id);
+  return saved ? { ...recipe, provenance: saved.recipe.provenance ?? { source: saved.source } } : recipe;
+}
+
 export function HouseholdProvider({ children }: { children: ReactNode }) {
   const [{ state, updateError }, update] = useReducer(
     householdReducer,
@@ -70,6 +77,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   // Ephemeral request invalidation; resetting identical household data must
   // still prevent an older in-flight response from restoring cleared chat.
   const [chatResetVersion, setChatResetVersion] = useState(0);
+  const [householdResetVersion, setHouseholdResetVersion] = useState(0);
   const hydrated = useRef(false);
 
   /* eslint-disable react-hooks/set-state-in-effect -- Hydrate browser-only storage after SSR and report persistence failures. */
@@ -109,6 +117,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         storageError,
         updateError,
         chatResetVersion,
+        householdResetVersion,
         setPantry: (pantry) => update({ type: "setPantry", pantry }),
         setPreferences: (preferences) =>
           update({ type: "setPreferences", preferences }),
@@ -117,7 +126,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
           update({
             type: "addMeal",
             id,
-            recipe,
+            recipe: withSavedProvenance(recipe, state),
             servings,
             calendarStartDate: nextWeekStart(),
           });
@@ -140,19 +149,19 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         setCalendarDraft: (meals) =>
           update({
             type: "setCalendarDraft",
-            meals,
+            meals: meals.map((meal) => ({ ...meal, recipe: withSavedProvenance(meal.recipe, state) })),
             calendarStartDate: nextWeekStart(),
           }),
         commitCalendar: () => update({ type: "commitCalendar" }),
         discardCalendarDraft: () => update({ type: "discardCalendarDraft" }),
         setWorkspaceMode: (mode) => update({ type: "setWorkspaceMode", mode }),
         saveRecipe: (recipe, source) =>
-          update({ type: "saveRecipe", recipe, source }),
+          update({ type: "saveRecipe", recipe: { ...recipe, provenance: recipe.provenance ?? { source } }, source }),
         removeSavedRecipe: (recipeId) =>
           update({ type: "removeSavedRecipe", recipeId }),
         setChatDraft: (text) => update({ type: "setChatDraft", text }),
         discussRecipe: (recipe, servings) =>
-          update({ type: "discussRecipe", recipe, servings }),
+          update({ type: "discussRecipe", recipe: withSavedProvenance(recipe, state), servings }),
         clearRecipeFocus: () => update({ type: "clearRecipeFocus" }),
         appendChatMessages: (messages) =>
           update({ type: "appendChatMessages", messages }),
@@ -165,6 +174,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         reset: () => {
           setStorageError(null);
           setChatResetVersion((version) => version + 1);
+          setHouseholdResetVersion((version) => version + 1);
           update({ type: "replace", state: createSampleHousehold() });
         },
       }}

@@ -21,6 +21,11 @@ export type CalendarRecipeChoice = {
   source: RecipeSource;
 };
 
+function sourceLabel(choice: CalendarRecipeChoice) {
+  const source = choice.recipe.provenance?.source ?? choice.source;
+  return source === "import" ? "Imported" : source === "demo" ? "Demo" : "AI";
+}
+
 type CalendarRecipeTrayProps = {
   source: CalendarRecipeSource;
   onSourceChange: (source: CalendarRecipeSource) => void;
@@ -107,7 +112,9 @@ export function CalendarRecipeTray({
       </div>
       <p className="calendar-help">
         {source === "ideas"
-          ? suggestionSource === "ai"
+          ? suggestionSource === undefined
+            ? "Meal ideas from your kitchen."
+            : suggestionSource === "ai"
             ? "AI ideas from your kitchen."
             : "Demo ideas · sample recipes, no live AI."
           : source === "box"
@@ -157,7 +164,7 @@ export function CalendarRecipeTray({
                 </span>
                 <span className="calendar-recipe-meta">
                   {choice.recipe.minutes} min · {choice.servings} servings ·{" "}
-                  {choice.source === "demo" ? "Demo" : "AI"}
+                  {sourceLabel(choice)}
                 </span>
               </span>
               <Plus size={14} aria-hidden="true" />

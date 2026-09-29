@@ -4,7 +4,7 @@ The Calendar view in `/meals` replaces the selected-meal list. Start with next M
 
 ## Arrange, review, commit
 
-- Choose a recipe from Ideas, Recipe box, or From chat. Drag it into an empty slot, or select the recipe and tap a slot. Ideas and chat use the existing provider response and display its actual demo/AI source; this release does not connect a live AI provider.
+- Choose a recipe from Ideas, Recipe box, or From chat. Drag it into an empty slot, or select the recipe and tap a slot. Ideas and chat use the configured demo/AI provider; recipe cards separately identify sample, AI, and imported provenance. See [AI demo operations](AI_DEMO_RUNBOOK.md).
 - Drag a placed meal to move it. Dropping onto another meal swaps the two. Select a meal to edit its date, slot, or servings with keyboard/touch controls, view the recipe, or discuss it in chat.
 - To plan three lunches, choose a recipe, set the target to three, choose Lunch only and Repeat selected recipe, then Fill open slots. Different recipes uses distinct recipe IDs within the chosen dates and slots; it leaves slots open when the recipe pool runs out. Existing meals count toward the target and stay in place.
 - A selected calendar meal can be repeated into a specified number of later empty slots of the same meal type. Add days if the visible range has no room.

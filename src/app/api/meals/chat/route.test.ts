@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POST } from "./route";
+import { createMealHandlers } from "@/features/meals/api-handlers";
+import { chatAboutMeals } from "@/features/meals/chat-provider";
+import { suggestMeals } from "@/features/meals/demo-provider";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { chatMealsResponseSchema } from "@/lib/contracts";
+import { AiRuntimeError } from "@/features/meals/ai-runtime";
+
+const POST = createMealHandlers({ chat: chatAboutMeals, suggest: suggestMeals }).chat;
 
 function request(body: string) {
   return new Request("http://localhost/api/meals/chat", { method: "POST", body });
@@ -67,4 +72,22 @@ test("unsupported requests return an honest reply without unrelated recipe propo
   const data = chatMealsResponseSchema.parse(await response.json());
   assert.deepEqual(data.recipes, []);
   assert.match(data.reply, /haven’t applied those constraints/);
+});
+
+test("chat forwards cancellation and returns public AI failures without losing their category", async () => {
+  for (const [code, status] of [["timeout", 504], ["credits", 503], ["rate_limit", 429], ["invalid_output", 502]] as const) {
+    const input = request(JSON.stringify(context()));
+    let forwarded: AbortSignal | undefined;
+    const handler = createMealHandlers({ suggest: suggestMeals, chat: async (_body, options) => {
+      forwarded = options.signal;
+      throw new AiRuntimeError(code);
+    } }).chat;
+    const response = await handler(input);
+    assert.ok(forwarded instanceof AbortSignal);
+    assert.equal(forwarded.aborted, false);
+    assert.equal(response.status, status);
+    assert.equal((await response.json()).code, code);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    if (code === "rate_limit") assert.equal(response.headers.get("Retry-After"), "30");
+  }
 });

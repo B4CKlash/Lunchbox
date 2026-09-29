@@ -10,6 +10,7 @@ import {
   ShoppingBasket,
   SlidersHorizontal,
   Utensils,
+  UserRound,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 
@@ -28,6 +29,7 @@ const navigation = [
     step: "03",
     icon: ShoppingBasket,
   },
+  { href: "/account", label: "Your account", step: "", icon: UserRound },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -101,7 +103,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="main-content" className="page-content">
           <div className="demo-banner">
             <span className="status-dot" />A little taste of LunchBox{" "}
-            <span>Sample recipes · changes stay in this browser</span>
+            <span>Changes are saved in this browser</span>
           </div>
           {storageError && (
             <p className="storage-warning" role="alert">
