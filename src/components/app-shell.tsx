@@ -9,10 +9,12 @@ import {
   PackageOpen,
   ShoppingBasket,
   Utensils,
+  UserRound,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 
 const navigation = [
+  { href: "/account", label: "Your account", step: "", icon: UserRound },
   { href: "/pantry", label: "Your pantry", step: "01", icon: PackageOpen },
   { href: "/meals", label: "Meals & plan", step: "02", icon: Utensils },
   {

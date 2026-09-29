@@ -45,6 +45,7 @@ type HouseholdContextValue = {
   appendChatMessages: (messages: ChatMessage[]) => void;
   completeChatTurn: (messages: ChatMessage[], submittedDraft: string) => void;
   clearChat: () => void;
+  replaceHousehold: (state: HouseholdState) => void;
   reset: () => void;
 };
 const HouseholdContext = createContext<HouseholdContextValue | null>(null);
@@ -125,6 +126,10 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         clearChat: () => {
           setChatResetVersion((version) => version + 1);
           update({ type: "clearChat" });
+        },
+        replaceHousehold: (state) => {
+          setChatResetVersion((version) => version + 1);
+          update({ type: "replace", state });
         },
         reset: () => {
           setStorageError(null);

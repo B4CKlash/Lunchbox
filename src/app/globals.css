@@ -2152,3 +2152,9 @@ textarea:focus-visible {
     padding: 10px;
   }
 }
+
+.account-card { max-width: 680px; padding: 28px; }
+.account-card form { display: grid; gap: 16px; margin: 20px 0; }
+.account-card h2 { margin-top: 24px; }
+.account-actions { flex-wrap: wrap; margin: 20px 0; }
+.account-card p { overflow-wrap: anywhere; }
