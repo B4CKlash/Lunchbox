@@ -7,6 +7,13 @@ import { buildShoppingList } from "@/features/planning/shopping";
 
 const amount = (quantity: number, unit: string) =>
   `${quantity.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${unit}`;
+const calendarDate = (date: string) =>
+  new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 
 export function ShoppingPanel() {
   const { state, setWorkspaceMode } = useHousehold();
@@ -22,16 +29,29 @@ export function ShoppingPanel() {
         <div>
           <p className="eyebrow">JUST THE MISSING PIECES</p>
           <h1>A little list. A good week.</h1>
-          <p>Your meals, minus what’s already in the kitchen.</p>
+          <p>Your committed meals, minus what’s already in the kitchen.</p>
         </div>
         <Link
           className="button secondary"
           href="/meals"
           onClick={() => setWorkspaceMode("plan")}
         >
-          Edit your plan <ArrowRight size={16} aria-hidden="true" />
+          Open calendar <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </header>
+
+      {state.workspace.calendar.draft !== null ? (
+        <p className="status-message" role="status">
+          You have a calendar draft. This list includes only committed meals.{" "}
+          <Link
+            className="text-link"
+            href="/meals"
+            onClick={() => setWorkspaceMode("plan")}
+          >
+            Review and commit your calendar
+          </Link>
+        </p>
+      ) : null}
 
       {!state.meals.length ? (
         <section className="card empty-state spacious">
@@ -40,11 +60,15 @@ export function ShoppingPanel() {
           </span>
           <h2>Good lists start with a plan.</h2>
           <p>
-            Choose a meal and we’ll combine the ingredients you’re missing into
-            one simple shopping list.
+            Add meals to your calendar, then commit your plan. We’ll combine the
+            ingredients you’re missing into one simple shopping list.
           </p>
-          <Link className="button" href="/meals">
-            Find your first meal <ArrowRight size={16} aria-hidden="true" />
+          <Link
+            className="button"
+            href="/meals"
+            onClick={() => setWorkspaceMode("plan")}
+          >
+            Plan your meals <ArrowRight size={16} aria-hidden="true" />
           </Link>
         </section>
       ) : (
@@ -64,7 +88,7 @@ export function ShoppingPanel() {
               <ShoppingBasket size={24} aria-hidden="true" />
             </div>
             <p className="muted shopping-intro">
-              Matching ingredients are combined across your plan.
+              Matching ingredients are combined across your committed meals.
             </p>
             {shopping.length ? (
               <ul className="shopping-list">
@@ -99,7 +123,8 @@ export function ShoppingPanel() {
               </div>
             )}
             <p className="footnote">
-              This list updates whenever your pantry, meals, or servings change.
+              This list updates when you commit your calendar or change your
+              pantry. Draft edits stay in the calendar until you commit them.
             </p>
           </section>
 
@@ -116,8 +141,8 @@ export function ShoppingPanel() {
                   <strong>{state.meals.length}</strong>
                   <span>
                     {state.meals.length === 1
-                      ? "planned meal"
-                      : "planned meals"}
+                      ? "committed meal"
+                      : "committed meals"}
                   </span>
                 </div>
                 <div>
@@ -131,7 +156,13 @@ export function ShoppingPanel() {
                     <Utensils size={15} aria-hidden="true" />
                     <span>
                       {meal.recipe.name}
-                      <small>{meal.servings} servings</small>
+                      <small>
+                        {meal.date ? `${calendarDate(meal.date)} · ` : ""}
+                        {meal.slot
+                          ? `${meal.slot.charAt(0).toUpperCase()}${meal.slot.slice(1)} · `
+                          : ""}
+                        {meal.servings} servings
+                      </small>
                     </span>
                   </div>
                 ))}
@@ -141,7 +172,7 @@ export function ShoppingPanel() {
                 href="/meals"
                 onClick={() => setWorkspaceMode("plan")}
               >
-                Back to the plan <ArrowRight size={15} aria-hidden="true" />
+                Back to the calendar <ArrowRight size={15} aria-hidden="true" />
               </Link>
             </section>
             <section className="card pantry-reminder">

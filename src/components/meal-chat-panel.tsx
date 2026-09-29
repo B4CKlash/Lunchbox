@@ -36,7 +36,7 @@ export function MealChatPanel({
   const context = JSON.stringify({
     pantry: state.pantry,
     preferences: state.preferences,
-    meals: state.meals,
+    meals: workspace.calendar.draft ?? state.meals,
     recipeBox: workspace.recipeBox,
     focusedRecipe: workspace.focusedRecipe ?? undefined,
     focusedServings: workspace.focusedServings ?? undefined,
