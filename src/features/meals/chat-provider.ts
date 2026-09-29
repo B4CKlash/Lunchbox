@@ -27,7 +27,7 @@ function shortageSummary(items: ShoppingItem[]) {
 }
 
 const fallbackReply =
-  "This is a demo recipe guide. I can suggest sample meals, find a quicker option, use your use-soon ingredients, review your plan, or explain a selected recipe. Try “recipes with rice” to search the samples. I can’t apply cuisine, dietary, allergy, substitution, or custom serving instructions in chat yet; I haven’t applied those constraints. Set servings and time in the controls, or choose one of the prompts.";
+  "This is a demo recipe guide. I can suggest sample meals, find a quicker option, use your use-soon ingredients, review your calendar preview, or explain a selected recipe. Try “recipes with rice” to search the samples. I can’t apply cuisine, dietary, allergy, substitution, or custom serving instructions in chat yet; I haven’t applied those constraints. Set servings and time in the controls, or choose one of the prompts.";
 
 /** Bounded demo commands only: recipe proposals never mutate the household. */
 export async function chatAboutMeals(
@@ -42,13 +42,18 @@ export async function chatAboutMeals(
     recipes: Recipe[] = [],
     servings = preferences.servings,
   ): ChatMealsResponse {
-    return chatMealsResponseSchema.parse({ source: "demo", reply, recipes, servings });
+    return chatMealsResponseSchema.parse({
+      source: "demo",
+      reply,
+      recipes,
+      servings,
+    });
   }
 
   if (/^(review|show|check)( me)? my (meal )?plan$/.test(message)) {
     if (!request.meals.length)
       return response(
-        "Your plan is empty. Ask what you can make tonight, then use Add to plan on a recipe. Planning keeps your pantry quantities unchanged.",
+        "Your calendar is empty. Ask what you can make tonight, then use Add to calendar on a recipe. Place your meals and commit your calendar to update the grocery list. Planning keeps your pantry quantities unchanged.",
       );
     const shortages = buildShoppingList(pantry, request.meals);
     const names = request.meals
@@ -56,7 +61,7 @@ export async function chatAboutMeals(
       .map((meal) => `${meal.recipe.name} (${meal.servings} servings)`)
       .join("; ");
     return response(
-      `Your plan has ${request.meals.length} ${request.meals.length === 1 ? "meal" : "meals"}: ${names}${request.meals.length > 5 ? "; and more" : ""}. ${shortages.length ? `After combining the whole plan and counting pantry stock once, you need: ${shortageSummary(shortages)}. See the shopping list for every amount.` : "Your pantry covers the combined ingredient amounts in this plan."} Planning has not changed your pantry quantities.`,
+      `Your calendar preview has ${request.meals.length} ${request.meals.length === 1 ? "meal" : "meals"}: ${names}${request.meals.length > 5 ? "; and more" : ""}. ${shortages.length ? `After combining these meals and counting pantry stock once, this preview needs: ${shortageSummary(shortages)}.` : "Your pantry covers the combined ingredient amounts in this preview."} Commit your calendar to update the grocery list with all missing ingredient amounts for these meals. Planning has not changed your pantry quantities.`,
     );
   }
 
@@ -98,7 +103,7 @@ export async function chatAboutMeals(
       },
     ]);
     return response(
-      `${focusedRecipe.name} takes ${focusedRecipe.minutes} minutes. For ${focusedServings} servings, ${shortages.length ? `you need to pick up: ${shortageSummary(shortages)}.` : "your pantry covers all the ingredient amounts."} This checks this recipe on its own; your shopping list combines every planned meal. Open Ingredients & steps for the complete recipe.`,
+      `${focusedRecipe.name} takes ${focusedRecipe.minutes} minutes. For ${focusedServings} servings, ${shortages.length ? `you need to pick up: ${shortageSummary(shortages)}.` : "your pantry covers all the ingredient amounts."} This checks this recipe on its own; your shopping list combines only committed meals. Commit calendar changes to update your grocery list. Open Ingredients & steps for the complete recipe.`,
       [focusedRecipe],
       focusedServings,
     );
@@ -184,7 +189,7 @@ export async function chatAboutMeals(
     );
 
   return response(
-    `Here ${recipes.length === 1 ? "is a sample meal" : "are sample meals"} ${wantsSoon ? "using your available use-soon ingredients" : wantsQuicker ? "that take less time" : ingredientId ? `with ${ingredientQuery}` : "matched to your pantry"}, for ${preferences.servings} servings and up to ${preferences.maxMinutes} minutes. These are demo suggestions. Save a recipe, discuss it, or add it to your plan when it suits you.`,
+    `Here ${recipes.length === 1 ? "is a sample meal" : "are sample meals"} ${wantsSoon ? "using your available use-soon ingredients" : wantsQuicker ? "that take less time" : ingredientId ? `with ${ingredientQuery}` : "matched to your pantry"}, for ${preferences.servings} servings and up to ${preferences.maxMinutes} minutes. These are demo suggestions. Save a recipe, discuss it, or add it to your calendar draft. Arrange your meals, then commit your calendar to update the grocery list.`,
     recipes,
   );
 }

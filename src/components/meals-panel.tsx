@@ -7,15 +7,19 @@ import {
   Bookmark,
   Clock3,
   LayoutGrid,
-  ListChecks,
+  CalendarDays,
   LoaderCircle,
   MessageCircle,
+  Plus,
   RefreshCw,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { MealChatPanel } from "@/components/meal-chat-panel";
 import { MealPlanPanel } from "@/components/meal-plan-panel";
 import { RecipeCard } from "@/components/recipe-card";
+import { selectedPreferenceLabels } from "@/features/meals/recommendation-options";
+import { RecipeImportPanel } from "@/components/recipe-import-panel";
+import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
 import { useMealSuggestions } from "@/features/meals/use-meal-suggestions";
 import { buildShoppingList } from "@/features/planning/shopping";
 import { preferencesSchema } from "@/lib/contracts";
@@ -23,26 +27,41 @@ import { preferencesSchema } from "@/lib/contracts";
 const modes = [
   { id: "suggestions", label: "Suggestions", icon: LayoutGrid },
   { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "plan", label: "My plan", icon: ListChecks },
+  { id: "plan", label: "Calendar", icon: CalendarDays },
 ] as const;
 
-export function MealsPanel() {
-  const { state, setPreferences, setWorkspaceMode } = useHousehold();
+export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
+  const { state, setPreferences, setWorkspaceMode, householdResetVersion } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
   );
   const [message, setMessage] = useState("");
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
-  const { loading, current, refresh } = useMealSuggestions(
-    JSON.stringify({ pantry: state.pantry, preferences: state.preferences }),
+  const [importOpen, setImportOpen] = useState(false);
+  const [importSeed, setImportSeed] = useState({ url: "", resetVersion: householdResetVersion, request: 0 });
+  const importUrl = importSeed.resetVersion === householdResetVersion ? importSeed.url : "";
+  const kitchen = { pantry: state.pantry, preferences: state.preferences };
+  const { loading, current, refresh, cancel } = useMealSuggestions(
+    JSON.stringify({ ...kitchen, knownIngredients: knownIngredientsFromHousehold(state) }),
+    JSON.stringify(kitchen),
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
   const mode = state.workspace.mode;
+  const draftMeals = state.workspace.calendar.draft ?? state.meals;
+  const profileLabels = selectedPreferenceLabels([
+    ...(state.preferences.goals ?? []),
+    ...(state.preferences.dietaryNeeds ?? []),
+    ...(state.preferences.nutritionFocus ?? []),
+    ...(state.preferences.flavorPreferences ?? []),
+    ...(state.preferences.cuisinePreferences ?? []),
+    ...(state.preferences.cookingStyles ?? []),
+  ]);
 
   function updatePreferences(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const parsed = preferencesSchema.safeParse({
+      ...state.preferences,
       servings: Number(form.get("servings")),
       maxMinutes: Number(form.get("maxMinutes")),
       prioritizeUseSoon: form.get("useSoon") === "on",
@@ -60,14 +79,55 @@ export function MealsPanel() {
 
   return (
     <>
-      <header className="page-heading">
+      <header
+        className={
+          mode === "plan"
+            ? "page-heading calendar-page-heading"
+            : "page-heading"
+        }
+      >
         <div>
           <p className="eyebrow">ONE KITCHEN. MANY POSSIBILITIES.</p>
-          <h1>Find your next good meal.</h1>
+          <h1>
+            {mode === "plan"
+              ? "A good week starts here."
+              : "Find your next good meal."}
+          </h1>
           <p>Browse an idea, talk it through, make it a plan.</p>
         </div>
-        <span className="pill demo-pill">Your recipe workspace</span>
+        <span className="pill demo-pill">{aiMode === "ai" ? "AI kitchen assistant" : "Demo recipe workspace"}</span>
       </header>
+      <section
+        className={`personalization-banner${state.preferences.onboardingComplete ? " complete" : ""}`}
+        aria-label="Recommendation preferences"
+      >
+        <div>
+          <p className="eyebrow">
+            {state.preferences.onboardingComplete
+              ? "PERSONALIZED FOR YOU"
+              : "MAKE THESE IDEAS YOURS"}
+          </p>
+          <h2>
+            {state.preferences.onboardingComplete
+              ? "Your priorities are shaping these meals."
+              : "Tell us what good food looks like for you."}
+          </h2>
+          <p>
+            {state.preferences.onboardingComplete
+              ? profileLabels.length
+                ? profileLabels.slice(0, 5).join(" · ")
+                : "Your saved preferences are active."
+              : "Set goals, dietary needs, allergies, and the cooking styles you enjoy."}
+          </p>
+        </div>
+        <Link className="button secondary" href="/onboarding">
+          {state.preferences.onboardingComplete
+            ? "Edit preferences"
+            : "Personalize meals"}
+          <ArrowRight size={16} aria-hidden="true" />
+        </Link>
+      </section>
+
       <div
         className="workspace-navigation"
         role="group"
@@ -83,7 +143,7 @@ export function MealsPanel() {
             <Icon size={18} aria-hidden="true" />
             {label}
             {id === "plan" ? (
-              <span className="workspace-count">{state.meals.length}</span>
+              <span className="workspace-count">{draftMeals.length}</span>
             ) : null}
           </button>
         ))}
@@ -92,7 +152,7 @@ export function MealsPanel() {
       <p className="status-message" role="status">
         {message}
       </p>
-      {state.meals.length >= 50 ? (
+      {draftMeals.length >= 50 ? (
         <p className="error-message" role="status">
           Your plan holds up to 50 meals. Remove one to add another.
         </p>
@@ -102,6 +162,16 @@ export function MealsPanel() {
           Your recipe box holds up to 100 recipes. Unsave one to make room.
         </p>
       ) : null}
+      <div hidden={!importOpen}>
+        <RecipeImportPanel
+          key={`${householdResetVersion}:${importSeed.request}`}
+          initialUrl={importUrl}
+          aiMode={aiMode}
+          onClose={() => setImportOpen(false)}
+          onNotice={setMessage}
+          onSaved={() => { setCollection("saved"); setWorkspaceMode("suggestions"); setImportOpen(false); }}
+        />
+      </div>
       <div hidden={mode !== "suggestions"}>
         <section
           className="preferences-card"
@@ -192,11 +262,12 @@ export function MealsPanel() {
             <p className="muted">
               {collection === "saved"
                 ? "Keep the good ideas close. Plan them whenever you like."
-                : current?.response?.source === "ai"
+                : aiMode === "ai"
                   ? "Ideas based on your kitchen and preferences."
                   : "Sample recipes, matched to your pantry and time."}
             </p>
           </div>
+          <div className="collection-actions">
           <div
             className="collection-switch"
             role="group"
@@ -215,6 +286,13 @@ export function MealsPanel() {
               <Bookmark size={13} aria-hidden="true" />
               Recipe box {state.workspace.recipeBox.length}
             </button>
+          </div>
+          <button className="button secondary" onClick={() => {
+            setImportOpen(true);
+            requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
+          }}>
+            <Plus size={16} aria-hidden="true" /> Add recipe
+          </button>
           </div>
         </div>
         <section
@@ -258,6 +336,7 @@ export function MealsPanel() {
               <LoaderCircle className="spinning" size={28} aria-hidden="true" />
               <h3>Looking in your kitchen…</h3>
               <p role="status">Finding meals that fit your preferences.</p>
+              <button className="button secondary" onClick={cancel}>Stop search</button>
             </div>
           ) : current?.error ? (
             <div className="card empty-state">
@@ -287,32 +366,41 @@ export function MealsPanel() {
               <Clock3 size={28} aria-hidden="true" />
               <h3>A little more time opens things up.</h3>
               <p>
-                No recipes fit this time limit. Try 25 minutes or more for the
-                sample recipes.
+                {aiMode === "ai" ? "No recipes matched this request. Adjust your time limit or ask the assistant for a dish you’d like." : "No recipes fit this time limit. Try 25 minutes or more for the sample recipes."}
               </p>
             </div>
           )}
         </section>
       </div>
       <div hidden={mode !== "chat"}>
-        <MealChatPanel onNotice={setMessage} />
+        <MealChatPanel aiMode={aiMode} onNotice={setMessage} onImportUrl={(url) => {
+          setImportSeed((previous) => ({ url, resetVersion: householdResetVersion, request: previous.request + 1 }));
+          setImportOpen(true);
+          requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
+        }} />
       </div>
       <div hidden={mode !== "plan"}>
-        <MealPlanPanel onNotice={setMessage} />
+        <MealPlanPanel
+          onNotice={setMessage}
+          suggestions={current?.response}
+          loading={loading}
+          error={current?.error}
+          onRefresh={refresh}
+        />
       </div>
       {mode !== "plan" ? (
         <aside className="workspace-plan-strip" aria-label="Plan overview">
           <div>
             <span className="eyebrow">IT ALL COMES TOGETHER</span>
             <h2>
-              {state.meals.length
-                ? `${state.meals.length} ${state.meals.length === 1 ? "meal" : "meals"} in your plan`
+              {draftMeals.length
+                ? `${draftMeals.length} ${draftMeals.length === 1 ? "meal" : "meals"} in your calendar`
                 : "A little inspiration. A plan that fits."}
             </h2>
             <p>
               {state.meals.length
-                ? `${shopping.length} ${shopping.length === 1 ? "ingredient" : "ingredients"} to pick up · pantry amounts stay unchanged`
-                : "Recipes from every view meet in the same plan and shopping list."}
+                ? `${shopping.length} ${shopping.length === 1 ? "ingredient" : "ingredients"} for committed meals · arrange drafts in your calendar`
+                : "Arrange recipes from every view, then commit your calendar to update groceries."}
             </p>
           </div>
           <div className="actions">
@@ -320,7 +408,7 @@ export function MealsPanel() {
               className="button secondary"
               onClick={() => setWorkspaceMode("plan")}
             >
-              Open my plan <ArrowRight size={15} aria-hidden="true" />
+              Open calendar <ArrowRight size={15} aria-hidden="true" />
             </button>
             {state.meals.length > 0 ? (
               <Link href="/shopping" className="text-link">

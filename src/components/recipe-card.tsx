@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   Bookmark,
   Check,
   Clock3,
@@ -9,6 +10,7 @@ import {
   Utensils,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
+import { buildShoppingList } from "@/features/planning/shopping";
 import type { Recipe, RecipeSource } from "@/lib/contracts";
 
 const amount = (quantity: number, unit: string) =>
@@ -42,6 +44,16 @@ export function RecipeDetails({
           <li key={index}>{step}</li>
         ))}
       </ol>
+      {recipe.provenance?.source === "import" ? (
+        <p className="recipe-attribution">
+          {recipe.provenance.sourceUrl ? (
+            <a href={recipe.provenance.sourceUrl} target="_blank" rel="noreferrer">
+              {recipe.provenance.title || "Original recipe"}
+            </a>
+          ) : "Imported from recipe text"}
+          {recipe.provenance.author ? ` · ${recipe.provenance.author}` : ""}
+        </p>
+      ) : null}
     </details>
   );
 }
@@ -67,24 +79,22 @@ export function RecipeCard({
     removeSavedRecipe,
     discussRecipe,
     setChatDraft,
+    setWorkspaceMode,
   } = useHousehold();
   const saved = state.workspace.recipeBox.some(
     (entry) => entry.recipe.id === recipe.id,
   );
-  const planned = state.meals.filter(
+  const calendarMeals = state.workspace.calendar.draft ?? state.meals;
+  const planned = calendarMeals.filter(
     (meal) => meal.recipe.id === recipe.id,
   ).length;
-  const inStock = recipe.ingredients.filter(
-    (ingredient) =>
-      state.pantry
-        .filter(
-          (item) =>
-            item.id === ingredient.ingredientId &&
-            item.unit === ingredient.unit,
-        )
-        .reduce((total, item) => total + item.quantity, 0) >=
-      (ingredient.quantity * servings) / recipe.servings,
-  ).length;
+  const shortages = buildShoppingList(state.pantry, [{ id: "preview", recipe, servings }]);
+  const ingredientCount = new Set(recipe.ingredients.map(
+    (ingredient) => JSON.stringify([ingredient.ingredientId, ingredient.unit]),
+  )).size;
+  const inStock = ingredientCount - shortages.length;
+  const provenance = recipe.provenance ?? { source };
+  const snapshot = { ...recipe, provenance };
   return (
     <article
       className={`recipe-card recipe-tone-${index % 3}`}
@@ -95,7 +105,7 @@ export function RecipeCard({
           {String(index + 1).padStart(2, "0")}
         </span>
         <span className="pill">
-          {source === "demo" ? "Sample recipe" : "AI recipe"}
+          {provenance.source === "demo" ? "Sample recipe" : provenance.source === "import" ? "Imported recipe" : "AI recipe"}
         </span>
         <h3>{recipe.name}</h3>
         <div className="recipe-meta">
@@ -113,25 +123,47 @@ export function RecipeCard({
         <p>{recipe.description}</p>
         <div className="pantry-match">
           <span className="match-dot" />
-          {inStock} of {recipe.ingredients.length} ingredients on hand
+          {inStock} of {ingredientCount} ingredients on hand
         </div>
-        <RecipeDetails recipe={recipe} servings={servings} />
+        {shortages.length ? (
+          <details className="recipe-shortages">
+            <summary>{shortages.length} {shortages.length === 1 ? "ingredient" : "ingredients"} to pick up</summary>
+            <ul>{shortages.map((item) => (
+              <li key={`${item.ingredientId}-${item.unit}`}>
+                <span>{item.name}</span><span>{amount(item.quantity, item.unit)}</span>
+              </li>
+            ))}</ul>
+            <p>For this meal alone. Your shopping list combines the whole plan.</p>
+          </details>
+        ) : null}
+        <RecipeDetails recipe={snapshot} servings={servings} />
         <button
           className="button"
-          disabled={state.meals.length >= 50}
+          disabled={calendarMeals.length >= 50}
           onClick={() => {
-            addMeal(recipe, servings);
-            onNotice(`${recipe.name} added to your plan for ${servings}.`);
+            addMeal(snapshot, servings);
+            onNotice(
+              `${recipe.name} added to your calendar draft for ${servings} servings. Choose a day, then commit when you’re ready.`,
+            );
           }}
         >
           <Plus size={16} aria-hidden="true" />
-          {planned ? "Add another meal" : "Add to plan"}
+          Add to calendar
         </button>
         {planned > 0 ? (
-          <p className="recipe-planned">
-            <Check size={12} aria-hidden="true" />
-            In your plan {planned > 1 ? `× ${planned}` : ""}
-          </p>
+          <>
+            <p className="recipe-planned">
+              <Check size={12} aria-hidden="true" />
+              In your calendar {planned > 1 ? `× ${planned}` : ""}
+            </p>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setWorkspaceMode("plan")}
+            >
+              Open calendar <ArrowRight size={14} aria-hidden="true" />
+            </button>
+          </>
         ) : null}
         <div className="recipe-secondary-actions">
           <button
@@ -140,7 +172,7 @@ export function RecipeCard({
             disabled={!saved && state.workspace.recipeBox.length >= 100}
             onClick={() => {
               if (saved) removeSavedRecipe(recipe.id);
-              else saveRecipe(recipe, source);
+              else saveRecipe(snapshot, provenance.source);
               onNotice(
                 saved
                   ? `${recipe.name} removed from your recipe box.`
@@ -154,7 +186,7 @@ export function RecipeCard({
           <button
             className="text-button"
             onClick={() => {
-              discussRecipe(recipe, servings);
+              discussRecipe(snapshot, servings);
               if (!state.workspace.chatDraft)
                 setChatDraft("What do I need for this recipe?");
               requestAnimationFrame(() =>
