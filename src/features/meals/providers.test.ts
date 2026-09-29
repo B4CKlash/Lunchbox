@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createGateway } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { chatAboutMeals, suggestMeals } from "./providers";
@@ -25,18 +26,72 @@ test("demo mode never calls an injected model; explicit AI failures never return
   }
 });
 
-test("unconfigured runtime fails before a network call and configuration defaults are explicit", async () => {
+test("configuration defaults are explicit", () => {
   const names = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "LUNCHBOX_AI_MODE", "LUNCHBOX_AI_MODEL"] as const;
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
     for (const name of names) delete process.env[name];
     assert.equal(getAiMode(), "demo");
     assert.equal(getAiModel(), "google/gemini-2.5-flash");
-    await assert.rejects(generateStructured({ schema: z.object({ ok: z.boolean() }), prompt: "Test", instructions: "Test", operation: "chat" }), (error: unknown) => error instanceof AiRuntimeError && error.code === "configuration");
   } finally {
     for (const name of names) {
       if (previous[name] === undefined) delete process.env[name];
       else process.env[name] = previous[name];
+    }
+  }
+});
+
+test("runtime accepts request-context OIDC and categorizes development and production Gateway failures", async (t) => {
+  const names = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "NODE_ENV"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  const contextSymbol = Symbol.for("@vercel/request-context");
+  const globals = globalThis as typeof globalThis & { [key: symbol]: unknown };
+  const previousContext = globals[contextSymbol];
+  const previousProvider = globalThis.AI_SDK_DEFAULT_PROVIDER;
+  const token = `test.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.test`;
+  let calls = 0;
+  let failure: { status: number; type: string } | undefined;
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected network request in offline authentication test"); });
+  try {
+    for (const name of names) Reflect.deleteProperty(process.env, name);
+    Object.assign(process.env, { NODE_ENV: "test" });
+    globals[contextSymbol] = { get: () => ({ headers: { "x-vercel-oidc-token": token } }) };
+    globalThis.AI_SDK_DEFAULT_PROVIDER = createGateway({
+      fetch: async (_url, init) => {
+        calls += 1;
+        const headers = new Headers(init?.headers);
+        assert.equal(headers.get("authorization"), `Bearer ${token}`);
+        assert.equal(headers.get("ai-gateway-auth-method"), "oidc");
+        if (failure) return Response.json({ error: { message: "Private provider details", type: failure.type } }, { status: failure.status });
+        return Response.json({
+          content: [{ type: "text", text: '{"ok":true}' }],
+          finishReason: { unified: "stop" },
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        });
+      },
+    });
+    const options = { schema: z.object({ ok: z.boolean() }), prompt: "Test", instructions: "Test", operation: "chat" };
+    assert.deepEqual(await generateStructured(options), { ok: true });
+    failure = { status: 401, type: "authentication_error" };
+    await assert.rejects(generateStructured(options), (error: unknown) => error instanceof AiRuntimeError && error.code === "configuration" && !error.message.includes("Private"));
+    Object.assign(process.env, { NODE_ENV: "production" });
+    for (const expected of [
+      { status: 401, type: "authentication_error", code: "configuration" },
+      { status: 403, type: "forbidden", code: "configuration" },
+      { status: 402, type: "insufficient_credits", code: "credits" },
+    ]) {
+      failure = expected;
+      await assert.rejects(generateStructured(options), (error: unknown) => error instanceof AiRuntimeError && error.code === expected.code && !error.message.includes("Private"));
+    }
+    assert.equal(calls, 5);
+  } finally {
+    globalThis.AI_SDK_DEFAULT_PROVIDER = previousProvider;
+    if (previousContext === undefined) delete globals[contextSymbol];
+    else globals[contextSymbol] = previousContext;
+    for (const name of names) {
+      if (previous[name] === undefined) Reflect.deleteProperty(process.env, name);
+      else Reflect.set(process.env, name, previous[name]);
     }
   }
 });
