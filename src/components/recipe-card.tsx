@@ -88,7 +88,11 @@ export function RecipeCard({
   const planned = calendarMeals.filter(
     (meal) => meal.recipe.id === recipe.id,
   ).length;
-  const shortages = buildShoppingList(state.pantry, [{ id: "preview", recipe, servings }]);
+  const shortages = buildShoppingList(
+    state.pantry,
+    [{ id: "preview", recipe, servings }],
+    { includeRestock: false },
+  );
   const ingredientCount = new Set(recipe.ingredients.map(
     (ingredient) => JSON.stringify([ingredient.ingredientId, ingredient.unit]),
   )).size;

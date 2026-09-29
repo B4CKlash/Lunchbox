@@ -24,7 +24,7 @@ const favorite = (): Recipe => ({ ...candidate(), id: "favorite-original", ingre
 test("fake-model tool loop returns normalized missing ingredients and exact scaled groceries", async () => {
   const input = context();
   input.preferences.servings = 4;
-  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false }];
+  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false, tag: "special" }];
   const before = structuredClone(input);
   const model = new MockLanguageModelV4({ doGenerate: [callResult("evaluateRecipes", { recipes: [candidate()], servings: 4 }), textResult({ reply: "Here is an idea.", recipeRefs: ["proposal:1"], servings: 4 })] });
   const result = await liveChatAboutMeals(input, { model });
@@ -95,14 +95,14 @@ test("custom ingredients combine across recipes and units stay separate", () => 
   const recipes = evaluated.recipes.map((entry) => entry.recipe);
   assert.equal(recipes[0].ingredients[0].ingredientId, recipes[1].ingredients[0].ingredientId);
   const id = recipes[0].ingredients[0].ingredientId;
-  const shopping = buildShoppingList([{ id, name: "Aji amarillo paste", quantity: 100, unit: "ml", location: "Fridge", useSoon: false }], recipes.map((recipe, index) => ({ id: String(index), recipe, servings: 2 })));
+  const shopping = buildShoppingList([{ id, name: "Aji amarillo paste", quantity: 100, unit: "ml", location: "Fridge", useSoon: false, tag: "special" }], recipes.map((recipe, index) => ({ id: String(index), recipe, servings: 2 })));
   assert.equal(shopping[0].quantity, 40);
   assert.equal(shopping[0].unit, "g");
 });
 
 test("ambiguous legacy identities, invented IDs, and time violations cannot become proposals", () => {
   const input = context();
-  input.pantry = ["one", "two"].map((id) => ({ id, name: "Fresh mushrooms", quantity: 100, unit: "g", location: "Fridge", useSoon: false }));
+  input.pantry = ["one", "two"].map((id) => ({ id, name: "Fresh mushrooms", quantity: 100, unit: "g", location: "Fridge", useSoon: false, tag: "special" }));
   const tools = createMealTools(input);
   const ambiguous = tools.evaluateRecipes({ recipes: [{ ...candidate(), ingredients: [{ ingredientId: null, name: "Mushrooms", quantity: 200, unit: "g" }] }], servings: 2 });
   assert.equal(ambiguous.recipes.length, 0);
@@ -116,7 +116,7 @@ test("ambiguous legacy identities, invented IDs, and time violations cannot beco
 
 test("reviewPlan combines demand once and focused inspection respects selected servings", () => {
   const input = context();
-  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false }];
+  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false, tag: "special" }];
   input.meals = [{ id: "a", recipe: favorite(), servings: 4 }, { id: "b", recipe: favorite(), servings: 2 }];
   input.focusedRecipe = favorite();
   input.focusedServings = 4;
@@ -128,7 +128,7 @@ test("reviewPlan combines demand once and focused inspection respects selected s
 
 test("calendar drafts and committed plans share the math but keep grocery scope explicit", () => {
   const input = context();
-  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false }];
+  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false, tag: "special" }];
   input.meals = [{ id: "a", recipe: favorite(), servings: 4, date: "2026-10-05", slot: "dinner" }];
   input.planStatus = "draft";
   const before = structuredClone(input);
@@ -148,6 +148,27 @@ test("calendar drafts and committed plans share the math but keep grocery scope 
   assert.deepEqual(input, before);
 });
 
+test("individual recipe tools exclude staple restocks while full calendar review includes them", () => {
+  const input = context();
+  input.pantry = [
+    { id: "rice", name: "Jasmine rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false, tag: "staple", restockBelow: 500 },
+    { id: "salt", name: "Salt", quantity: 0, unit: "g", location: "Cupboard", useSoon: false, tag: "staple", restockBelow: 50 },
+  ];
+  input.focusedRecipe = favorite();
+  input.focusedServings = 2;
+  input.recipeBox = [{ recipe: favorite(), source: "import" }];
+  input.meals = [{ id: "planned", recipe: favorite(), servings: 2 }];
+  const tools = createMealTools(input);
+  assert.deepEqual(tools.findSavedRecipes({ query: "rice", servings: 2 })[0].shortages, []);
+  assert.deepEqual(tools.reviewPlan({ scope: "focused" }).shortages, []);
+  const evaluated = tools.evaluateRecipes({ recipes: [candidate()], servings: 2 });
+  assert.deepEqual(evaluated.recipes[0].shortages.map(({ ingredientId }) => ingredientId), ["mushrooms"]);
+  assert.deepEqual(tools.reviewPlan().shortages?.map(({ ingredientId, quantity, restock }) => ({ ingredientId, quantity, restock })), [
+    { ingredientId: "rice", quantity: 300, restock: true },
+    { ingredientId: "salt", quantity: 50, restock: true },
+  ]);
+});
+
 test("model IDs cannot override a contradictory physical form or ambiguous name", () => {
   for (const ingredient of [
     { ingredientId: "rice", name: "Cooked rice", quantity: 150, unit: "g" as const },
@@ -160,7 +181,7 @@ test("model IDs cannot override a contradictory physical form or ambiguous name"
     assert.equal(tools.proposals.size, 0);
   }
   const input = context();
-  input.pantry = ["mushrooms-one", "mushrooms-two"].map((id) => ({ id, name: "Fresh mushrooms", quantity: 100, unit: "g", location: "Fridge", useSoon: false }));
+  input.pantry = ["mushrooms-one", "mushrooms-two"].map((id) => ({ id, name: "Fresh mushrooms", quantity: 100, unit: "g", location: "Fridge", useSoon: false, tag: "special" }));
   const tools = createMealTools(input);
   const result = tools.evaluateRecipes({ recipes: [{ ...candidate(), ingredients: [{ ingredientId: "mushrooms-one", name: "Mushrooms", quantity: 100, unit: "g" }] }], servings: 2 });
   assert.equal(result.recipes.length, 0);
