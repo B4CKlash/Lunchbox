@@ -40,7 +40,6 @@ export function ShoppingPanel() {
         </Link>
       </header>
 
-      {!state.meals.length && !shopping.length ? (
       {state.workspace.calendar.draft !== null ? (
         <p className="status-message" role="status">
           You have a calendar draft. This list includes only committed meals.{" "}
