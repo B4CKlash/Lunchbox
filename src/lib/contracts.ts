@@ -2,13 +2,16 @@ import { z } from "zod";
 
 // Integration-owned public contracts. Coordinate changes before editing these.
 export const unitSchema = z.enum(["g", "ml", "each"]);
+export const pantryTagSchema = z.enum(["staple", "seasonal", "special"]);
 export const pantryItemSchema = z.object({
   id: z.string().min(1).max(80),
   name: z.string().trim().min(1).max(80),
   quantity: z.number().finite().min(0).max(100000),
+  restockBelow: z.number().finite().min(0).max(100000).optional(),
   unit: unitSchema,
   location: z.enum(["Fridge", "Freezer", "Cupboard", "Garden"]),
   useSoon: z.boolean(),
+  tag: pantryTagSchema.default("special"),
 });
 export const preferencesSchema = z.object({
   servings: z.number().int().min(1).max(12),
@@ -51,6 +54,7 @@ export const suggestMealsResponseSchema = z.object({
 });
 
 export type Unit = z.infer<typeof unitSchema>;
+export type PantryTag = z.infer<typeof pantryTagSchema>;
 export type PantryItem = z.infer<typeof pantryItemSchema>;
 export type Preferences = z.infer<typeof preferencesSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
@@ -65,4 +69,5 @@ export type ShoppingItem = {
   required: number;
   available: number;
   quantity: number;
+  restock?: boolean;
 };

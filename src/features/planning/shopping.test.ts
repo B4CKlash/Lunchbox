@@ -10,9 +10,11 @@ const pantryItem = (
   id: "rice",
   name: "Jasmine rice",
   quantity,
+  restockBelow: 0,
   unit,
   location: "Cupboard",
   useSoon: false,
+  tag: "special",
 });
 const recipe = (quantity: number, unit: PantryItem["unit"] = "g"): Recipe => ({
   id: "rice-meal",
@@ -111,5 +113,12 @@ test("rounds fractional quantities without floating-point residue", () => {
   assert.deepEqual(
     buildShoppingList([pantryItem(0.3)], [meal("one", 0.1), meal("two", 0.2)]),
     [],
+  );
+});
+
+test("restocks low staple quantities to their threshold, combining recipe demand", () => {
+  assert.deepEqual(
+    buildShoppingList([{ ...pantryItem(40), tag: "staple", restockBelow: 100 }], [meal("one", 30)]),
+    [{ ingredientId: "rice", name: "Jasmine rice", unit: "g", required: 100, available: 40, quantity: 60, restock: true }],
   );
 });

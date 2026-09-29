@@ -29,7 +29,7 @@ export function ShoppingPanel() {
         </Link>
       </header>
 
-      {!state.meals.length ? (
+      {!state.meals.length && !shopping.length ? (
         <section className="card empty-state spacious">
           <span className="empty-symbol">
             <ShoppingBasket size={30} aria-hidden="true" />
@@ -60,7 +60,9 @@ export function ShoppingPanel() {
               <ShoppingBasket size={24} aria-hidden="true" />
             </div>
             <p className="muted shopping-intro">
-              Matching ingredients are combined across your plan.
+              {state.meals.length
+                ? "Matching ingredients are combined across your plan."
+                : "Staples below your restock level."}
             </p>
             {shopping.length ? (
               <ul className="shopping-list">
@@ -75,12 +77,13 @@ export function ShoppingPanel() {
                     <div>
                       <h3>{item.name}</h3>
                       <p>
-                        {amount(item.required, item.unit)} needed ·{" "}
-                        {amount(item.available, item.unit)} on hand
+                        {item.restock && item.quantity === 0
+                          ? "Out of stock · Pantry staple"
+                          : `${amount(item.required, item.unit)} needed · ${amount(item.available, item.unit)} on hand`}
                       </p>
                     </div>
                     <strong className="shopping-amount">
-                      {amount(item.quantity, item.unit)}
+                      {item.restock && item.quantity === 0 ? "Restock" : amount(item.quantity, item.unit)}
                     </strong>
                   </li>
                 ))}

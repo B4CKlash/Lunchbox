@@ -42,6 +42,34 @@ export function buildShoppingList(
     }
   }
 
+  const stapleThresholds = new Map<string, { item: PantryItem; threshold: number }>();
+  for (const item of pantry) {
+    if (item.tag !== "staple") continue;
+    const key = keyFor(item.id, item.unit);
+    const threshold = item.restockBelow ?? 0;
+    const previous = stapleThresholds.get(key);
+    if (!previous || threshold > previous.threshold)
+      stapleThresholds.set(key, { item, threshold });
+  }
+  for (const [key, { item, threshold }] of stapleThresholds) {
+    const available = stock.get(key) ?? 0;
+    if (available >= threshold) continue;
+    const existing = demand.get(key);
+    if (existing) {
+      existing.restock = true;
+      existing.required = Math.max(existing.required, threshold);
+    }
+    else demand.set(key, {
+      ingredientId: item.id,
+      name: item.name,
+      unit: item.unit,
+      required: threshold,
+      available,
+      quantity: Math.max(0, threshold - available),
+      restock: true,
+    });
+  }
+
   return [...demand.values()]
     .map((item) => ({
       ...item,
@@ -49,5 +77,5 @@ export function buildShoppingList(
       available: round(item.available),
       quantity: round(Math.max(0, item.required - item.available)),
     }))
-    .filter((item) => item.quantity > 0);
+    .filter((item) => item.quantity > 0 || item.restock);
 }

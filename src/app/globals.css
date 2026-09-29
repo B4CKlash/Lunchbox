@@ -650,6 +650,24 @@ a.button:hover {
 .pantry-table strong {
   font-weight: 500;
 }
+.pantry-tag {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf1e8;
+  color: #536049;
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.pantry-tag.tag-staple {
+  background: #e5f0df;
+  color: #315b2f;
+}
+.pantry-tag.tag-seasonal {
+  background: #fff0dc;
+  color: #865722;
+}
 .quantity {
   font-variant-numeric: tabular-nums;
 }
@@ -700,6 +718,70 @@ a.button:hover {
 }
 .ingredient-editor {
   margin-bottom: 23px;
+}
+.pantry-import {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 14px;
+}
+.pantry-import h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 7px;
+  font-size: 16px;
+}
+.pantry-import > div > p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pantry-import textarea {
+  display: block;
+  width: 100%;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #ccd6c4;
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+.import-defaults,
+.import-review-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.receipt-title {
+  margin: 22px 0 4px;
+  font-size: 14px;
+}
+.import-review {
+  margin-bottom: 23px;
+}
+.import-review-row {
+  grid-template-columns: minmax(150px, 2fr) repeat(3, minmax(90px, 1fr)) auto auto;
+  align-items: end;
+  padding: 12px 0;
+  border-bottom: 1px solid #e5e9df;
+}
+.import-review-row .checkbox-label {
+  padding-bottom: 12px;
+}
+.camera-button {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.camera-button input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 .ingredient-fields {
   display: grid;
@@ -1378,6 +1460,13 @@ a.button:hover {
   }
 }
 @media (max-width: 700px) {
+  .pantry-import {
+    grid-template-columns: 1fr;
+  }
+  .import-defaults,
+  .import-review-row {
+    grid-template-columns: 1fr 1fr;
+  }
   .app-shell {
     display: block;
   }
