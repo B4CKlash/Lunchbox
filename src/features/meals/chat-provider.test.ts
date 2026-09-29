@@ -84,6 +84,7 @@ test("plan review scales meals and subtracts combined pantry stock only once", a
       unit: "g",
       location: "Cupboard",
       useSoon: false,
+      tag: "special",
     },
   ];
   request.meals = [
@@ -112,6 +113,7 @@ test("focused recipe gaps match ingredient ID and unit and scale current serving
       unit: "ml",
       location: "Cupboard",
       useSoon: false,
+      tag: "special",
     },
     {
       id: "beans",
@@ -120,6 +122,7 @@ test("focused recipe gaps match ingredient ID and unit and scale current serving
       unit: "g",
       location: "Cupboard",
       useSoon: false,
+      tag: "special",
     },
     {
       id: "rice",
@@ -128,6 +131,7 @@ test("focused recipe gaps match ingredient ID and unit and scale current serving
       unit: "g",
       location: "Cupboard",
       useSoon: false,
+      tag: "special",
     },
   ];
   const result = await chatAboutMeals(request);

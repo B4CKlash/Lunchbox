@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
-import { pantryItemSchema, type PantryItem, type PantryTag } from "@/lib/contracts";
 import {
   inferPantryCategory,
   pantryCategories,
@@ -14,6 +13,7 @@ import {
   pantryItemSchema,
   type PantryCategory,
   type PantryItem,
+  type PantryTag,
 } from "@/lib/contracts";
 
 const locations = ["Fridge", "Freezer", "Cupboard", "Garden"] as const;
@@ -334,6 +334,9 @@ export function PantryPanel() {
                   <option value="staple">Staple</option>
                   <option value="seasonal">Seasonal</option>
                   <option value="special">Special</option>
+                </select>
+              </label>
+              <label className="field">
                 Food group
                 <select
                   name="category"
