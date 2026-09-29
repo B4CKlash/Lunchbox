@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rememberRecipeNames } from "./suggestion-history";
+import type { PantryItem } from "@/lib/contracts";
+import { pendingPantryIngredients, rememberRecipeNames } from "./suggestion-history";
 
 test("successful suggestions retain previous dishes for later generation requests", () => {
   const previous = ["Lentil soup", "Rice bowl"];
@@ -10,6 +11,19 @@ test("successful suggestions retain previous dishes for later generation request
   ]);
   assert.deepEqual(previous, ["Lentil soup", "Rice bowl"]);
   assert.deepEqual(rememberRecipeNames(previous, []), previous);
+});
+
+test("new and restocked pantry items get priority, with units and depleted stock respected", () => {
+  const apple: PantryItem = { id: "apples", name: "Apple", quantity: 1, unit: "each", location: "Fridge", useSoon: false, tag: "special" };
+  const rice: PantryItem = { id: "rice", name: "Rice", quantity: 100, unit: "g", location: "Cupboard", useSoon: false, tag: "staple" };
+  const appleRef = { ingredientId: "apples", name: "Apple", unit: "each" as const };
+  assert.deepEqual(pendingPantryIngredients([rice], [rice, apple], []), [appleRef]);
+  assert.deepEqual(pendingPantryIngredients([apple], [{ ...apple, quantity: 2 }], []), [appleRef]);
+  assert.deepEqual(pendingPantryIngredients([apple], [{ ...apple, quantity: 0 }], [appleRef]), []);
+  assert.deepEqual(pendingPantryIngredients([apple], [], [appleRef]), []);
+  assert.deepEqual(pendingPantryIngredients([apple], [{ ...apple, unit: "g", quantity: 100 }], [appleRef]), [{ ...appleRef, unit: "g" }]);
+  // Moving stock between rows with the same canonical pair is not a restock.
+  assert.deepEqual(pendingPantryIngredients([rice, { ...rice, quantity: 50 }], [{ ...rice, quantity: 150 }], []), []);
 });
 
 test("repeat names count once and renew their place in the bounded history", () => {

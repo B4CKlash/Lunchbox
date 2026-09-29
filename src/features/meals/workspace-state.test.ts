@@ -32,6 +32,31 @@ function message(id: string): ChatMessage {
   };
 }
 
+test("adding an apple prioritizes it until current suggestions complete and remembers dishes for reload", () => {
+  const original = createSampleHousehold();
+  const apple = { id: "apples", name: "Apple", quantity: 1, unit: "each" as const, location: "Fridge" as const, useSoon: false, tag: "special" as const };
+  const updated = applyHouseholdAction(original, { type: "setPantry", pantry: [...original.pantry, apple] });
+  assert.deepEqual(updated.workspace.suggestions.pendingIngredients, [{ ingredientId: "apples", name: "Apple", unit: "each" }]);
+  const input = { pantry: updated.pantry, preferences: updated.preferences };
+  const done = applyHouseholdAction(updated, { type: "recordSuggestions", input, recipes: [recipe()] });
+  assert.deepEqual(done.workspace.suggestions, { recentRecipeNames: ["Rice bowl"], pendingIngredients: [] });
+  assert.deepEqual(done.pantry, updated.pantry);
+  assert.deepEqual(done.workspace.recipeBox, []);
+  assert.deepEqual(done.meals, []);
+  assert.deepEqual(original.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [] });
+});
+
+test("empty or stale suggestion responses cannot consume a newer pantry or preference edit", () => {
+  const original = createSampleHousehold();
+  const input = { pantry: original.pantry, preferences: original.preferences };
+  const restocked = applyHouseholdAction(original, { type: "setPantry", pantry: original.pantry.map((item, index) => index === 0 ? { ...item, quantity: item.quantity + 1 } : item) });
+  assert.deepEqual(applyHouseholdAction(restocked, { type: "recordSuggestions", input, recipes: [recipe()] }), restocked);
+  const nextInput = { pantry: restocked.pantry, preferences: restocked.preferences };
+  assert.deepEqual(applyHouseholdAction(restocked, { type: "recordSuggestions", input: nextInput, recipes: [] }), restocked);
+  const changedPreferences = applyHouseholdAction(restocked, { type: "setPreferences", preferences: { ...restocked.preferences, servings: 4 } });
+  assert.deepEqual(applyHouseholdAction(changedPreferences, { type: "recordSuggestions", input: nextInput, recipes: [recipe()] }), changedPreferences);
+});
+
 test("switching entry points retains the draft, saved recipes, focus, and one plan", () => {
   const original = createSampleHousehold();
   const actions: HouseholdAction[] = [

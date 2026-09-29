@@ -81,6 +81,7 @@ test("legacy v1 saves gain a blank workspace without losing pantry, preferences,
     chatDraft: "",
     focusedRecipe: null,
     focusedServings: null,
+    suggestions: { recentRecipeNames: [], pendingIngredients: [] },
     calendar: {
       startDate: null,
       days: 7,
@@ -90,6 +91,26 @@ test("legacy v1 saves gain a blank workspace without losing pantry, preferences,
     },
   });
   assert.equal(HOUSEHOLD_STORAGE_KEY, "lunchbox.household.v1");
+});
+
+test("recipe variety and pending pantry additions survive reload without changing the household key", () => {
+  const state = createSampleHousehold();
+  state.workspace.suggestions = {
+    recentRecipeNames: ["Apple and lentil salad", "Pepper rice"],
+    pendingIngredients: [{ ingredientId: "apples", name: "Apple", unit: "each" }],
+  };
+  let stored = "";
+  saveHousehold({ setItem: (key, value) => {
+    assert.equal(key, HOUSEHOLD_STORAGE_KEY);
+    stored = value;
+  } }, state);
+  assert.deepEqual(loadHousehold({ getItem: () => stored }), state);
+  const legacy = { ...state, workspace: { ...state.workspace, suggestions: undefined } };
+  const upgraded = loadHousehold({ getItem: () => JSON.stringify(legacy) });
+  assert.ok(upgraded);
+  assert.deepEqual(upgraded.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [] });
+  assert.deepEqual(upgraded.pantry, state.pantry);
+  assert.deepEqual(upgraded.workspace.recipeBox, state.workspace.recipeBox);
 });
 
 test("missing, corrupt, incompatible, and invalid saves fall back safely", () => {
