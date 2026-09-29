@@ -263,5 +263,9 @@ test("import API validates input, forwards cancellation, and exposes only safe e
   const limited = await limit(request({ kind: "text", text }));
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get("retry-after"), "30");
+  const timedLimit = createImportHandler(async () => { throw new AiRuntimeError("rate_limit", { retryAfterSeconds: 180 }); });
+  const timedLimited = await timedLimit(request({ kind: "text", text }));
+  assert.equal(timedLimited.status, 429);
+  assert.equal(timedLimited.headers.get("retry-after"), "180");
   assert.equal((await handler(request({ text: "x".repeat(1_000_001) }))).status, 413);
 });

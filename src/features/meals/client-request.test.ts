@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mealFailureMessage, mealRequestError } from "./client-request";
+import { mealFailureMessage, mealRequestError, mealRequestFailure, mealRetryAt } from "./client-request";
+
+test("Retry-After supports seconds and HTTP dates without shortening long waits", () => {
+  const now = Date.parse("2026-09-29T12:00:00Z");
+  assert.equal(mealRetryAt("120", now), now + 120_000);
+  assert.equal(mealRetryAt("Tue, 29 Sep 2026 12:05:00 GMT", now), now + 300_000);
+  assert.equal(mealRetryAt("Tue, 29 Sep 2026 11:00:00 GMT", now), now);
+  for (const header of [null, "", "-1", "+5", "not a date", "999999999999999999999"])
+    assert.equal(mealRetryAt(header, now), now + 30_000);
+});
+
+test("busy failures retain HTTP status and retry deadline without exposing firewall HTML", async () => {
+  const before = Date.now();
+  const failure = await mealRequestFailure(new Response("<html>private</html>", { status: 429, headers: { "Retry-After": "120" } }));
+  assert.equal(failure.status, 429);
+  assert.ok(failure.retryAt! >= before + 120_000);
+  assert.doesNotMatch(mealFailureMessage(failure), /<html>|private/);
+});
 
 test("public API error explains unavailable AI credits", async () => {
   const response = Response.json({ error: "AI credits are unavailable. Your recipe is still here.", code: "credits_unavailable" }, { status: 503 });

@@ -39,6 +39,7 @@ type HouseholdContextValue = {
   setPantry: (pantry: PantryItem[]) => void;
   setPreferences: (preferences: Preferences) => void;
   recordSuggestions: (input: SuggestMealsRequest, recipes: Recipe[]) => void;
+  deferAiRequests: (until: number) => void;
   addMeal: (recipe: Recipe, servings: number) => void;
   removeMeal: (id: string) => void;
   setMealServings: (id: string, servings: number) => void;
@@ -125,6 +126,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
           update({ type: "setPreferences", preferences }),
         recordSuggestions: (input, recipes) =>
           update({ type: "recordSuggestions", input, recipes }),
+        deferAiRequests: (until) => update({ type: "deferAiRequests", until }),
         addMeal: (recipe, servings) => {
           const id = crypto.randomUUID();
           update({

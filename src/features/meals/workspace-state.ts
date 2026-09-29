@@ -19,6 +19,7 @@ export type HouseholdAction =
   | { type: "setPantry"; pantry: PantryItem[] }
   | { type: "setPreferences"; preferences: Preferences }
   | { type: "recordSuggestions"; input: SuggestMealsRequest; recipes: Recipe[] }
+  | { type: "deferAiRequests"; until: number }
   | {
       type: "addMeal";
       id: string;
@@ -94,6 +95,15 @@ function nextHousehold(
       };
     case "setPreferences":
       return { ...current, preferences: action.preferences };
+    case "deferAiRequests":
+      if (!Number.isSafeInteger(action.until) || action.until < 0) return current;
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          aiCooldownUntil: Math.max(current.workspace.aiCooldownUntil, action.until),
+        },
+      };
     case "recordSuggestions": {
       // A late response must not consume newer pantry edits or preference changes.
       if (!action.recipes.length || JSON.stringify(action.input.pantry) !== JSON.stringify(current.pantry) || JSON.stringify(action.input.preferences) !== JSON.stringify(current.preferences))

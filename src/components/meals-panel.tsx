@@ -21,6 +21,7 @@ import { selectedPreferenceLabels } from "@/features/meals/recommendation-option
 import { RecipeImportPanel } from "@/components/recipe-import-panel";
 import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
 import { useMealSuggestions } from "@/features/meals/use-meal-suggestions";
+import { formatMealRetryTime } from "@/features/meals/client-request";
 import { buildShoppingList } from "@/features/planning/shopping";
 import { preferencesSchema, type Preferences } from "@/lib/contracts";
 
@@ -31,7 +32,7 @@ const modes = [
 ] as const;
 
 export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
-  const { state, setPreferences, setWorkspaceMode, householdResetVersion, recordSuggestions } = useHousehold();
+  const { state, setPreferences, setWorkspaceMode, householdResetVersion, recordSuggestions, deferAiRequests } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
   );
@@ -41,14 +42,21 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
   const [importSeed, setImportSeed] = useState({ url: "", resetVersion: householdResetVersion, request: 0 });
   const importUrl = importSeed.resetVersion === householdResetVersion ? importSeed.url : "";
   const kitchen = { pantry: state.pantry, preferences: state.preferences };
-  const { loading, current, refresh, cancel } = useMealSuggestions(
+  const { loading, current, previous, waiting, cooldownActive, refresh, cancel } = useMealSuggestions(
     JSON.stringify({
       ...kitchen,
       knownIngredients: knownIngredientsFromHousehold(state),
       preferredIngredients: state.workspace.suggestions.pendingIngredients,
     }),
     JSON.stringify({ ...kitchen, householdResetVersion }),
-    { recentRecipeNames: state.workspace.suggestions.recentRecipeNames, recordSuggestions },
+    {
+      enabled: state.workspace.mode !== "chat" && !(state.workspace.mode === "suggestions" && collection === "saved") && !importOpen,
+      resetVersion: householdResetVersion,
+      aiCooldownUntil: state.workspace.aiCooldownUntil,
+      deferAiRequests,
+      recentRecipeNames: state.workspace.suggestions.recentRecipeNames,
+      recordSuggestions,
+    },
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
   const mode = state.workspace.mode;
@@ -248,7 +256,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               />{" "}
               Prioritize use-soon ingredients
             </label>
-            <button className="button" type="submit" disabled={loading}>
+            <button className="button" type="submit" disabled={loading || cooldownActive}>
               {loading ? (
                 <LoaderCircle
                   size={16}
@@ -258,7 +266,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               ) : (
                 <RefreshCw size={16} aria-hidden="true" />
               )}
-              {loading
+              {waiting ? "Waiting for AI…" : loading
                 ? aiMode === "ai" ? "Generating recipes…" : "Finding ideas…"
                 : aiMode === "ai" ? "Generate more" : "Refresh sample ideas"}
             </button>
@@ -352,9 +360,13 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
           ) : loading ? (
             <div className="card empty-state">
               <LoaderCircle className="spinning" size={28} aria-hidden="true" />
-              <h3>Looking in your kitchen…</h3>
+              <h3>{waiting ? "Giving the kitchen a moment…" : "Looking in your kitchen…"}</h3>
               <p role="status">
-                {aiMode === "ai"
+                {waiting
+                  ? waiting.retrying
+                    ? `AI is busy. We’ll retry once at ${formatMealRetryTime(waiting.until)}.`
+                    : `AI is busy. Your latest preferences will be sent at ${formatMealRetryTime(waiting.until)}.`
+                  : aiMode === "ai"
                   ? "Generating recipes from your current pantry and preferences."
                   : "Finding sample meals that fit your preferences."}
               </p>
@@ -366,8 +378,11 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               <p className="error-message" role="alert">
                 {current.error}
               </p>
-              <button className="button" onClick={refresh}>
-                Try again
+              {cooldownActive ? (
+                <p role="status">Try again after {formatMealRetryTime(state.workspace.aiCooldownUntil)}.</p>
+              ) : null}
+              <button className="button" onClick={refresh} disabled={cooldownActive}>
+                {cooldownActive ? "Please wait before retrying" : "Try again"}
               </button>
             </div>
           ) : current?.response?.recipes.length ? (
@@ -404,6 +419,28 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               ) : null}
             </div>
           )}
+          {collection === "suggested" && previous && (loading || current?.error) ? (
+            <div>
+              <div className="section-heading">
+                <div>
+                  <h3>Previous ideas</h3>
+                  <p className="muted">These recipes were generated earlier and may not match your latest preferences.</p>
+                </div>
+              </div>
+              <div className="recipe-grid">
+                {previous.response.recipes.map((recipe, index) => (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    source={previous.response.source}
+                    servings={previous.servings}
+                    index={index}
+                    onNotice={setMessage}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
         </section>
       </div>
       <div hidden={mode !== "chat"}>

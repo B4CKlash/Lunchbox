@@ -24,8 +24,8 @@ export function createImportHandler(provider: typeof importRecipe = importRecipe
           ? "This recipe request is too large. Paste a shorter recipe." : "Send recipe text or a valid recipe link." }, { status: reason.status, headers });
       if (reason instanceof ImportSourceError)
         return Response.json({ code: reason.code, error: reason.message }, { status: reason.status, headers });
-      const { status, code, error } = publicAiError(reason);
-      return Response.json({ code, error }, { status, headers: { ...headers, ...(code === "rate_limit" ? { "Retry-After": "30" } : {}) } });
+      const { status, code, error, retryAfterSeconds } = publicAiError(reason);
+      return Response.json({ code, error }, { status, headers: { ...headers, ...(code === "rate_limit" ? { "Retry-After": String(retryAfterSeconds ?? 30) } : {}) } });
     }
   };
 }
