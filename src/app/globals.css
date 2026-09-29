@@ -609,6 +609,7 @@ a.button:hover {
   font-size: 9px;
 }
 .table-scroll {
+  position: relative;
   overflow-x: auto;
 }
 .pantry-table {
