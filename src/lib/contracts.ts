@@ -74,6 +74,13 @@ export const cookingStyleSchema = z.enum([
   "big-batch",
   "meal-prep",
 ]);
+export const preferenceNotesSchema = z.object({
+  goals: z.string().trim().max(500).optional(),
+  dietary: z.string().trim().max(500).optional(),
+  nutrition: z.string().trim().max(500).optional(),
+  taste: z.string().trim().max(500).optional(),
+  cooking: z.string().trim().max(500).optional(),
+});
 export const preferencesSchema = z.object({
   servings: z.number().int().min(1).max(12),
   maxMinutes: z.number().int().min(10).max(120),
@@ -90,6 +97,7 @@ export const preferencesSchema = z.object({
   flavorPreferences: z.array(flavorPreferenceSchema).max(6).optional(),
   cuisinePreferences: z.array(cuisinePreferenceSchema).max(7).optional(),
   cookingStyles: z.array(cookingStyleSchema).max(6).optional(),
+  customNotes: preferenceNotesSchema.optional(),
 });
 export const recipeIngredientSchema = z.object({
   ingredientId: z.string().min(1).max(80),
@@ -271,6 +279,7 @@ export type NutritionFocus = z.infer<typeof nutritionFocusSchema>;
 export type FlavorPreference = z.infer<typeof flavorPreferenceSchema>;
 export type CuisinePreference = z.infer<typeof cuisinePreferenceSchema>;
 export type CookingStyle = z.infer<typeof cookingStyleSchema>;
+export type PreferenceNotes = z.infer<typeof preferenceNotesSchema>;
 export type PantryItem = z.infer<typeof pantryItemSchema>;
 export type Preferences = z.infer<typeof preferencesSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;

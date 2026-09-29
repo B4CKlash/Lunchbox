@@ -122,6 +122,7 @@ export function createSampleHousehold(): HouseholdState {
       flavorPreferences: [],
       cuisinePreferences: [],
       cookingStyles: [],
+      customNotes: {},
     },
     meals: [],
     workspace: recipeWorkspaceSchema.parse({}),

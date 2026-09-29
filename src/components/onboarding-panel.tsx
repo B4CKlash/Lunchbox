@@ -1,14 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
+  CookingPot,
   Dumbbell,
   HeartPulse,
   Salad,
+  SlidersHorizontal,
   Soup,
   Sparkles,
 } from "lucide-react";
@@ -34,6 +37,7 @@ import {
   type FlavorPreference,
   type MealGoal,
   type NutritionFocus,
+  type PreferenceNotes,
 } from "@/lib/contracts";
 
 const steps = [
@@ -50,9 +54,23 @@ function toggleValue<T extends string>(values: T[], value: T): T[] {
     : [...values, value];
 }
 
+function labelsFor<T extends string>(
+  values: T[],
+  options: ReadonlyArray<{ value: T; title: string }>,
+) {
+  return values.flatMap((value) => {
+    const option = options.find((candidate) => candidate.value === value);
+    return option ? [option.title] : [];
+  });
+}
+
 export function OnboardingPanel() {
   const router = useRouter();
   const { state, setPreferences } = useHousehold();
+  const [editing, setEditing] = useState(
+    !state.preferences.onboardingComplete,
+  );
+  const [isCooking, setIsCooking] = useState(false);
   const [step, setStep] = useState(0);
   const [goals, setGoals] = useState<MealGoal[]>(state.preferences.goals ?? []);
   const [dietaryNeeds, setDietaryNeeds] = useState<DietaryNeed[]>(() =>
@@ -77,7 +95,57 @@ export function OnboardingPanel() {
   const [cookingStyles, setCookingStyles] = useState<CookingStyle[]>(
     state.preferences.cookingStyles ?? [],
   );
+  const [customNotes, setCustomNotes] = useState<PreferenceNotes>(
+    state.preferences.customNotes ?? {},
+  );
   const [error, setError] = useState("");
+
+  function updateNote(key: keyof PreferenceNotes, value: string) {
+    setCustomNotes((current) => ({ ...current, [key]: value }));
+  }
+
+  function editStep(nextStep: number) {
+    setStep(nextStep);
+    setError("");
+    setEditing(true);
+  }
+
+  function resetPreferences() {
+    if (
+      !window.confirm(
+        "Clear all recommendation preferences and start the quiz again? Your pantry and meal plan will stay as they are.",
+      )
+    )
+      return;
+    const cleared = preferencesSchema.parse({
+      ...state.preferences,
+      prioritizeUseSoon: false,
+      onboardingComplete: false,
+      goals: [],
+      dietaryNeeds: [],
+      allergies: [],
+      dislikedIngredients: [],
+      nutritionFocus: [],
+      flavorPreferences: [],
+      cuisinePreferences: [],
+      cookingStyles: [],
+      customNotes: {},
+    });
+    setPreferences(cleared);
+    setGoals([]);
+    setDietaryNeeds([]);
+    setDietaryNotice("");
+    setAllergies("");
+    setDislikedIngredients("");
+    setNutritionFocus([]);
+    setFlavorPreferences([]);
+    setCuisinePreferences([]);
+    setCookingStyles([]);
+    setCustomNotes({});
+    setStep(0);
+    setError("");
+    setEditing(true);
+  }
 
   function next() {
     if (step === 0 && goals.length === 0) {
@@ -131,13 +199,15 @@ export function OnboardingPanel() {
       flavorPreferences,
       cuisinePreferences,
       cookingStyles,
+      customNotes,
     });
     if (!result.success) {
       setError("Check your allergy list and try again.");
       return;
     }
     setPreferences(result.data);
-    router.push("/meals");
+    setIsCooking(true);
+    window.setTimeout(() => router.push("/meals"), 1800);
   }
 
   function selectDietaryNeed(value: DietaryNeed) {
@@ -156,6 +226,138 @@ export function OnboardingPanel() {
     }
   }
 
+  if (isCooking) {
+    return (
+      <div className="preference-cooking" role="status" aria-live="polite">
+        <div className="cooking-scene" aria-hidden="true">
+          <span className="steam steam-one" />
+          <span className="steam steam-two" />
+          <span className="steam steam-three" />
+          <span className="cooking-pot">
+            <CookingPot size={54} />
+          </span>
+          <span className="cooking-spark spark-one">✦</span>
+          <span className="cooking-spark spark-two">●</span>
+        </div>
+        <p className="eyebrow">YOUR KITCHEN IS LISTENING</p>
+        <h1>Cooking up ideas just for you…</h1>
+        <p>
+          Mixing your goals, favorite flavors, pantry, and preferred pace.
+        </p>
+      </div>
+    );
+  }
+
+  if (!editing && state.preferences.onboardingComplete) {
+    const summarySections = [
+      {
+        title: "Goals",
+        step: 0,
+        values: labelsFor(goals, goalOptions),
+        note: customNotes.goals,
+      },
+      {
+        title: "How you eat",
+        step: 1,
+        values: labelsFor(dietaryNeeds, dietaryOptions),
+        note: customNotes.dietary,
+      },
+      {
+        title: "Nutrition focus",
+        step: 2,
+        values: labelsFor(nutritionFocus, nutritionFocusOptions),
+        note: customNotes.nutrition,
+      },
+      {
+        title: "Taste",
+        step: 3,
+        values: [
+          ...labelsFor(flavorPreferences, flavorOptions),
+          ...labelsFor(cuisinePreferences, cuisineOptions),
+        ],
+        note: customNotes.taste,
+      },
+      {
+        title: "Cooking style",
+        step: 4,
+        values: labelsFor(cookingStyles, cookingStyleOptions),
+        note: customNotes.cooking,
+      },
+    ];
+    return (
+      <div className="onboarding-wrap preference-summary-wrap">
+        <header className="summary-hero">
+          <div>
+            <p className="eyebrow">YOUR RECOMMENDATION PROFILE</p>
+            <h1>Meals that feel more like you.</h1>
+            <p>
+              These preferences shape what LunchBox suggests. Come back anytime
+              to adjust them or add more detail.
+            </p>
+          </div>
+          <span className="onboarding-hero-icon" aria-hidden="true">
+            <SlidersHorizontal size={28} />
+          </span>
+        </header>
+
+        <div className="summary-grid">
+          {summarySections.map((section) => (
+            <section className="card preference-summary-card" key={section.title}>
+              <div className="summary-card-heading">
+                <h2>{section.title}</h2>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => editStep(section.step)}
+                >
+                  Change
+                </button>
+              </div>
+              <div className="summary-chips">
+                {section.values.length ? (
+                  section.values.map((value) => <span key={value}>{value}</span>)
+                ) : (
+                  <span className="empty-summary-chip">Nothing selected yet</span>
+                )}
+              </div>
+              {section.note ? <p className="summary-note">“{section.note}”</p> : null}
+            </section>
+          ))}
+          <section className="card preference-summary-card avoidance-summary">
+            <div className="summary-card-heading">
+              <h2>Leave out</h2>
+              <button type="button" className="text-button" onClick={() => editStep(1)}>
+                Change
+              </button>
+            </div>
+            <div className="avoidance-summary-row">
+              <strong>Allergies</strong>
+              <span>{state.preferences.allergies?.join(", ") || "None added"}</span>
+            </div>
+            <div className="avoidance-summary-row">
+              <strong>Dislikes</strong>
+              <span>
+                {state.preferences.dislikedIngredients?.join(", ") || "None added"}
+              </span>
+            </div>
+          </section>
+        </div>
+
+        <footer className="summary-actions">
+          <button type="button" className="text-button reset-profile-button" onClick={resetPreferences}>
+            Reset preferences
+          </button>
+          <button type="button" className="button secondary" onClick={() => editStep(0)}>
+            Add more detail
+          </button>
+          <Link className="button" href="/meals">
+            Go to Meals & Plan <ArrowRight size={16} />
+          </Link>
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="onboarding-wrap">
       <header className="onboarding-hero">
@@ -171,6 +373,15 @@ export function OnboardingPanel() {
           <Sparkles size={28} />
         </span>
       </header>
+
+      {state.preferences.onboardingComplete ? (
+        <div className="quiz-utility-row">
+          <span>Editing your saved recommendation profile</span>
+          <button type="button" className="text-button" onClick={resetPreferences}>
+            Reset preferences
+          </button>
+        </div>
+      ) : null}
 
       <ol className="onboarding-progress" aria-label="Setup progress">
         {steps.map((label, index) => (
@@ -207,6 +418,16 @@ export function OnboardingPanel() {
                 </button>
               ))}
             </div>
+            <label className="field open-response-field">
+              Anything else about your goals?
+              <textarea
+                value={customNotes.goals ?? ""}
+                onChange={(event) => updateNote("goals", event.target.value)}
+                placeholder="e.g. I’m training for an event or feeding a family on a budget"
+                maxLength={500}
+              />
+              <span>Optional · be as specific as you like.</span>
+            </label>
           </>
         ) : null}
 
@@ -289,6 +510,16 @@ export function OnboardingPanel() {
               <span>We’ll leave these out of recommendations too.</span>
             </label>
             </div>
+            <label className="field open-response-field">
+              Anything else about how you eat?
+              <textarea
+                value={customNotes.dietary ?? ""}
+                onChange={(event) => updateNote("dietary", event.target.value)}
+                placeholder="e.g. Cultural, religious, household, or ingredient-specific needs"
+                maxLength={500}
+              />
+              <span>Optional · this stays with your recommendation profile.</span>
+            </label>
           </>
         ) : null}
 
@@ -323,6 +554,16 @@ export function OnboardingPanel() {
               These preferences guide recipe ranking; they are not medical or
               nutritional advice.
             </p>
+            <label className="field open-response-field">
+              Any specific nutrition targets?
+              <textarea
+                value={customNotes.nutrition ?? ""}
+                onChange={(event) => updateNote("nutrition", event.target.value)}
+                placeholder="e.g. Keep meals under 500 calories or aim for 35g protein"
+                maxLength={500}
+              />
+              <span>Optional · exact targets depend on available recipe nutrition data.</span>
+            </label>
           </>
         ) : null}
 
@@ -359,6 +600,16 @@ export function OnboardingPanel() {
                 ))}
               </div>
             </div>
+            <label className="field open-response-field">
+              Anything else about your taste?
+              <textarea
+                value={customNotes.taste ?? ""}
+                onChange={(event) => updateNote("taste", event.target.value)}
+                placeholder="e.g. I love ginger and citrus, but I don’t like overly sweet sauces"
+                maxLength={500}
+              />
+              <span>Optional · add favorite dishes, cuisines, or flavor details.</span>
+            </label>
             <div className="preference-group">
               <div className="preference-group-heading">
                 <strong>Favorite cuisines</strong>
@@ -412,6 +663,16 @@ export function OnboardingPanel() {
                 </button>
               ))}
             </div>
+            <label className="field open-response-field">
+              Anything else about your cooking routine?
+              <textarea
+                value={customNotes.cooking ?? ""}
+                onChange={(event) => updateNote("cooking", event.target.value)}
+                placeholder="e.g. Air fryer recipes on weekdays; big batch cooking on Sunday"
+                maxLength={500}
+              />
+              <span>Optional · mention equipment, schedule, skill level, or cleanup needs.</span>
+            </label>
           </>
         ) : null}
 

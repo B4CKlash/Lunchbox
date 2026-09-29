@@ -360,8 +360,8 @@ function PantryContent() {
                 Restock staple below
                 <input name="restockBelow" type="number" min="0" max="100000" step="any" defaultValue={editing?.restockBelow ?? 0} />
               </label>
-            <label className="field">
-              Storage
+              <label className="field">
+                Storage
                 <select
                   name="location"
                   defaultValue={editing?.location ?? "Fridge"}
