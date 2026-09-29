@@ -195,6 +195,10 @@ export const chatMessageSchema = z.object({
   servings: z.number().int().min(1).max(12),
 });
 export const workspaceModeSchema = z.enum(["suggestions", "chat", "plan"]);
+export const suggestionMemorySchema = z.object({
+  recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
+  pendingIngredients: z.array(knownIngredientSchema).max(200).default([]),
+});
 export const recipeWorkspaceSchema = z.object({
   mode: workspaceModeSchema.default("suggestions"),
   recipeBox: z.array(savedRecipeSchema).max(100).default([]),
@@ -203,6 +207,7 @@ export const recipeWorkspaceSchema = z.object({
   focusedRecipe: recipeSchema.nullable().default(null),
   focusedServings: z.number().int().min(1).max(12).nullable().default(null),
   calendar: calendarWorkspaceSchema.prefault({}),
+  suggestions: suggestionMemorySchema.prefault({}),
 });
 export const householdStateSchema = z.object({
   version: z.literal(1),
@@ -216,8 +221,9 @@ export const suggestMealsRequestSchema = z.object({
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   knownIngredients: z.array(knownIngredientSchema).max(2000).optional(),
-  // Request-only variety context; never added to persisted household state.
+  // Bounded context from the existing household workspace.
   recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  preferredIngredients: z.array(knownIngredientSchema).max(200).optional(),
 });
 export const suggestMealsResponseSchema = z.object({
   source: recipeSourceSchema,

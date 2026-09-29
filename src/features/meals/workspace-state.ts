@@ -9,13 +9,16 @@ import {
   type Preferences,
   type Recipe,
   type RecipeSource,
+  type SuggestMealsRequest,
   type WorkspaceMode,
 } from "@/lib/contracts";
+import { pendingPantryIngredients, rememberRecipeNames } from "./suggestion-history";
 
 export type HouseholdAction =
   | { type: "replace"; state: HouseholdState }
   | { type: "setPantry"; pantry: PantryItem[] }
   | { type: "setPreferences"; preferences: Preferences }
+  | { type: "recordSuggestions"; input: SuggestMealsRequest; recipes: Recipe[] }
   | {
       type: "addMeal";
       id: string;
@@ -78,9 +81,34 @@ function nextHousehold(
     case "replace":
       return action.state;
     case "setPantry":
-      return { ...current, pantry: action.pantry };
+      return {
+        ...current,
+        pantry: action.pantry,
+        workspace: {
+          ...current.workspace,
+          suggestions: {
+            ...current.workspace.suggestions,
+            pendingIngredients: pendingPantryIngredients(current.pantry, action.pantry, current.workspace.suggestions.pendingIngredients),
+          },
+        },
+      };
     case "setPreferences":
       return { ...current, preferences: action.preferences };
+    case "recordSuggestions": {
+      // A late response must not consume newer pantry edits or preference changes.
+      if (!action.recipes.length || JSON.stringify(action.input.pantry) !== JSON.stringify(current.pantry) || JSON.stringify(action.input.preferences) !== JSON.stringify(current.preferences))
+        return current;
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          suggestions: {
+            recentRecipeNames: rememberRecipeNames(current.workspace.suggestions.recentRecipeNames, action.recipes),
+            pendingIngredients: [],
+          },
+        },
+      };
+    }
     case "addMeal":
       return withDraft([
         ...editableMeals,

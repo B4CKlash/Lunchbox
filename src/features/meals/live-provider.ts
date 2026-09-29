@@ -30,8 +30,18 @@ const outputSchema = z.object({
   recipeRefs: z.array(z.string()).max(3),
   servings: z.number().int().min(1).max(12),
 });
-type MealContext = ChatMealsRequest & { knownIngredients?: KnownIngredient[]; recentRecipeNames?: string[] };
+type MealContext = ChatMealsRequest & { knownIngredients?: KnownIngredient[]; recentRecipeNames?: string[]; preferredIngredients?: KnownIngredient[] };
 export type LiveProviderOptions = { signal?: AbortSignal; model?: LanguageModel };
+
+function preferredPantryItems(context: Pick<MealContext, "pantry" | "preferredIngredients">) {
+  const requested = new Set((context.preferredIngredients ?? []).map(({ ingredientId, unit }) => JSON.stringify([ingredientId, unit])));
+  // Names and availability come from the current pantry, not stale client hints.
+  return context.pantry.filter(({ id, unit, quantity }) => quantity > 0 && requested.has(JSON.stringify([id, unit])));
+}
+
+function usesPreferredIngredient(recipe: Recipe, preferred: MealContext["pantry"]) {
+  return recipe.ingredients.some(({ ingredientId, unit }) => preferred.some((item) => item.id === ingredientId && item.unit === unit));
+}
 
 function ingredientReferences(context: MealContext): KnownIngredient[] {
   const recipes = [
@@ -51,11 +61,13 @@ function ingredientReferences(context: MealContext): KnownIngredient[] {
 /** Read-only request-scoped tools. Only normalized snapshots can become response cards. */
 export function createMealTools(context: MealContext) {
   const known = ingredientReferences(context);
+  const preferred = preferredPantryItems(context);
   const proposals = new Map<string, { recipe: Recipe; servings: number }>();
   let evaluated = 0;
   let generated = false;
   const recipeNameKey = (name: string) => name.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ");
   const excludedNames = new Set((context.recentRecipeNames ?? []).map(recipeNameKey));
+  const hasPreferredRecipe = () => [...proposals.values()].some(({ recipe }) => usesPreferredIngredient(recipe, preferred));
 
   function findSavedRecipes({ query, servings = context.preferences.servings }: { query: string; servings?: number }) {
     const words = query.toLocaleLowerCase("en-US").split(/\s+/).filter(Boolean);
@@ -112,7 +124,14 @@ export function createMealTools(context: MealContext) {
       const shortages = buildShoppingList(context.pantry, [{ id: ref, recipe, servings: parsed.servings }], { includeRestock: false });
       return [{ ref, recipe, servings: parsed.servings, shortages }];
     });
-    return { recipes, errors };
+    return {
+      recipes,
+      errors,
+      ...(preferred.length ? {
+        preferredIngredientUsed: hasPreferredRecipe(),
+        ...(!hasPreferredRecipe() ? { nextStep: "No evaluated recipe uses a newly added or restocked ingredient yet. Create at least one dish using a preferredPantryItems ingredient with its exact ID and unit when compatible with dietary and time constraints. If none is compatible, explain the specific conflict in the final reply and return suitable alternatives. Do not override allergies or other food constraints." } : {}),
+      } : {}),
+    };
   }
 
   function reviewPlan({ scope = "plan", servings }: { scope?: "plan" | "focused"; servings?: number | null } = {}) {
@@ -135,7 +154,8 @@ export function createMealTools(context: MealContext) {
   return {
     proposals,
     known,
-    toolPhaseComplete: () => generated,
+    preferred,
+    toolPhaseComplete: () => generated && (!preferred.length || hasPreferredRecipe()),
     attemptedGeneration: () => evaluated > 0,
     findSavedRecipes,
     evaluateRecipes,
@@ -161,10 +181,14 @@ Be concise. Return at most three recipe refs. An explanation or clarification ca
 
 async function run(context: MealContext, operation: "chat" | "suggest", options: LiveProviderOptions) {
   const toolkit = createMealTools(context);
+  const requestInstructions = operation === "suggest" && toolkit.preferred.length
+    ? `${instructions}\npreferredPantryItems contains current positive-stock pantry snapshots that were newly added or restocked. Include at least one of these ingredients in at least one returned new recipe when compatible with the current dietary needs, allergies, dislikes, custom notes, and maximum cooking time. Use its exact canonical ID and unit, without guessing conversions. A small amount, even one apple, should visibly influence a suitable dish; other ingredients may still need groceries. These priorities never override food or time constraints. If none can fit, return suitable alternatives and explain the specific conflict in reply. If an evaluated recipe uses a preferred ingredient, include it in the final batch unless it conflicts with a food constraint.`
+    : instructions;
   const prompt = JSON.stringify({
     pantry: context.pantry,
     preferences: context.preferences,
     recentRecipeNames: context.recentRecipeNames ?? [],
+    ...(operation === "suggest" ? { preferredPantryItems: toolkit.preferred } : {}),
     knownIngredients: toolkit.known,
     savedRecipes: context.recipeBox.map((entry) => ({ name: entry.recipe.name, minutes: entry.recipe.minutes })),
     planStatus: context.planStatus ?? "unspecified",
@@ -176,7 +200,7 @@ async function run(context: MealContext, operation: "chat" | "suggest", options:
   });
   const output = await generateStructured({
     schema: outputSchema,
-    instructions,
+    instructions: requestInstructions,
     prompt,
     // Suggestions have no saved recipes or plan to inspect. Keep that budget
     // for creating and, if needed, repairing a new recipe proposal.
@@ -204,5 +228,7 @@ export async function liveSuggestMeals(input: SuggestMealsRequest, options: Live
   const parsed = suggestMealsRequestSchema.parse(input);
   const response = await run({ ...parsed, meals: [], recipeBox: [], messages: [], message: "Generate up to three new, distinct recipes from the current pantry and preferences. Call evaluateRecipes to create the recipe cards, then return its valid references. Avoid the dishes in recentRecipeNames, not just their titles. Use available use-soon ingredients when prioritized, but allow missing ingredients for the grocery list. Only return no recipes when the food preferences need clarification, and explain the specific conflict." }, "suggest", options);
   if (response.servings !== parsed.preferences.servings) throw new AiRuntimeError("invalid_output");
-  return suggestMealsResponseSchema.parse({ source: "ai", recipes: response.recipes, ...(response.recipes.length === 0 ? { explanation: response.reply } : {}) });
+  const preferred = preferredPantryItems(parsed);
+  const preferredOmitted = preferred.length > 0 && !response.recipes.some((recipe) => usesPreferredIngredient(recipe, preferred));
+  return suggestMealsResponseSchema.parse({ source: "ai", recipes: response.recipes, ...(response.recipes.length === 0 || preferredOmitted ? { explanation: response.reply } : {}) });
 }

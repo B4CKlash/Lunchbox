@@ -22,7 +22,7 @@ import { RecipeImportPanel } from "@/components/recipe-import-panel";
 import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
 import { useMealSuggestions } from "@/features/meals/use-meal-suggestions";
 import { buildShoppingList } from "@/features/planning/shopping";
-import { preferencesSchema } from "@/lib/contracts";
+import { preferencesSchema, type Preferences } from "@/lib/contracts";
 
 const modes = [
   { id: "suggestions", label: "Suggestions", icon: LayoutGrid },
@@ -31,7 +31,7 @@ const modes = [
 ] as const;
 
 export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
-  const { state, setPreferences, setWorkspaceMode, householdResetVersion } = useHousehold();
+  const { state, setPreferences, setWorkspaceMode, householdResetVersion, recordSuggestions } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
   );
@@ -42,8 +42,13 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
   const importUrl = importSeed.resetVersion === householdResetVersion ? importSeed.url : "";
   const kitchen = { pantry: state.pantry, preferences: state.preferences };
   const { loading, current, refresh, cancel } = useMealSuggestions(
-    JSON.stringify({ ...kitchen, knownIngredients: knownIngredientsFromHousehold(state) }),
-    JSON.stringify(kitchen),
+    JSON.stringify({
+      ...kitchen,
+      knownIngredients: knownIngredientsFromHousehold(state),
+      preferredIngredients: state.workspace.suggestions.pendingIngredients,
+    }),
+    JSON.stringify({ ...kitchen, householdResetVersion }),
+    { recentRecipeNames: state.workspace.suggestions.recentRecipeNames, recordSuggestions },
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
   const mode = state.workspace.mode;
@@ -57,14 +62,10 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     ...(state.preferences.cookingStyles ?? []),
   ]);
 
-  function updatePreferences(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  function updatePreferences(patch: Partial<Preferences>) {
     const parsed = preferencesSchema.safeParse({
       ...state.preferences,
-      servings: Number(form.get("servings")),
-      maxMinutes: Number(form.get("maxMinutes")),
-      prioritizeUseSoon: form.get("useSoon") === "on",
+      ...patch,
     });
     if (!parsed.success) {
       setPreferenceError(
@@ -75,6 +76,11 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     setPreferenceError(null);
     setCollection("suggested");
     setPreferences(parsed.data);
+  }
+
+  function generateMore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCollection("suggested");
     refresh();
   }
 
@@ -182,18 +188,21 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
             <h2 id="preferences-heading">Make it fit your day.</h2>
             <p>
               {aiMode === "ai"
-                ? "Ideas refresh when your pantry or saved preferences change. Generate again for something new."
+                ? "Recipes update when you change these controls, save preferences, or edit your pantry. Generate more for new dishes."
                 : "Choose what works for you. Demo ideas come from the same sample recipes."}
             </p>
           </div>
           <form
             className="preferences-form"
-            key={JSON.stringify(state.preferences)}
-            onSubmit={updatePreferences}
+            onSubmit={generateMore}
           >
             <label className="field">
               Servings
-              <select name="servings" defaultValue={state.preferences.servings}>
+              <select
+                name="servings"
+                value={state.preferences.servings}
+                onChange={(event) => updatePreferences({ servings: Number(event.target.value) })}
+              >
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>
                     {n} {n === 1 ? "person" : "people"}
@@ -205,7 +214,8 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               Time available
               <select
                 name="maxMinutes"
-                defaultValue={state.preferences.maxMinutes}
+                value={state.preferences.maxMinutes}
+                onChange={(event) => updatePreferences({ maxMinutes: Number(event.target.value) })}
               >
                 {Array.from(
                   new Set([
@@ -233,7 +243,8 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               <input
                 type="checkbox"
                 name="useSoon"
-                defaultChecked={state.preferences.prioritizeUseSoon}
+                checked={state.preferences.prioritizeUseSoon}
+                onChange={(event) => updatePreferences({ prioritizeUseSoon: event.target.checked })}
               />{" "}
               Prioritize use-soon ingredients
             </label>
@@ -249,7 +260,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               )}
               {loading
                 ? aiMode === "ai" ? "Generating recipes…" : "Finding ideas…"
-                : aiMode === "ai" ? "Generate new recipes" : "Update ideas"}
+                : aiMode === "ai" ? "Generate more" : "Refresh sample ideas"}
             </button>
           </form>
           {preferenceError ? (
@@ -360,18 +371,23 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               </button>
             </div>
           ) : current?.response?.recipes.length ? (
-            <div className="recipe-grid">
-              {current.response.recipes.map((recipe, index) => (
-                <RecipeCard
-                  key={recipe.id}
-                  recipe={recipe}
-                  source={current.response!.source}
-                  servings={state.preferences.servings}
-                  index={index}
-                  onNotice={setMessage}
-                />
-              ))}
-            </div>
+            <>
+              {current.response.explanation ? (
+                <p className="status-message" role="status">{current.response.explanation}</p>
+              ) : null}
+              <div className="recipe-grid">
+                {current.response.recipes.map((recipe, index) => (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    source={current.response!.source}
+                    servings={state.preferences.servings}
+                    index={index}
+                    onNotice={setMessage}
+                  />
+                ))}
+              </div>
+            </>
           ) : (
             <div className="card empty-state">
               <Clock3 size={28} aria-hidden="true" />
