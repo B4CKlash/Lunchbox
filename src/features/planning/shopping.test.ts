@@ -122,3 +122,21 @@ test("restocks low staple quantities to their threshold, combining recipe demand
     [{ ingredientId: "rice", name: "Jasmine rice", unit: "g", required: 100, available: 40, quantity: 60, restock: true }],
   );
 });
+
+test("recipe coverage excludes unrelated restocks and staple thresholds while full shopping retains them", () => {
+  const pantry: PantryItem[] = [
+    { ...pantryItem(40), tag: "staple", restockBelow: 100 },
+    { ...pantryItem(10), id: "salt", name: "Salt", tag: "staple", restockBelow: 50 },
+  ];
+  const meals = [meal("one", 60)];
+  const before = structuredClone({ pantry, meals });
+  assert.deepEqual(buildShoppingList(pantry, meals, { includeRestock: false }), [
+    { ingredientId: "rice", name: "Jasmine rice", unit: "g", required: 60, available: 40, quantity: 20 },
+  ]);
+  assert.deepEqual(buildShoppingList(pantry, meals), [
+    { ingredientId: "rice", name: "Jasmine rice", unit: "g", required: 100, available: 40, quantity: 60, restock: true },
+    { ingredientId: "salt", name: "Salt", unit: "g", required: 50, available: 10, quantity: 40, restock: true },
+  ]);
+  assert.deepEqual(buildShoppingList(pantry, [meal("covered", 30)], { includeRestock: false }), []);
+  assert.deepEqual({ pantry, meals }, before);
+});

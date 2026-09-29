@@ -192,6 +192,9 @@ export function ShoppingPanel() {
               {selectedMeals.length
                 ? `Ingredients combined across ${selectedMeals.length === 1 ? "the selected meal" : `${selectedMeals.length} selected meals`}.`
                 : "Pantry staples below their restock levels."}
+              {state.meals.length
+                ? "Matching ingredients are combined across your committed meals, including staple restock reminders."
+                : "Staples below your restock level."}
             </p>
             <div className="shopping-filters">
               <label className="field">Build list from

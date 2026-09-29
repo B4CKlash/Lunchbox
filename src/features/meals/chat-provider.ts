@@ -21,7 +21,7 @@ const amount = (quantity: number, unit: string) =>
 function shortageSummary(items: ShoppingItem[]) {
   const visible = items.slice(0, 8);
   const list = visible
-    .map((item) => `${amount(item.quantity, item.unit)} ${item.name}`)
+    .map((item) => `${amount(item.quantity, item.unit)} ${item.name}${item.restock ? " (staple restock)" : ""}`)
     .join("; ");
   return `${list}${items.length > visible.length ? `; plus ${items.length - visible.length} more ingredients` : ""}`;
 }
@@ -101,9 +101,9 @@ export async function chatAboutMeals(
         recipe: focusedRecipe,
         servings: focusedServings,
       },
-    ]);
+    ], { includeRestock: false });
     return response(
-      `${focusedRecipe.name} takes ${focusedRecipe.minutes} minutes. For ${focusedServings} servings, ${shortages.length ? `you need to pick up: ${shortageSummary(shortages)}.` : "your pantry covers all the ingredient amounts."} This checks this recipe on its own; your shopping list combines only committed meals. Commit calendar changes to update your grocery list. Open Ingredients & steps for the complete recipe.`,
+      `${focusedRecipe.name} takes ${focusedRecipe.minutes} minutes. For ${focusedServings} servings, ${shortages.length ? `you need to pick up: ${shortageSummary(shortages)}.` : "your pantry covers all the ingredient amounts."} This checks this recipe on its own; your shopping list combines only committed meals plus low staple restocks. Commit calendar changes to update your grocery list. Open Ingredients & steps for the complete recipe.`,
       [focusedRecipe],
       focusedServings,
     );

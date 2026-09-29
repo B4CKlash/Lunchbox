@@ -7,7 +7,7 @@ import {
 } from "@/lib/contracts";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { chatAboutMeals } from "./chat-provider";
-import { suggestMeals } from "./providers";
+import { suggestMeals } from "./demo-provider";
 
 function input(message: string): ChatMealsRequest {
   const { pantry, preferences } = createSampleHousehold();
@@ -140,6 +140,22 @@ test("focused recipe gaps match ingredient ID and unit and scale current serving
   assert.match(result.reply, /this recipe on its own/);
   assert.match(result.reply, /only committed meals/);
   assert.deepEqual(result.recipes, [request.focusedRecipe]);
+});
+
+test("demo focused coverage excludes staple restocks that remain in full plan review", async () => {
+  const request = input("What do I need for this recipe?");
+  request.focusedRecipe = riceRecipe();
+  request.focusedServings = 2;
+  request.pantry = [
+    { id: "rice", name: "Rice", quantity: 200, unit: "g", location: "Cupboard", useSoon: false, tag: "staple", restockBelow: 500 },
+    { id: "salt", name: "Salt", quantity: 0, unit: "g", location: "Cupboard", useSoon: false, tag: "staple", restockBelow: 50 },
+  ];
+  assert.match((await chatAboutMeals(request)).reply, /pantry covers all the ingredient amounts/);
+  request.message = "Review my plan";
+  request.meals = [{ id: "planned", recipe: riceRecipe(), servings: 2 }];
+  const review = await chatAboutMeals(request);
+  assert.match(review.reply, /300 g Rice \(staple restock\)/);
+  assert.match(review.reply, /50 g Salt \(staple restock\)/);
 });
 
 test("focused steps return original recipe details with bounded readable text", async () => {
