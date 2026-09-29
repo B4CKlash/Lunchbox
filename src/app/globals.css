@@ -590,6 +590,11 @@ a.button:hover {
   gap: 3px;
   flex: none;
 }
+.pantry-filters {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 640px;
+}
 .segmented-control button {
   min-height: 31px;
   padding: 6px 10px;
@@ -672,6 +677,13 @@ a.button:hover {
   border-radius: 5px;
   padding: 4px 7px;
 }
+.category-label {
+  font-size: 10px;
+  color: var(--green);
+  background: var(--pale);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
 .next-step {
   margin-top: 27px;
   background: var(--lime);
@@ -703,7 +715,7 @@ a.button:hover {
 }
 .ingredient-fields {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1.2fr;
+  grid-template-columns: 2fr 0.8fr 1fr 1.1fr 1.1fr;
   gap: 15px;
 }
 .field {

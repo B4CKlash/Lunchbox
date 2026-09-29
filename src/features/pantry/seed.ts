@@ -12,6 +12,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "g",
         location: "Fridge",
         useSoon: true,
+        category: "vegetables",
       },
       {
         id: "lentils",
@@ -20,6 +21,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "g",
         location: "Cupboard",
         useSoon: false,
+        category: "protein",
       },
       {
         id: "rice",
@@ -28,6 +30,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "g",
         location: "Cupboard",
         useSoon: false,
+        category: "carbs",
       },
       {
         id: "onion",
@@ -36,6 +39,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "each",
         location: "Cupboard",
         useSoon: false,
+        category: "vegetables",
       },
       {
         id: "oil",
@@ -44,6 +48,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "ml",
         location: "Cupboard",
         useSoon: false,
+        category: "fats",
       },
       {
         id: "zucchini",
@@ -52,6 +57,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "each",
         location: "Fridge",
         useSoon: true,
+        category: "vegetables",
       },
       {
         id: "pepper",
@@ -60,6 +66,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "each",
         location: "Fridge",
         useSoon: true,
+        category: "vegetables",
       },
       {
         id: "beans",
@@ -68,6 +75,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "g",
         location: "Cupboard",
         useSoon: false,
+        category: "protein",
       },
       {
         id: "spinach",
@@ -76,6 +84,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "g",
         location: "Fridge",
         useSoon: false,
+        category: "vegetables",
       },
       {
         id: "lemon",
@@ -84,6 +93,7 @@ export function createSampleHousehold(): HouseholdState {
         unit: "each",
         location: "Fridge",
         useSoon: false,
+        category: "fruit",
       },
     ],
     preferences: { servings: 2, maxMinutes: 30, prioritizeUseSoon: true },
