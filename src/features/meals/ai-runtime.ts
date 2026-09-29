@@ -36,6 +36,8 @@ export function publicAiError(error: unknown) {
   if (error instanceof AiRuntimeError) code = error.code;
   else if (error instanceof Error && error.name === "TimeoutError") code = "timeout";
   else if (error instanceof Error && error.name === "AbortError") code = "cancelled";
+  // AI SDK strips authentication status codes; its production wrapper is named GatewayError.
+  else if (error instanceof Error && (error.name === "GatewayAuthenticationError" || (error.name === "GatewayError" && !("statusCode" in error)))) code = "configuration";
   else if (NoObjectGeneratedError.isInstance(error) || error instanceof z.ZodError) code = "invalid_output";
   else if (APICallError.isInstance(error) || (error instanceof Error && "statusCode" in error)) {
     const statusCode = error.statusCode;
@@ -68,8 +70,8 @@ export type StructuredGenerationOptions<T> = {
 
 /** Server-only call boundary. No prompts, recipes, credentials, or raw errors are logged. */
 export async function generateStructured<T>(options: StructuredGenerationOptions<T>): Promise<T> {
-  if (!options.model && !process.env.AI_GATEWAY_API_KEY && !process.env.VERCEL_OIDC_TOKEN)
-    throw new AiRuntimeError("configuration");
+  // Gateway resolves API keys, local OIDC, and Vercel's per-request OIDC context.
+  // An environment-only check would reject valid deployed Function requests.
   if (options.prompt.length + options.instructions.length > 100_000)
     throw new AiRuntimeError("context_too_large");
   const signal = AbortSignal.any([
