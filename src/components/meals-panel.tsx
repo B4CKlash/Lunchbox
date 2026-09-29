@@ -16,6 +16,7 @@ import { useHousehold } from "@/components/household-provider";
 import { MealChatPanel } from "@/components/meal-chat-panel";
 import { MealPlanPanel } from "@/components/meal-plan-panel";
 import { RecipeCard } from "@/components/recipe-card";
+import { selectedPreferenceLabels } from "@/features/meals/recommendation-options";
 import { useMealSuggestions } from "@/features/meals/use-meal-suggestions";
 import { buildShoppingList } from "@/features/planning/shopping";
 import { preferencesSchema } from "@/lib/contracts";
@@ -39,11 +40,20 @@ export function MealsPanel() {
   const shopping = buildShoppingList(state.pantry, state.meals);
   const mode = state.workspace.mode;
   const draftMeals = state.workspace.calendar.draft ?? state.meals;
+  const profileLabels = selectedPreferenceLabels([
+    ...(state.preferences.goals ?? []),
+    ...(state.preferences.dietaryNeeds ?? []),
+    ...(state.preferences.nutritionFocus ?? []),
+    ...(state.preferences.flavorPreferences ?? []),
+    ...(state.preferences.cuisinePreferences ?? []),
+    ...(state.preferences.cookingStyles ?? []),
+  ]);
 
   function updatePreferences(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const parsed = preferencesSchema.safeParse({
+      ...state.preferences,
       servings: Number(form.get("servings")),
       maxMinutes: Number(form.get("maxMinutes")),
       prioritizeUseSoon: form.get("useSoon") === "on",
@@ -61,7 +71,13 @@ export function MealsPanel() {
 
   return (
     <>
-      <header className={mode === "plan" ? "page-heading calendar-page-heading" : "page-heading"}>
+      <header
+        className={
+          mode === "plan"
+            ? "page-heading calendar-page-heading"
+            : "page-heading"
+        }
+      >
         <div>
           <p className="eyebrow">ONE KITCHEN. MANY POSSIBILITIES.</p>
           <h1>
@@ -73,6 +89,37 @@ export function MealsPanel() {
         </div>
         <span className="pill demo-pill">Your recipe workspace</span>
       </header>
+      <section
+        className={`personalization-banner${state.preferences.onboardingComplete ? " complete" : ""}`}
+        aria-label="Recommendation preferences"
+      >
+        <div>
+          <p className="eyebrow">
+            {state.preferences.onboardingComplete
+              ? "PERSONALIZED FOR YOU"
+              : "MAKE THESE IDEAS YOURS"}
+          </p>
+          <h2>
+            {state.preferences.onboardingComplete
+              ? "Your priorities are shaping these meals."
+              : "Tell us what good food looks like for you."}
+          </h2>
+          <p>
+            {state.preferences.onboardingComplete
+              ? profileLabels.length
+                ? profileLabels.slice(0, 5).join(" · ")
+                : "Your saved preferences are active."
+              : "Set goals, dietary needs, allergies, and the cooking styles you enjoy."}
+          </p>
+        </div>
+        <Link className="button secondary" href="/onboarding">
+          {state.preferences.onboardingComplete
+            ? "Edit preferences"
+            : "Personalize meals"}
+          <ArrowRight size={16} aria-hidden="true" />
+        </Link>
+      </section>
+
       <div
         className="workspace-navigation"
         role="group"

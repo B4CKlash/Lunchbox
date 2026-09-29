@@ -60,3 +60,38 @@ test("callers cannot mutate the provider's recipes and requests stay unchanged",
   );
   assert.deepEqual(input, before);
 });
+
+test("onboarding preferences personalize ranking and allergy exclusions", async () => {
+  const input = createSampleHousehold();
+  input.preferences.goals = ["meal-prep"];
+  input.preferences.nutritionFocus = ["high-protein"];
+  input.preferences.flavorPreferences = ["rich-comforting"];
+  input.preferences.cuisinePreferences = ["american-comfort"];
+  input.preferences.cookingStyles = ["big-batch", "meal-prep"];
+  assert.equal((await suggestMeals(input)).recipes[0].id, "r3");
+
+  input.preferences.allergies = ["rice"];
+  assert.deepEqual((await suggestMeals(input)).recipes, []);
+});
+
+test("ingredient dislikes are excluded separately from strict allergies", async () => {
+  const input = createSampleHousehold();
+  input.preferences.dislikedIngredients = ["tomatoes"];
+  assert.equal(
+    (await suggestMeals(input)).recipes.some((recipe) => recipe.id === "r1"),
+    false,
+  );
+});
+
+test("flavor and cuisine preferences influence recommendation ranking", async () => {
+  const input = createSampleHousehold();
+  input.preferences.flavorPreferences = ["spicy"];
+  input.preferences.cuisinePreferences = ["mexican"];
+  assert.equal((await suggestMeals(input)).recipes[0].id, "r2");
+});
+
+test("pescatarian and flexitarian preferences remain compatible with plant-based recipes", async () => {
+  const input = createSampleHousehold();
+  input.preferences.dietaryNeeds = ["pescatarian", "flexitarian"];
+  assert.equal((await suggestMeals(input)).recipes.length, 3);
+});
