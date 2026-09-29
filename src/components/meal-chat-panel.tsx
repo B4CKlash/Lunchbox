@@ -5,6 +5,7 @@ import { ArrowUp, LoaderCircle, MessageCircle, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { RecipeCard } from "@/components/recipe-card";
 import { chatMealsResponseSchema } from "@/lib/contracts";
+import { mealFailureMessage, mealRequestError } from "@/features/meals/client-request";
 
 const prompts = [
   "What can I make tonight?",
@@ -15,8 +16,12 @@ const prompts = [
 
 export function MealChatPanel({
   onNotice,
+  aiMode,
+  onImportUrl,
 }: {
   onNotice: (message: string) => void;
+  aiMode: "demo" | "ai";
+  onImportUrl: (url: string) => void;
 }) {
   const {
     state,
@@ -37,6 +42,7 @@ export function MealChatPanel({
     pantry: state.pantry,
     preferences: state.preferences,
     meals: workspace.calendar.draft ?? state.meals,
+    planStatus: workspace.calendar.draft !== null ? "draft" : "committed",
     recipeBox: workspace.recipeBox,
     focusedRecipe: workspace.focusedRecipe ?? undefined,
     focusedServings: workspace.focusedServings ?? undefined,
@@ -53,6 +59,10 @@ export function MealChatPanel({
   async function sendMessage(prompt: string) {
     const message = prompt.trim();
     if (!message || loading) return;
+    if (/^https?:\/\/\S+$/i.test(message)) {
+      onImportUrl(message);
+      return;
+    }
     activeRequest.current?.abort();
     const controller = new AbortController();
     activeRequest.current = controller;
@@ -82,13 +92,11 @@ export function MealChatPanel({
         }),
         signal: AbortSignal.any([
           controller.signal,
-          AbortSignal.timeout(20000),
+          AbortSignal.timeout(50000),
         ]),
       });
       if (!response.ok)
-        throw new Error(
-          "The demo assistant couldn’t reply. Your message is still here; try sending it again.",
-        );
+        throw new Error(await mealRequestError(response));
       const parsed = chatMealsResponseSchema.safeParse(await response.json());
       if (!parsed.success)
         throw new Error(
@@ -122,9 +130,7 @@ export function MealChatPanel({
       activeRequest.current = null;
       setPending(null);
       setError(
-        reason instanceof Error && reason.name === "Error"
-          ? reason.message
-          : "The reply couldn’t be completed. Your message is still here; please try again.",
+        mealFailureMessage(reason),
       );
     }
   }
@@ -142,12 +148,12 @@ export function MealChatPanel({
             <p className="eyebrow">A LITTLE HELP DECIDING</p>
             <h2 id="chat-heading">Let’s talk dinner.</h2>
           </div>
-          <span className="pill demo-pill">Demo assistant</span>
+          <span className="pill demo-pill">{aiMode === "ai" ? "AI assistant" : "Demo assistant"}</span>
         </div>
         <p className="muted">
-          Explore sample recipes, check ingredients, or talk through your plan.
-          This guided demo supports the prompts below and ingredient searches
-          like “recipes with rice.”
+          {aiMode === "ai"
+            ? "Ask for a favorite dish, use what’s in your kitchen, revise a recipe, or talk through your plan. Missing ingredients go on your shopping list when you commit your calendar."
+            : "Explore sample recipes, check ingredients, or talk through your plan. This guided demo supports the prompts below and ingredient searches like “recipes with rice.”"}
         </p>
         <div className="prompt-chips">
           {prompts.map((prompt) => (
@@ -288,8 +294,15 @@ export function MealChatPanel({
         ) : null}
         <div className="composer-footer">
           <p className="footnote">
-            Demo replies · last 20 messages saved in this browser
+            {aiMode === "ai" ? "AI replies" : "Demo replies"} · last 20 messages saved in this browser
           </p>
+          {loading ? (
+            <button className="text-button" type="button" onClick={() => {
+              activeRequest.current?.abort();
+              setPending(null);
+              setError("Reply stopped. Your message is still here.");
+            }}>Stop reply</button>
+          ) : null}
           <button
             type="button"
             className="text-button"

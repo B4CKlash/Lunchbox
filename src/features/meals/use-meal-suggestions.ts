@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { mealFailureMessage, mealRequestError } from "@/features/meals/client-request";
 import {
   suggestMealsResponseSchema,
   type SuggestMealsResponse,
@@ -11,30 +12,34 @@ type SuggestionResult = {
   response?: SuggestMealsResponse;
   error?: string;
 };
-export function useMealSuggestions(request: string) {
+export function useMealSuggestions(request: string, kitchenKey = request) {
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState<SuggestionResult | null>(null);
-  const requestKey = `${retry}:${request}`;
+  const latestRequest = useRef(request);
+  const activeRequest = useRef<AbortController | null>(null);
+  const requestKey = `${retry}:${kitchenKey}`;
   const loading = result?.key !== requestKey;
   const current = loading ? null : result;
 
+  // Saving a recipe updates ingredient references without spending another AI request.
+  useEffect(() => { latestRequest.current = request; }, [request]);
+
   useEffect(() => {
     const controller = new AbortController();
+    activeRequest.current = controller;
     async function loadSuggestions() {
       try {
         const response = await fetch("/api/meals/suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: request,
+          body: latestRequest.current,
           signal: AbortSignal.any([
             controller.signal,
-            AbortSignal.timeout(20000),
+            AbortSignal.timeout(50000),
           ]),
         });
         if (!response.ok)
-          throw new Error(
-            "We couldn’t load your meal ideas. Please try again.",
-          );
+          throw new Error(await mealRequestError(response));
         const parsed = suggestMealsResponseSchema.safeParse(
           await response.json(),
         );
@@ -48,16 +53,21 @@ export function useMealSuggestions(request: string) {
         if (!controller.signal.aborted)
           setResult({
             key: requestKey,
-            error:
-              error instanceof Error && error.name === "Error"
-                ? error.message
-                : "We couldn’t load your meal ideas. Please try again.",
+            error: mealFailureMessage(error),
           });
       }
     }
     void loadSuggestions();
     return () => controller.abort();
-  }, [request, requestKey]);
+  }, [requestKey]);
 
-  return { loading, current, refresh: () => setRetry((value) => value + 1) };
+  return {
+    loading,
+    current,
+    refresh: () => setRetry((value) => value + 1),
+    cancel: () => {
+      activeRequest.current?.abort();
+      setResult({ key: requestKey, error: "Search stopped. Try again whenever you’re ready." });
+    },
+  };
 }

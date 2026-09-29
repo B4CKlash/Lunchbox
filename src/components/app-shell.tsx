@@ -101,7 +101,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="main-content" className="page-content">
           <div className="demo-banner">
             <span className="status-dot" />A little taste of LunchBox{" "}
-            <span>Sample recipes · changes stay in this browser</span>
+            <span>Changes are saved in this browser</span>
           </div>
           {storageError && (
             <p className="storage-warning" role="alert">
