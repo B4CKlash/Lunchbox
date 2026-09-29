@@ -210,6 +210,56 @@ test("suggestions retain the configured serving count and use the same normalize
   const result = await liveSuggestMeals(input, { model });
   assert.equal(result.source, "ai");
   assert.equal(result.recipes[0].ingredients[1].ingredientId, "mushrooms");
+  assert.deepEqual(model.doGenerateCalls[0].tools?.map((tool) => tool.name), ["evaluateRecipes"]);
+});
+
+test("regeneration passes current inventory, full preferences, and recent dishes to the model", async () => {
+  const input = { ...context(), recentRecipeNames: ["Tomato rice bowls"] };
+  input.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 0, unit: "g", location: "Cupboard", useSoon: false, tag: "special" }];
+  input.preferences = { ...input.preferences, servings: 4, maxMinutes: 20, cuisinePreferences: ["east-asian-inspired"], customNotes: { taste: "Use ginger" } };
+  const before = structuredClone(input);
+  const model = new MockLanguageModelV4({ doGenerate: [callResult("evaluateRecipes", { recipes: [candidate()], servings: 4 }), textResult({ reply: "Fresh ideas.", recipeRefs: ["proposal:1"], servings: 4 })] });
+  const result = await liveSuggestMeals(input, { model });
+  const userMessage = model.doGenerateCalls[0].prompt.find((message) => message.role === "user");
+  assert.ok(userMessage && Array.isArray(userMessage.content));
+  const text = userMessage.content.find((part) => part.type === "text");
+  assert.ok(text && text.type === "text");
+  const sent = JSON.parse(text.text);
+  assert.deepEqual(sent.pantry, input.pantry);
+  assert.deepEqual(sent.preferences, input.preferences);
+  assert.deepEqual(sent.recentRecipeNames, input.recentRecipeNames);
+  assert.equal(result.source, "ai");
+  assert.deepEqual(input, before);
+});
+
+test("already shown recipe names are rejected and a different dish can be repaired within the call budget", async () => {
+  const input = { ...context(), recentRecipeNames: ["  Rice AND mushrooms  "] };
+  const replacement = { ...candidate(), name: "Mushroom rice soup" };
+  const model = new MockLanguageModelV4({ doGenerate: [
+    callResult("evaluateRecipes", { recipes: [candidate()], servings: 2 }),
+    callResult("evaluateRecipes", { recipes: [replacement], servings: 2 }),
+    textResult({ reply: "A different dish.", recipeRefs: ["proposal:1"], servings: 2 }),
+  ] });
+  const result = await liveSuggestMeals(input, { model });
+  assert.deepEqual(result.recipes.map((recipe) => recipe.name), [replacement.name]);
+  assert.equal(model.doGenerateCalls.length, 3);
+  assert.match(JSON.stringify(model.doGenerateCalls[1].prompt), /already suggested/);
+});
+
+test("invalid recipe attempts are recoverable errors, not misleading empty matches", async () => {
+  const model = new MockLanguageModelV4({ doGenerate: [
+    callResult("evaluateRecipes", { recipes: [{ ...candidate(), minutes: 100 }], servings: 2 }),
+    textResult({ note: "I could not validate that recipe." }),
+    textResult({ reply: "Try a different time limit.", recipeRefs: [], servings: 2 }),
+  ] });
+  await assert.rejects(liveSuggestMeals(context(), { model }), (error: unknown) => error instanceof AiRuntimeError && error.code === "invalid_output");
+});
+
+test("a preference clarification survives an empty suggestion response", async () => {
+  const reply = "Your dietary notes conflict. Which preference should I follow?";
+  const model = new MockLanguageModelV4({ doGenerate: [textResult({ note: "The request needs clarification." }), textResult({ reply, recipeRefs: [], servings: 2 })] });
+  const result = await liveSuggestMeals(context(), { model });
+  assert.deepEqual(result, { source: "ai", recipes: [], explanation: reply });
 });
 
 test("runtime allows one failed proposal repair and finalizes with no tools within three calls", async () => {

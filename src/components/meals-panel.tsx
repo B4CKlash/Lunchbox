@@ -73,6 +73,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
       return;
     }
     setPreferenceError(null);
+    setCollection("suggested");
     setPreferences(parsed.data);
     refresh();
   }
@@ -179,7 +180,11 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
         >
           <div className="preferences-intro">
             <h2 id="preferences-heading">Make it fit your day.</h2>
-            <p>Choose what works for you.</p>
+            <p>
+              {aiMode === "ai"
+                ? "Ideas refresh when your pantry or saved preferences change. Generate again for something new."
+                : "Choose what works for you. Demo ideas come from the same sample recipes."}
+            </p>
           </div>
           <form
             className="preferences-form"
@@ -242,7 +247,9 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               ) : (
                 <RefreshCw size={16} aria-hidden="true" />
               )}
-              {loading ? "Finding ideas…" : "Update ideas"}
+              {loading
+                ? aiMode === "ai" ? "Generating recipes…" : "Finding ideas…"
+                : aiMode === "ai" ? "Generate new recipes" : "Update ideas"}
             </button>
           </form>
           {preferenceError ? (
@@ -263,7 +270,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               {collection === "saved"
                 ? "Keep the good ideas close. Plan them whenever you like."
                 : aiMode === "ai"
-                  ? "Ideas based on your kitchen and preferences."
+                  ? "New recipes based on your current kitchen and preferences."
                   : "Sample recipes, matched to your pantry and time."}
             </p>
           </div>
@@ -335,7 +342,11 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
             <div className="card empty-state">
               <LoaderCircle className="spinning" size={28} aria-hidden="true" />
               <h3>Looking in your kitchen…</h3>
-              <p role="status">Finding meals that fit your preferences.</p>
+              <p role="status">
+                {aiMode === "ai"
+                  ? "Generating recipes from your current pantry and preferences."
+                  : "Finding sample meals that fit your preferences."}
+              </p>
               <button className="button secondary" onClick={cancel}>Stop search</button>
             </div>
           ) : current?.error ? (
@@ -364,10 +375,17 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
           ) : (
             <div className="card empty-state">
               <Clock3 size={28} aria-hidden="true" />
-              <h3>A little more time opens things up.</h3>
+              <h3>{aiMode === "ai" ? "No recipes matched this request." : "A little more time opens things up."}</h3>
               <p>
-                {aiMode === "ai" ? "No recipes matched this request. Adjust your time limit or ask the assistant for a dish you’d like." : "No recipes fit this time limit. Try 25 minutes or more for the sample recipes."}
+                {aiMode === "ai"
+                  ? current?.response?.explanation ?? "Adjust your preferences or ask the assistant for a dish you’d like."
+                  : "No recipes fit this time limit. Try 25 minutes or more for the sample recipes."}
               </p>
+              {aiMode === "ai" ? (
+                <button className="button secondary" onClick={() => setWorkspaceMode("chat")}>
+                  Ask in Chat
+                </button>
+              ) : null}
             </div>
           )}
         </section>

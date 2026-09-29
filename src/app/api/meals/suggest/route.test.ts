@@ -40,12 +40,14 @@ test("suggestion API rejects malformed and invalid input", async () => {
   assert.equal((await POST(request("🌱".repeat(25001)))).status, 413);
 });
 
-test("suggestion API passes known identities and cancellation to the provider", async () => {
+test("suggestion API passes known identities, recent dishes, and cancellation to the provider", async () => {
   const { pantry, preferences } = createSampleHousehold();
   const knownIngredients = [{ ingredientId: "favorite-mushrooms", name: "Fresh mushrooms", unit: "g" as const }];
-  const input = request(JSON.stringify({ pantry, preferences, knownIngredients }));
+  const recentRecipeNames = ["Mushroom rice"];
+  const input = request(JSON.stringify({ pantry, preferences, knownIngredients, recentRecipeNames }));
   const handler = createMealHandlers({ chat: chatAboutMeals, suggest: async (body, options) => {
     assert.deepEqual(body.knownIngredients, knownIngredients);
+    assert.deepEqual(body.recentRecipeNames, recentRecipeNames);
     assert.ok(options.signal instanceof AbortSignal);
     assert.equal(options.signal.aborted, false);
     throw new AiRuntimeError("configuration");
@@ -54,4 +56,16 @@ test("suggestion API passes known identities and cancellation to the provider", 
   assert.equal(response.status, 503);
   assert.equal((await response.json()).code, "configuration");
   assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
+
+test("suggestion API bounds recent dish context and preserves preference explanations", async () => {
+  const { pantry, preferences } = createSampleHousehold();
+  for (const recentRecipeNames of [Array.from({ length: 31 }, () => "A dish"), ["x".repeat(121)], [""]]) {
+    assert.equal((await POST(request(JSON.stringify({ pantry, preferences, recentRecipeNames })))).status, 400);
+  }
+  const explanation = "Your preferences conflict; choose which cuisine to prioritize in Chat.";
+  const handler = createMealHandlers({ chat: chatAboutMeals, suggest: async () => ({ source: "ai", recipes: [], explanation }) }).suggest;
+  const response = await handler(request(JSON.stringify({ pantry, preferences })));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { source: "ai", recipes: [], explanation });
 });
