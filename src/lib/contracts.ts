@@ -2,6 +2,15 @@ import { z } from "zod";
 
 // Integration-owned public contracts. Coordinate changes before editing these.
 export const unitSchema = z.enum(["g", "ml", "each"]);
+export const pantryCategorySchema = z.enum([
+  "protein",
+  "carbs",
+  "vegetables",
+  "fruit",
+  "fats",
+  "dairy",
+  "other",
+]);
 export const pantryItemSchema = z.object({
   id: z.string().min(1).max(80),
   name: z.string().trim().min(1).max(80),
@@ -9,6 +18,8 @@ export const pantryItemSchema = z.object({
   unit: unitSchema,
   location: z.enum(["Fridge", "Freezer", "Cupboard", "Garden"]),
   useSoon: z.boolean(),
+  // Optional so households saved before categories were introduced still load.
+  category: pantryCategorySchema.optional(),
 });
 export const preferencesSchema = z.object({
   servings: z.number().int().min(1).max(12),
@@ -51,6 +62,7 @@ export const suggestMealsResponseSchema = z.object({
 });
 
 export type Unit = z.infer<typeof unitSchema>;
+export type PantryCategory = z.infer<typeof pantryCategorySchema>;
 export type PantryItem = z.infer<typeof pantryItemSchema>;
 export type Preferences = z.infer<typeof preferencesSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
