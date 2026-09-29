@@ -2,6 +2,7 @@ import { z } from "zod";
 
 // Integration-owned public contracts. Coordinate changes before editing these.
 export const unitSchema = z.enum(["g", "ml", "each"]);
+export const pantryTagSchema = z.enum(["staple", "seasonal", "special"]);
 export const pantryCategorySchema = z.enum([
   "protein",
   "carbs",
@@ -15,9 +16,11 @@ export const pantryItemSchema = z.object({
   id: z.string().min(1).max(80),
   name: z.string().trim().min(1).max(80),
   quantity: z.number().finite().min(0).max(100000),
+  restockBelow: z.number().finite().min(0).max(100000).optional(),
   unit: unitSchema,
   location: z.enum(["Fridge", "Freezer", "Cupboard", "Garden"]),
   useSoon: z.boolean(),
+  tag: pantryTagSchema.default("special"),
   // Optional so households saved before categories were introduced still load.
   category: pantryCategorySchema.optional(),
 });
@@ -217,6 +220,7 @@ export const chatMealsResponseSchema = z.object({
 });
 
 export type Unit = z.infer<typeof unitSchema>;
+export type PantryTag = z.infer<typeof pantryTagSchema>;
 export type PantryCategory = z.infer<typeof pantryCategorySchema>;
 export type MealGoal = z.infer<typeof mealGoalSchema>;
 export type DietaryNeed = z.infer<typeof dietaryNeedSchema>;
@@ -248,4 +252,5 @@ export type ShoppingItem = {
   required: number;
   available: number;
   quantity: number;
+  restock?: boolean;
 };
