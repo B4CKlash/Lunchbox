@@ -201,6 +201,8 @@ export const suggestionMemorySchema = z.object({
 });
 export const recipeWorkspaceSchema = z.object({
   mode: workspaceModeSchema.default("suggestions"),
+  // Share provider cooldowns across Chat, Suggestions, and page reloads.
+  aiCooldownUntil: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
   recipeBox: z.array(savedRecipeSchema).max(100).default([]),
   chatMessages: z.array(chatMessageSchema).max(20).default([]),
   chatDraft: z.string().max(1000).default(""),

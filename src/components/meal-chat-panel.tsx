@@ -5,7 +5,9 @@ import { ArrowUp, LoaderCircle, MessageCircle, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { RecipeCard } from "@/components/recipe-card";
 import { chatMealsResponseSchema } from "@/lib/contracts";
-import { mealFailureMessage, mealRequestError } from "@/features/meals/client-request";
+import { formatMealRetryTime, mealFailureMessage, mealRequestFailure } from "@/features/meals/client-request";
+import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meals/meal-retry";
+import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
 
 const prompts = [
   "What can I make tonight?",
@@ -30,6 +32,7 @@ export function MealChatPanel({
     chatResetVersion,
     clearChat,
     clearRecipeFocus,
+    deferAiRequests,
   } = useHousehold();
   const { workspace } = state;
   const [pending, setPending] = useState<{
@@ -37,7 +40,10 @@ export function MealChatPanel({
     prompt: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<MealRequestWait | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
+  const latestCooldown = useRef({ until: workspace.aiCooldownUntil, deferAiRequests });
+  const cooldownActive = useMealCooldown(workspace.aiCooldownUntil);
   const context = JSON.stringify({
     pantry: state.pantry,
     preferences: state.preferences,
@@ -49,6 +55,10 @@ export function MealChatPanel({
   });
   const loading = pending?.key === context;
 
+  useEffect(() => {
+    latestCooldown.current = { until: workspace.aiCooldownUntil, deferAiRequests };
+  }, [workspace.aiCooldownUntil, deferAiRequests]);
+
   // A result from an older kitchen must never appear as a current recommendation.
   // Keeping this panel mounted allows a response to finish when only the view changes.
   useEffect(
@@ -58,12 +68,15 @@ export function MealChatPanel({
 
   async function sendMessage(prompt: string) {
     const message = prompt.trim();
-    if (!message || loading) return;
+    if (!message || loading || activeRequest.current) return;
+    if (cooldownActive) {
+      setError("AI is busy. Please wait before sending another message.");
+      return;
+    }
     if (/^https?:\/\/\S+$/i.test(message)) {
       onImportUrl(message);
       return;
     }
-    activeRequest.current?.abort();
     const controller = new AbortController();
     activeRequest.current = controller;
     controller.signal.addEventListener(
@@ -81,27 +94,30 @@ export function MealChatPanel({
     setChatDraft(message);
     setPending({ key: context, prompt: message });
     setError(null);
+    setWaiting(null);
     try {
-      const response = await fetch("/api/meals/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...JSON.parse(context),
-          messages: workspace.chatMessages,
-          message,
-        }),
-        signal: AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(50000),
-        ]),
+      const result = await withMealRateLimitRecovery(async () => {
+        const response = await fetch("/api/meals/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...JSON.parse(context),
+            messages: workspace.chatMessages,
+            message,
+          }),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(50000)]),
+        });
+        if (!response.ok) throw await mealRequestFailure(response);
+        const parsed = chatMealsResponseSchema.safeParse(await response.json());
+        if (!parsed.success)
+          throw new Error("That reply wasn’t in a usable format. Please try again.");
+        return parsed.data;
+      }, {
+        signal: controller.signal,
+        getCooldownUntil: () => latestCooldown.current.until,
+        deferRequests: (until) => latestCooldown.current.deferAiRequests(until),
+        onWaiting: setWaiting,
       });
-      if (!response.ok)
-        throw new Error(await mealRequestError(response));
-      const parsed = chatMealsResponseSchema.safeParse(await response.json());
-      if (!parsed.success)
-        throw new Error(
-          "That reply wasn’t in a usable format. Please try again.",
-        );
       if (controller.signal.aborted) return;
       activeRequest.current = null;
       completeChatTurn(
@@ -111,15 +127,15 @@ export function MealChatPanel({
             role: "user",
             text: message,
             recipes: [],
-            servings: parsed.data.servings,
+            servings: result.servings,
           },
           {
             id: crypto.randomUUID(),
             role: "assistant",
-            text: parsed.data.reply,
-            source: parsed.data.source,
-            recipes: parsed.data.recipes,
-            servings: parsed.data.servings,
+            text: result.reply,
+            source: result.source,
+            recipes: result.recipes,
+            servings: result.servings,
           },
         ],
         message,
@@ -160,7 +176,7 @@ export function MealChatPanel({
             <button
               className="prompt-chip"
               key={prompt}
-              disabled={loading}
+              disabled={loading || cooldownActive}
               onClick={() => void sendMessage(prompt)}
             >
               {prompt}
@@ -217,7 +233,7 @@ export function MealChatPanel({
         {loading ? (
           <div className="chat-pending" role="status">
             <LoaderCircle size={17} className="spinning" aria-hidden="true" />
-            Looking through your kitchen…
+            {waiting ? `AI is busy. We’ll retry once at ${formatMealRetryTime(waiting.until)}.` : "Looking through your kitchen…"}
           </div>
         ) : null}
       </div>
@@ -252,7 +268,7 @@ export function MealChatPanel({
               <button
                 type="button"
                 className="prompt-chip"
-                disabled={loading}
+                disabled={loading || cooldownActive}
                 key={prompt}
                 onClick={() => void sendMessage(prompt)}
               >
@@ -274,17 +290,20 @@ export function MealChatPanel({
           />
           <button
             className="button"
-            disabled={loading || !workspace.chatDraft.trim()}
+            disabled={loading || cooldownActive || !workspace.chatDraft.trim()}
             type="submit"
           >
             <ArrowUp size={17} aria-hidden="true" />
-            <span>{loading ? "Sending…" : "Send"}</span>
+            <span>{loading ? waiting ? "Waiting…" : "Sending…" : cooldownActive ? "Please wait" : "Send"}</span>
           </button>
         </div>
         {error ? (
           <p className="error-message" role="alert">
             {error}
           </p>
+        ) : null}
+        {!loading && cooldownActive ? (
+          <p className="status-message" role="status">Your message is still here. Sending will be available after {formatMealRetryTime(workspace.aiCooldownUntil)}.</p>
         ) : null}
         {pending && !loading ? (
           <p className="error-message" role="status">

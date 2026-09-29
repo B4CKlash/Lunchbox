@@ -91,3 +91,15 @@ test("chat forwards cancellation and returns public AI failures without losing t
     if (code === "rate_limit") assert.equal(response.headers.get("Retry-After"), "30");
   }
 });
+
+test("chat and suggestion APIs forward provider cooldown without exposing diagnostics", async () => {
+  const fail = async () => { throw new AiRuntimeError("rate_limit", { retryAfterSeconds: 172800 }); };
+  const handlers = createMealHandlers({ chat: fail, suggest: fail });
+  for (const handle of [handlers.chat, handlers.suggest]) {
+    const response = await handle(request(JSON.stringify(context())));
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("Retry-After"), "172800");
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.deepEqual(Object.keys(await response.json()).sort(), ["code", "error"]);
+  }
+});

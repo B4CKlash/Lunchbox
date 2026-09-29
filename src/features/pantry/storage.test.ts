@@ -76,6 +76,7 @@ test("legacy v1 saves gain a blank workspace without losing pantry, preferences,
   assert.deepEqual(loaded.meals, legacy.meals);
   assert.deepEqual(loaded.workspace, {
     mode: "suggestions",
+    aiCooldownUntil: 0,
     recipeBox: [],
     chatMessages: [],
     chatDraft: "",
@@ -111,6 +112,21 @@ test("recipe variety and pending pantry additions survive reload without changin
   assert.deepEqual(upgraded.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [] });
   assert.deepEqual(upgraded.pantry, state.pantry);
   assert.deepEqual(upgraded.workspace.recipeBox, state.workspace.recipeBox);
+});
+
+test("AI cooldown survives reload and older saves start without a cooldown", () => {
+  const state = createSampleHousehold();
+  state.workspace.aiCooldownUntil = Date.UTC(2026, 8, 30);
+  let stored = "";
+  saveHousehold({ setItem: (key, value) => {
+    assert.equal(key, HOUSEHOLD_STORAGE_KEY);
+    stored = value;
+  } }, state);
+  assert.equal(loadHousehold({ getItem: () => stored })?.workspace.aiCooldownUntil, state.workspace.aiCooldownUntil);
+  const legacy = { ...state, workspace: { ...state.workspace, aiCooldownUntil: undefined } };
+  const loaded = loadHousehold({ getItem: () => JSON.stringify(legacy) });
+  assert.equal(loaded?.workspace.aiCooldownUntil, 0);
+  assert.deepEqual(loaded?.pantry, state.pantry);
 });
 
 test("missing, corrupt, incompatible, and invalid saves fall back safely", () => {

@@ -32,6 +32,22 @@ function message(id: string): ChatMessage {
   };
 }
 
+test("AI cooldown is shared, can only extend, and leaves kitchen content untouched", () => {
+  const original = createSampleHousehold();
+  const until = Date.UTC(2026, 8, 30);
+  const deferred = applyHouseholdAction(original, { type: "deferAiRequests", until });
+  assert.equal(deferred.workspace.aiCooldownUntil, until);
+  assert.deepEqual(deferred.pantry, original.pantry);
+  assert.deepEqual(deferred.preferences, original.preferences);
+  assert.deepEqual(deferred.workspace.chatMessages, original.workspace.chatMessages);
+  assert.deepEqual(deferred.workspace.suggestions, original.workspace.suggestions);
+  assert.equal(applyHouseholdAction(deferred, { type: "deferAiRequests", until: until - 1000 }).workspace.aiCooldownUntil, until);
+  assert.equal(applyHouseholdAction(deferred, { type: "deferAiRequests", until: until + 1000 }).workspace.aiCooldownUntil, until + 1000);
+  for (const invalid of [-1, NaN, Infinity, 1.5]) {
+    assert.deepEqual(applyHouseholdAction(deferred, { type: "deferAiRequests", until: invalid }), deferred);
+  }
+});
+
 test("adding an apple prioritizes it until current suggestions complete and remembers dishes for reload", () => {
   const original = createSampleHousehold();
   const apple = { id: "apples", name: "Apple", quantity: 1, unit: "each" as const, location: "Fridge" as const, useSoon: false, tag: "special" as const };

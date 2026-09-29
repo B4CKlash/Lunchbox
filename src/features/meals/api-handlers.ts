@@ -44,8 +44,8 @@ export function createMealHandlers(
     } catch (reason) {
       if (reason instanceof RequestBodyError)
         return Response.json({ error: reason.message, code: reason.code }, { status: reason.status, headers });
-      const { status, error, code } = publicAiError(reason);
-      return Response.json({ error, code }, { status, headers: { ...headers, ...(code === "rate_limit" ? { "Retry-After": "30" } : {}) } });
+      const { status, error, code, retryAfterSeconds } = publicAiError(reason);
+      return Response.json({ error, code }, { status, headers: { ...headers, ...(code === "rate_limit" ? { "Retry-After": String(retryAfterSeconds ?? 30) } : {}) } });
     }
   }
   return { chat: (request: Request) => handle(request, "chat"), suggest: (request: Request) => handle(request, "suggest") };
