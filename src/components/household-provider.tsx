@@ -10,53 +10,66 @@ import {
   type ReactNode,
 } from "react";
 import {
-  householdStateSchema,
+  type CalendarSettings,
+  type ChatMessage,
   type HouseholdState,
   type PantryItem,
+  type PlannedMeal,
   type Preferences,
   type Recipe,
+  type RecipeSource,
+  type WorkspaceMode,
 } from "@/lib/contracts";
+import {
+  householdReducer,
+  type HouseholdStore,
+} from "@/features/meals/workspace-state";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { loadHousehold, saveHousehold } from "@/features/pantry/storage";
+import { nextWeekStart } from "@/features/planning/calendar";
 
 type HouseholdContextValue = {
   state: HouseholdState;
   ready: boolean;
   storageError: string | null;
   updateError: string | null;
+  chatResetVersion: number;
   setPantry: (pantry: PantryItem[]) => void;
   setPreferences: (preferences: Preferences) => void;
   addMeal: (recipe: Recipe, servings: number) => void;
   removeMeal: (id: string) => void;
   setMealServings: (id: string, servings: number) => void;
+  setCalendarSettings: (patch: Partial<CalendarSettings>) => void;
+  setCalendarDraft: (meals: PlannedMeal[]) => void;
+  commitCalendar: () => void;
+  discardCalendarDraft: () => void;
+  setWorkspaceMode: (mode: WorkspaceMode) => void;
+  saveRecipe: (recipe: Recipe, source: RecipeSource) => void;
+  removeSavedRecipe: (recipeId: string) => void;
+  setChatDraft: (text: string) => void;
+  discussRecipe: (recipe: Recipe, servings: number) => void;
+  clearRecipeFocus: () => void;
+  appendChatMessages: (messages: ChatMessage[]) => void;
+  completeChatTurn: (messages: ChatMessage[], submittedDraft: string) => void;
+  clearChat: () => void;
   reset: () => void;
 };
 const HouseholdContext = createContext<HouseholdContextValue | null>(null);
-
-type StateUpdate =
-  HouseholdState | ((current: HouseholdState) => HouseholdState);
-type Store = { state: HouseholdState; updateError: string | null };
-function householdReducer(current: Store, update: StateUpdate): Store {
-  const result = householdStateSchema.safeParse(
-    typeof update === "function" ? update(current.state) : update,
-  );
-  return result.success
-    ? { state: result.data, updateError: null }
-    : {
-        ...current,
-        updateError:
-          "That change could not be applied. Check quantities and servings; a kitchen can hold up to 200 ingredients and 50 planned meals.",
-      };
-}
 
 export function HouseholdProvider({ children }: { children: ReactNode }) {
   const [{ state, updateError }, update] = useReducer(
     householdReducer,
     undefined,
-    (): Store => ({ state: createSampleHousehold(), updateError: null }),
+    (): HouseholdStore => ({
+      state: createSampleHousehold(),
+      updateError: null,
+    }),
   );
   const [ready, setReady] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
+  // Ephemeral request invalidation; resetting identical household data must
+  // still prevent an older in-flight response from restoring cleared chat.
+  const [chatResetVersion, setChatResetVersion] = useState(0);
   const hydrated = useRef(false);
 
   /* eslint-disable react-hooks/set-state-in-effect -- Hydrate browser-only storage after SSR and report persistence failures. */
@@ -66,7 +79,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     hydrated.current = true;
     try {
       const saved = loadHousehold(window.localStorage);
-      if (saved) update(saved);
+      if (saved) update({ type: "replace", state: saved });
     } catch {
       setStorageError(
         "Saved data could not be loaded. You can use the sample kitchen for this visit.",
@@ -95,31 +108,64 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         ready,
         storageError,
         updateError,
-        setPantry: (pantry) => update((current) => ({ ...current, pantry })),
+        chatResetVersion,
+        setPantry: (pantry) => update({ type: "setPantry", pantry }),
         setPreferences: (preferences) =>
-          update((current) => ({ ...current, preferences })),
+          update({ type: "setPreferences", preferences }),
         addMeal: (recipe, servings) => {
           const id = crypto.randomUUID();
-          update((current) => ({
-            ...current,
-            meals: [...current.meals, { id, recipe, servings }],
-          }));
+          update({
+            type: "addMeal",
+            id,
+            recipe,
+            servings,
+            calendarStartDate: nextWeekStart(),
+          });
         },
         removeMeal: (id) =>
-          update((current) => ({
-            ...current,
-            meals: current.meals.filter((meal) => meal.id !== id),
-          })),
+          update({
+            type: "removeMeal",
+            id,
+            calendarStartDate: nextWeekStart(),
+          }),
         setMealServings: (id, servings) =>
-          update((current) => ({
-            ...current,
-            meals: current.meals.map((meal) =>
-              meal.id === id ? { ...meal, servings } : meal,
-            ),
-          })),
+          update({
+            type: "setMealServings",
+            id,
+            servings,
+            calendarStartDate: nextWeekStart(),
+          }),
+        setCalendarSettings: (patch) =>
+          update({ type: "setCalendarSettings", patch }),
+        setCalendarDraft: (meals) =>
+          update({
+            type: "setCalendarDraft",
+            meals,
+            calendarStartDate: nextWeekStart(),
+          }),
+        commitCalendar: () => update({ type: "commitCalendar" }),
+        discardCalendarDraft: () => update({ type: "discardCalendarDraft" }),
+        setWorkspaceMode: (mode) => update({ type: "setWorkspaceMode", mode }),
+        saveRecipe: (recipe, source) =>
+          update({ type: "saveRecipe", recipe, source }),
+        removeSavedRecipe: (recipeId) =>
+          update({ type: "removeSavedRecipe", recipeId }),
+        setChatDraft: (text) => update({ type: "setChatDraft", text }),
+        discussRecipe: (recipe, servings) =>
+          update({ type: "discussRecipe", recipe, servings }),
+        clearRecipeFocus: () => update({ type: "clearRecipeFocus" }),
+        appendChatMessages: (messages) =>
+          update({ type: "appendChatMessages", messages }),
+        completeChatTurn: (messages, submittedDraft) =>
+          update({ type: "completeChatTurn", messages, submittedDraft }),
+        clearChat: () => {
+          setChatResetVersion((version) => version + 1);
+          update({ type: "clearChat" });
+        },
         reset: () => {
           setStorageError(null);
-          update(createSampleHousehold());
+          setChatResetVersion((version) => version + 1);
+          update({ type: "replace", state: createSampleHousehold() });
         },
       }}
     >

@@ -5,6 +5,16 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { pantryItemSchema, type PantryItem, type PantryTag } from "@/lib/contracts";
+import {
+  inferPantryCategory,
+  pantryCategories,
+  pantryCategoryLabel,
+} from "@/features/pantry/categories";
+import {
+  pantryItemSchema,
+  type PantryCategory,
+  type PantryItem,
+} from "@/lib/contracts";
 
 const locations = ["Fridge", "Freezer", "Cupboard", "Garden"] as const;
 const amount = (quantity: number, unit: string) =>
@@ -14,7 +24,7 @@ type ImportRow = { name: string; quantity: number; unit: PantryItem["unit"]; loc
 export function PantryPanel() {
   const { state, setPantry } = useHousehold();
   const [editor, setEditor] = useState<PantryItem | "new" | null>(null);
-  const [filter, setFilter] = useState<"all" | "soon">("all");
+  const [filter, setFilter] = useState<"all" | "soon" | PantryCategory>("all");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [bulkText, setBulkText] = useState("");
@@ -29,7 +39,12 @@ export function PantryPanel() {
     (item) => item.useSoon && item.quantity > 0,
   );
   const inStock = state.pantry.filter((item) => item.quantity > 0);
-  const shown = filter === "soon" ? useSoon : state.pantry;
+  const shown =
+    filter === "all"
+      ? state.pantry
+      : filter === "soon"
+        ? useSoon
+        : state.pantry.filter((item) => inferPantryCategory(item) === filter);
   const editing = editor && editor !== "new" ? editor : null;
 
   function openEditor(item: PantryItem | "new") {
@@ -64,6 +79,7 @@ export function PantryPanel() {
       location: form.get("location"),
       useSoon: form.get("useSoon") === "on",
       tag: form.get("tag"),
+      category: form.get("category"),
     });
     if (!result.success) {
       setError(
@@ -318,6 +334,18 @@ export function PantryPanel() {
                   <option value="staple">Staple</option>
                   <option value="seasonal">Seasonal</option>
                   <option value="special">Special</option>
+                Food group
+                <select
+                  name="category"
+                  defaultValue={
+                    editing ? inferPantryCategory(editing) : "other"
+                  }
+                >
+                  {pantryCategories.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
                 </select>
               </label>
             </div>
@@ -367,7 +395,7 @@ export function PantryPanel() {
             <h2 id="pantry-heading">Your pantry</h2>
             <p className="muted">A small inventory with a big part to play.</p>
           </div>
-          <div className="segmented-control" aria-label="Filter pantry">
+          <div className="segmented-control pantry-filters" aria-label="Filter pantry">
             <button
               className={filter === "all" ? "selected" : ""}
               aria-pressed={filter === "all"}
@@ -382,6 +410,21 @@ export function PantryPanel() {
             >
               Use soon <span>{useSoon.length}</span>
             </button>
+            {pantryCategories.map((category) => {
+              const count = state.pantry.filter(
+                (item) => inferPantryCategory(item) === category.value,
+              ).length;
+              return (
+                <button
+                  key={category.value}
+                  className={filter === category.value ? "selected" : ""}
+                  aria-pressed={filter === category.value}
+                  onClick={() => setFilter(category.value)}
+                >
+                  {category.label} <span>{count}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
         {shown.length ? (
@@ -391,6 +434,7 @@ export function PantryPanel() {
                 <tr>
                   <th scope="col">Ingredient</th>
                   <th scope="col">On hand</th>
+                  <th scope="col">Food group</th>
                   <th scope="col">Storage</th>
                   <th scope="col">Tag</th>
                   <th scope="col">Keep in mind</th>
@@ -411,6 +455,11 @@ export function PantryPanel() {
                     </td>
                     <td className="quantity">
                       {amount(item.quantity, item.unit)}
+                    </td>
+                    <td>
+                      <span className="category-label">
+                        {pantryCategoryLabel(inferPantryCategory(item))}
+                      </span>
                     </td>
                     <td>
                       <span className="location-label">{item.location}</span>
@@ -445,12 +494,16 @@ export function PantryPanel() {
             <h3>
               {filter === "soon"
                 ? "Nothing needs the spotlight."
-                : "Make yourself at home."}
+                : filter === "all"
+                  ? "Make yourself at home."
+                  : `No ${pantryCategoryLabel(filter).toLowerCase()} here yet.`}
             </h3>
             <p>
               {filter === "soon"
                 ? "Mark an ingredient “Use this soon” to find it here."
-                : "Add your first ingredient to start filling your pantry."}
+                : filter === "all"
+                  ? "Add your first ingredient to start filling your pantry."
+                  : "Edit an ingredient’s food group or add something new."}
             </p>
             {filter === "all" ? (
               <button

@@ -1,4 +1,4 @@
-import type { HouseholdState } from "@/lib/contracts";
+import { recipeWorkspaceSchema, type HouseholdState } from "@/lib/contracts";
 
 /** A fresh, independent household each time; ingredient IDs are shared with recipes. */
 export function createSampleHousehold(): HouseholdState {
@@ -13,6 +13,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Fridge",
         useSoon: true,
         tag: "seasonal",
+        category: "vegetables",
       },
       {
         id: "lentils",
@@ -22,6 +23,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Cupboard",
         useSoon: false,
         tag: "special",
+        category: "protein",
       },
       {
         id: "rice",
@@ -32,6 +34,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Cupboard",
         useSoon: false,
         tag: "staple",
+        category: "carbs",
       },
       {
         id: "onion",
@@ -42,6 +45,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Cupboard",
         useSoon: false,
         tag: "staple",
+        category: "vegetables",
       },
       {
         id: "oil",
@@ -52,6 +56,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Cupboard",
         useSoon: false,
         tag: "staple",
+        category: "fats",
       },
       {
         id: "zucchini",
@@ -61,6 +66,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Fridge",
         useSoon: true,
         tag: "seasonal",
+        category: "vegetables",
       },
       {
         id: "pepper",
@@ -70,6 +76,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Fridge",
         useSoon: true,
         tag: "seasonal",
+        category: "vegetables",
       },
       {
         id: "beans",
@@ -79,6 +86,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Cupboard",
         useSoon: false,
         tag: "special",
+        category: "protein",
       },
       {
         id: "spinach",
@@ -88,6 +96,7 @@ export function createSampleHousehold(): HouseholdState {
         location: "Fridge",
         useSoon: false,
         tag: "seasonal",
+        category: "vegetables",
       },
       {
         id: "lemon",
@@ -97,9 +106,24 @@ export function createSampleHousehold(): HouseholdState {
         location: "Fridge",
         useSoon: false,
         tag: "seasonal",
+        category: "fruit",
       },
     ],
-    preferences: { servings: 2, maxMinutes: 30, prioritizeUseSoon: true },
+    preferences: {
+      servings: 2,
+      maxMinutes: 30,
+      prioritizeUseSoon: true,
+      onboardingComplete: false,
+      goals: [],
+      dietaryNeeds: [],
+      allergies: [],
+      dislikedIngredients: [],
+      nutritionFocus: [],
+      flavorPreferences: [],
+      cuisinePreferences: [],
+      cookingStyles: [],
+    },
     meals: [],
+    workspace: recipeWorkspaceSchema.parse({}),
   };
 }
