@@ -9,7 +9,7 @@ const amount = (quantity: number, unit: string) =>
   `${quantity.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${unit}`;
 
 export function ShoppingPanel() {
-  const { state } = useHousehold();
+  const { state, setWorkspaceMode } = useHousehold();
   const shopping = buildShoppingList(state.pantry, state.meals);
   const servings = state.meals.reduce(
     (total, meal) => total + meal.servings,
@@ -24,7 +24,11 @@ export function ShoppingPanel() {
           <h1>A little list. A good week.</h1>
           <p>Your meals, minus what’s already in the kitchen.</p>
         </div>
-        <Link className="button secondary" href="/meals">
+        <Link
+          className="button secondary"
+          href="/meals"
+          onClick={() => setWorkspaceMode("plan")}
+        >
           Edit your plan <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </header>
@@ -99,7 +103,7 @@ export function ShoppingPanel() {
             </p>
           </section>
 
-          <aside className="shopping-aside">
+          <aside className="shopping-aside" aria-label="Plan summary">
             <section className="plan-summary">
               <span className="eyebrow">A PLAN THAT ADDS UP</span>
               <h2>
@@ -132,7 +136,11 @@ export function ShoppingPanel() {
                   </div>
                 ))}
               </div>
-              <Link className="text-link" href="/meals">
+              <Link
+                className="text-link"
+                href="/meals"
+                onClick={() => setWorkspaceMode("plan")}
+              >
                 Back to the plan <ArrowRight size={15} aria-hidden="true" />
               </Link>
             </section>

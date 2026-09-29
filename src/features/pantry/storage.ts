@@ -9,6 +9,8 @@ export function loadHousehold(
   try {
     const stored = storage.getItem(HOUSEHOLD_STORAGE_KEY);
     if (stored === null) return null;
+    // The schema adds a blank workspace when reading pre-workspace v1 saves.
+    // Keep the original key and all valid pantry, preferences, and meal data.
     const result = householdStateSchema.safeParse(JSON.parse(stored));
     return result.success ? result.data : null;
   } catch {

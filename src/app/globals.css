@@ -1,6 +1,6 @@
 :root {
   --ink: #193f35;
-  --muted: #6c7b70;
+  --muted: #56665a;
   --paper: #f8f7f2;
   --white: #fffefa;
   --line: #e1e5da;
@@ -1833,5 +1833,322 @@ a.button:hover {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* One workspace, with shared recipe actions across every entry point. */
+.workspace-navigation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  margin: 0 0 26px;
+  padding-bottom: 12px;
+}
+.workspace-view {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: transparent;
+  color: var(--muted);
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  min-height: 44px;
+}
+.workspace-view.active {
+  background: var(--green);
+  color: var(--white);
+}
+.workspace-count {
+  background: #ffffff22;
+  border-radius: 5px;
+  min-width: 21px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+.workspace-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.collection-switch {
+  display: flex;
+  gap: 4px;
+  background: var(--pale);
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.collection-switch button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 11px;
+}
+.collection-switch button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--white);
+  box-shadow: 0 1px 4px #193f3510;
+}
+.recipe-secondary-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 7px;
+}
+.recipe-secondary-actions .text-button,
+.planned-entry-details .text-button,
+.plan-footer .text-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.recipe-planned {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--green);
+  font-size: 10px;
+  margin: 8px 0 0;
+}
+.workspace-plan-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: 25px 28px;
+  border-radius: 15px;
+  background: var(--lime);
+  margin-top: 28px;
+}
+.workspace-plan-strip h2 {
+  font-size: 21px;
+  letter-spacing: -0.5px;
+  margin: 5px 0;
+}
+.workspace-plan-strip p {
+  font-size: 11px;
+  color: #516849;
+  margin: 0;
+}
+.workspace-plan-strip .actions {
+  flex-direction: column;
+  gap: 12px;
+}
+.workspace-plan {
+  margin-top: 0;
+}
+.planned-entry-details {
+  margin: 0 0 16px 42px;
+}
+.planned-entry-details .recipe-details {
+  border: 0;
+  padding-top: 0;
+  padding-bottom: 2px;
+}
+.plan-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+}
+.chat-intro > p {
+  font-size: 12px;
+  max-width: 680px;
+}
+.prompt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.prompt-chip {
+  background: var(--pale);
+  color: var(--ink);
+  font-size: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+}
+.chat-welcome {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  color: var(--muted);
+  padding: 35px 24px;
+  max-width: 540px;
+  margin: 0 auto;
+}
+.chat-welcome p {
+  font-size: 12px;
+  margin: 0;
+}
+.chat-messages {
+  display: grid;
+  gap: 20px;
+  margin: 25px 0;
+}
+.chat-message {
+  min-width: 0;
+}
+.chat-message-user {
+  justify-self: end;
+  max-width: 85%;
+  padding: 16px 20px;
+  border-radius: 16px 16px 3px 16px;
+  background: #e7eddf;
+}
+.chat-message-assistant {
+  padding: 4px 0 10px;
+}
+.chat-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 15px;
+}
+.chat-message-user .chat-text {
+  margin-bottom: 0;
+}
+.chat-pending {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 15px;
+}
+.chat-composer {
+  padding: 20px 23px;
+}
+.chat-composer label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.composer-field {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+.composer-field textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  min-height: 74px;
+  max-height: 240px;
+  border: 1px solid #ccd6c4;
+  background: var(--white);
+  padding: 13px;
+  border-radius: 9px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+textarea:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 3px;
+}
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+.composer-footer .footnote {
+  margin: 0;
+}
+.recipe-focus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--lime);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-bottom: 15px;
+}
+.focused-prompts {
+  margin-bottom: 16px;
+}
+@media (max-width: 950px) {
+  .workspace-hint {
+    display: none;
+  }
+  .suggestions-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .workspace-plan-strip {
+    align-items: flex-start;
+  }
+}
+@media (max-width: 700px) {
+  .workspace-navigation {
+    gap: 4px;
+  }
+  .workspace-view {
+    flex: 1;
+    padding: 10px 8px;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .workspace-view svg {
+    width: 15px;
+  }
+  .workspace-plan-strip {
+    flex-direction: column;
+    padding: 23px;
+  }
+  .workspace-plan-strip .actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .workspace-plan .section-heading {
+    flex-wrap: wrap;
+  }
+  .plan-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .planned-entry-details {
+    margin-left: 0;
+  }
+  .chat-intro .section-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .chat-composer {
+    padding: 17px;
+  }
+  .composer-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .composer-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .chat-message-user {
+    max-width: 94%;
+  }
+  .chat-welcome {
+    padding: 10px;
   }
 }

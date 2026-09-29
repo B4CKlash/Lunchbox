@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="Kitchen navigation">
         <Link className="brand" href="/pantry" aria-label="LunchBox home">
           <span className="brand-mark">
             <CookingPot size={27} />
@@ -69,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => {
               if (
                 window.confirm(
-                  "Reset this browser’s pantry and meal plan to the sample kitchen?",
+                  "Reset this browser’s pantry, meal plan, recipe box, and conversation to the sample kitchen?",
                 )
               )
                 reset();

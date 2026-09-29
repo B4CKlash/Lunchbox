@@ -46,19 +46,59 @@ export const plannedMealSchema = z.object({
   recipe: recipeSchema,
   servings: z.number().int().min(1).max(12),
 });
+export const recipeSourceSchema = z.enum(["demo", "ai"]);
+export const savedRecipeSchema = z.object({
+  recipe: recipeSchema,
+  source: recipeSourceSchema,
+});
+export const chatMessageSchema = z.object({
+  id: z.string().min(1).max(120),
+  role: z.enum(["user", "assistant"]),
+  text: z.string().min(1).max(2000),
+  source: recipeSourceSchema.optional(),
+  recipes: z.array(recipeSchema).max(10).default([]),
+  servings: z.number().int().min(1).max(12),
+});
+export const workspaceModeSchema = z.enum(["suggestions", "chat", "plan"]);
+export const recipeWorkspaceSchema = z.object({
+  mode: workspaceModeSchema.default("suggestions"),
+  recipeBox: z.array(savedRecipeSchema).max(100).default([]),
+  chatMessages: z.array(chatMessageSchema).max(20).default([]),
+  chatDraft: z.string().max(1000).default(""),
+  focusedRecipe: recipeSchema.nullable().default(null),
+  focusedServings: z.number().int().min(1).max(12).nullable().default(null),
+});
 export const householdStateSchema = z.object({
   version: z.literal(1),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   meals: z.array(plannedMealSchema).max(50),
+  // Additive migration: existing v1 saves retain their kitchen and plan.
+  workspace: recipeWorkspaceSchema.prefault({}),
 });
 export const suggestMealsRequestSchema = z.object({
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
 });
 export const suggestMealsResponseSchema = z.object({
-  source: z.enum(["demo", "ai"]),
+  source: recipeSourceSchema,
   recipes: z.array(recipeSchema).max(10),
+});
+export const chatMealsRequestSchema = z.object({
+  pantry: z.array(pantryItemSchema).max(200),
+  preferences: preferencesSchema,
+  meals: z.array(plannedMealSchema).max(50),
+  recipeBox: z.array(savedRecipeSchema).max(100),
+  messages: z.array(chatMessageSchema).max(20),
+  message: z.string().trim().min(1).max(1000),
+  focusedRecipe: recipeSchema.optional(),
+  focusedServings: z.number().int().min(1).max(12).optional(),
+});
+export const chatMealsResponseSchema = z.object({
+  source: recipeSourceSchema,
+  reply: z.string().min(1).max(2000),
+  recipes: z.array(recipeSchema).max(10),
+  servings: z.number().int().min(1).max(12),
 });
 
 export type Unit = z.infer<typeof unitSchema>;
@@ -67,9 +107,16 @@ export type PantryItem = z.infer<typeof pantryItemSchema>;
 export type Preferences = z.infer<typeof preferencesSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
 export type PlannedMeal = z.infer<typeof plannedMealSchema>;
+export type RecipeSource = z.infer<typeof recipeSourceSchema>;
+export type SavedRecipe = z.infer<typeof savedRecipeSchema>;
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export type WorkspaceMode = z.infer<typeof workspaceModeSchema>;
+export type RecipeWorkspace = z.infer<typeof recipeWorkspaceSchema>;
 export type HouseholdState = z.infer<typeof householdStateSchema>;
 export type SuggestMealsRequest = z.infer<typeof suggestMealsRequestSchema>;
 export type SuggestMealsResponse = z.infer<typeof suggestMealsResponseSchema>;
+export type ChatMealsRequest = z.infer<typeof chatMealsRequestSchema>;
+export type ChatMealsResponse = z.infer<typeof chatMealsResponseSchema>;
 export type ShoppingItem = {
   ingredientId: string;
   name: string;
