@@ -3798,3 +3798,29 @@ input.calendar-search {
     padding: 10px;
   }
 }
+
+/* Recipe blocks accumulate without moving the cards someone is reading. */
+.recipe-feed { display: grid; gap: 24px; }
+.feed-steering { padding: 22px; border: 1px solid #d8dfcf; border-radius: 16px; background: var(--pale); }
+.feed-steering h3 { margin: 0 0 8px; font-size: 20px; }
+.feed-steering p { margin-top: 0; }
+.feed-direction-form { display: flex; align-items: end; gap: 12px; }
+.feed-direction-form .field { flex: 1; min-width: 0; }
+.feed-direction-form input { width: 100%; }
+.feed-direction-note { margin: 14px 0 0 !important; overflow-wrap: anywhere; }
+.feed-toolbar, .feed-block-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.feed-toolbar p, .feed-block-heading p { margin: 6px 0 0; }
+.feed-block { min-width: 0; }
+.feed-block-heading { margin-bottom: 14px; }
+.feed-block-heading h3 { margin: 0; }
+.feed-block-heading h3 span { font-size: 14px; font-weight: 400; }
+.feed-block-heading p { overflow-wrap: anywhere; }
+.feed-progress { padding: 18px; border: 1px dashed #c9d4c0; border-radius: 16px; text-align: center; }
+.feed-progress > svg { margin: 0 auto; }
+.feed-progress p { margin: 10px 0 16px; }
+.feed-block + .feed-block { padding-top: 26px; border-top: 1px solid #d8dfcf; }
+@media (max-width: 700px) {
+  .feed-direction-form, .feed-toolbar, .feed-block-heading { align-items: stretch; flex-direction: column; }
+  .feed-steering { padding: 16px; }
+  .feed-block-heading .pill { align-self: start; }
+}

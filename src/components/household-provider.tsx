@@ -19,6 +19,7 @@ import {
   type Recipe,
   type RecipeSource,
   type SuggestMealsRequest,
+  type SuggestionBlock,
   type WorkspaceMode,
 } from "@/lib/contracts";
 import {
@@ -39,6 +40,9 @@ type HouseholdContextValue = {
   setPantry: (pantry: PantryItem[]) => void;
   setPreferences: (preferences: Preferences) => void;
   recordSuggestions: (input: SuggestMealsRequest, recipes: Recipe[]) => void;
+  setSuggestionDirection: (direction: string) => void;
+  setSuggestionStreamEnabled: (enabled: boolean) => void;
+  appendSuggestionBlock: (input: SuggestMealsRequest, block: SuggestionBlock) => void;
   deferAiRequests: (until: number) => void;
   addMeal: (recipe: Recipe, servings: number) => void;
   removeMeal: (id: string) => void;
@@ -126,6 +130,9 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
           update({ type: "setPreferences", preferences }),
         recordSuggestions: (input, recipes) =>
           update({ type: "recordSuggestions", input, recipes }),
+        setSuggestionDirection: (direction) => update({ type: "setSuggestionDirection", direction }),
+        setSuggestionStreamEnabled: (enabled) => update({ type: "setSuggestionStreamEnabled", enabled }),
+        appendSuggestionBlock: (input, block) => update({ type: "appendSuggestionBlock", input, block }),
         deferAiRequests: (until) => update({ type: "deferAiRequests", until }),
         addMeal: (recipe, servings) => {
           const id = crypto.randomUUID();

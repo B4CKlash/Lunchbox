@@ -195,9 +195,23 @@ export const chatMessageSchema = z.object({
   servings: z.number().int().min(1).max(12),
 });
 export const workspaceModeSchema = z.enum(["suggestions", "chat", "plan"]);
+export const directionSchema = z.string().trim().max(1000);
+export const suggestionBlockSchema = z.object({
+  id: z.string().min(1).max(120),
+  sequence: z.number().int().positive(),
+  contextKey: z.string().max(100000),
+  direction: directionSchema,
+  servings: z.number().int().min(1).max(12),
+  source: recipeSourceSchema,
+  recipes: z.array(recipeSchema).min(1).max(6),
+  explanation: z.string().min(1).max(2000).optional(),
+});
 export const suggestionMemorySchema = z.object({
   recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
   pendingIngredients: z.array(knownIngredientSchema).max(200).default([]),
+  direction: directionSchema.default(""),
+  streamEnabled: z.boolean().default(true),
+  blocks: z.array(suggestionBlockSchema).max(20).default([]),
 });
 export const recipeWorkspaceSchema = z.object({
   mode: workspaceModeSchema.default("suggestions"),
@@ -222,6 +236,7 @@ export const householdStateSchema = z.object({
 export const suggestMealsRequestSchema = z.object({
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
+  direction: directionSchema.optional(),
   knownIngredients: z.array(knownIngredientSchema).max(2000).optional(),
   // Bounded context from the existing household workspace.
   recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
@@ -313,6 +328,7 @@ export type RecipeWorkspace = z.infer<typeof recipeWorkspaceSchema>;
 export type HouseholdState = z.infer<typeof householdStateSchema>;
 export type SuggestMealsRequest = z.infer<typeof suggestMealsRequestSchema>;
 export type SuggestMealsResponse = z.infer<typeof suggestMealsResponseSchema>;
+export type SuggestionBlock = z.infer<typeof suggestionBlockSchema>;
 export type ChatMealsRequest = z.infer<typeof chatMealsRequestSchema>;
 export type ChatMealsResponse = z.infer<typeof chatMealsResponseSchema>;
 export type ShoppingItem = {

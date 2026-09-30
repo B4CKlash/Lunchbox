@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatMessage, Recipe } from "@/lib/contracts";
+import type { ChatMessage, Recipe, SuggestMealsRequest, SuggestionBlock } from "@/lib/contracts";
 import { createSampleHousehold } from "@/features/pantry/seed";
 import { buildShoppingList } from "@/features/planning/shopping";
 import {
@@ -32,6 +32,138 @@ function message(id: string): ChatMessage {
   };
 }
 
+function suggestionBlock(input: SuggestMealsRequest, sequence = 1): SuggestionBlock {
+  return {
+    id: `block-${sequence}`,
+    sequence,
+    contextKey: JSON.stringify({ pantry: input.pantry, preferences: input.preferences, direction: input.direction ?? "" }),
+    direction: input.direction ?? "",
+    servings: input.preferences.servings,
+    source: "ai",
+    recipes: [{ ...recipe(`recipe-${sequence}`), name: `Rice bowl ${sequence}` }],
+  };
+}
+
+test("recipe feed appends, grows a block in place, and keeps independent snapshots and original portions", () => {
+  const original = createSampleHousehold();
+  let state = applyHouseholdAction(original, { type: "setSuggestionDirection", direction: "  More rice dishes  " });
+  state = applyHouseholdAction(state, { type: "setSuggestionStreamEnabled", enabled: false });
+  const input = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+  const first = suggestionBlock(input);
+  state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block: first });
+  first.recipes[0].ingredients[0].quantity = 999;
+  assert.equal(state.workspace.suggestions.blocks[0].recipes[0].ingredients[0].quantity, 150);
+  assert.equal(state.workspace.suggestions.direction, "More rice dishes");
+  assert.equal(state.workspace.suggestions.streamEnabled, false);
+  const grown = { ...state.workspace.suggestions.blocks[0], recipes: [...state.workspace.suggestions.blocks[0].recipes, recipe("second")] };
+  state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block: grown });
+  assert.equal(state.workspace.suggestions.blocks.length, 1);
+  assert.equal(state.workspace.suggestions.blocks[0].recipes.length, 2);
+  state = applyHouseholdAction(state, { type: "setPreferences", preferences: { ...state.preferences, servings: 4 } });
+  state = applyHouseholdAction(state, { type: "setSuggestionDirection", direction: "Now try soup" });
+  const nextInput = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+  state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input: nextInput, block: suggestionBlock(nextInput, 2) });
+  assert.deepEqual(state.workspace.suggestions.blocks.map(({ servings, direction }) => ({ servings, direction })), [
+    { servings: 2, direction: "More rice dishes" },
+    { servings: 4, direction: "Now try soup" },
+  ]);
+  assert.equal(state.workspace.suggestions.blocks[1].recipes[0].servings, 2);
+  assert.deepEqual(state.pantry, original.pantry);
+  assert.deepEqual(state.meals, original.meals);
+  assert.deepEqual(state.workspace.recipeBox, []);
+});
+
+test("recipe feed retains the latest twenty blocks and thirty recent names", () => {
+  let state = createSampleHousehold();
+  const input = { pantry: state.pantry, preferences: state.preferences };
+  for (let sequence = 1; sequence <= 35; sequence++)
+    state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block: suggestionBlock(input, sequence) });
+  assert.equal(state.workspace.suggestions.blocks.length, 20);
+  assert.equal(state.workspace.suggestions.blocks[0].sequence, 16);
+  assert.equal(state.workspace.suggestions.blocks.at(-1)?.sequence, 35);
+  assert.deepEqual(state.workspace.suggestions.recentRecipeNames, Array.from({ length: 30 }, (_, index) => `Rice bowl ${index + 6}`));
+  const replacement = { ...state.workspace.suggestions.blocks[0], explanation: "Another detail." };
+  state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block: replacement });
+  assert.equal(state.workspace.suggestions.blocks.length, 20);
+  assert.equal(state.workspace.suggestions.blocks[0].explanation, "Another detail.");
+});
+
+test("large recipe blocks evict oldest history by serialized size while preserving the latest context and portions", () => {
+  let state = createSampleHousehold();
+  const longRecipe = { ...recipe(), description: "x".repeat(400), steps: Array(20).fill("x".repeat(1000)) };
+  for (let sequence = 1; sequence <= 6; sequence++) {
+    state = applyHouseholdAction(state, { type: "setSuggestionDirection", direction: `Direction ${sequence}` });
+    state = applyHouseholdAction(state, { type: "setPreferences", preferences: { ...state.preferences, servings: sequence } });
+    const input = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+    const block = { ...suggestionBlock(input, sequence), recipes: Array.from({ length: 6 }, (_, index) => ({ ...longRecipe, id: `recipe-${sequence}-${index}`, name: `Dish ${sequence}-${index}` })) };
+    state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block });
+  }
+  const blocks = state.workspace.suggestions.blocks;
+  assert.ok(blocks.length < 6);
+  assert.ok(JSON.stringify(blocks).length * 2 <= 1_000_000);
+  assert.deepEqual(blocks.map(({ sequence }) => sequence), Array.from({ length: blocks.length }, (_, index) => 7 - blocks.length + index));
+  assert.deepEqual(blocks.map(({ direction, servings, sequence }) => ({ direction, servings, sequence })), blocks.map(({ sequence }) => ({ direction: `Direction ${sequence}`, servings: sequence, sequence })));
+  assert.equal(blocks.at(-1)?.sequence, 6);
+  assert.equal(blocks.at(-1)?.recipes[0].servings, 2);
+  assert.equal(state.workspace.suggestions.direction, "Direction 6");
+  assert.equal(state.preferences.servings, 6);
+
+  // Escaped content can make one schema-valid block exceed the byte budget.
+  const input = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+  const oversized = { ...suggestionBlock(input, 7), recipes: Array.from({ length: 6 }, (_, index) => ({ ...longRecipe, id: `oversized-${index}`, steps: Array(20).fill(String.fromCharCode(1).repeat(1000)) })) };
+  state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block: oversized });
+  assert.equal(state.workspace.suggestions.blocks.length, 1);
+  assert.equal(state.workspace.suggestions.blocks[0].id, oversized.id);
+  assert.ok(JSON.stringify(state.workspace.suggestions.blocks).length * 2 > 1_000_000);
+});
+
+test("stale recipe blocks cannot consume pantry, preference, or direction edits", () => {
+  const original = createSampleHousehold();
+  const input = { pantry: original.pantry, preferences: original.preferences };
+  const block = suggestionBlock(input);
+  const changed = [
+    applyHouseholdAction(original, { type: "setPantry", pantry: original.pantry.map((item, index) => index === 0 ? { ...item, quantity: item.quantity + 1 } : item) }),
+    applyHouseholdAction(original, { type: "setPreferences", preferences: { ...original.preferences, servings: 4 } }),
+    applyHouseholdAction(original, { type: "setSuggestionDirection", direction: "Use apples" }),
+  ];
+  for (const state of changed) {
+    assert.deepEqual(applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block }), state);
+    assert.deepEqual(applyHouseholdAction(state, { type: "recordSuggestions", input, recipes: [recipe()] }), state);
+  }
+  for (const invalid of [{ ...block, contextKey: "different kitchen" }, { ...block, servings: 4 }, { ...block, direction: "Different request" }])
+    assert.deepEqual(applyHouseholdAction(original, { type: "appendSuggestionBlock", input, block: invalid }), original);
+});
+
+test("only a valid current block clears pending additions, and legacy recording preserves feed settings", () => {
+  const original = createSampleHousehold();
+  let state = applyHouseholdAction(original, { type: "setPantry", pantry: original.pantry.map((item, index) => index === 0 ? { ...item, quantity: item.quantity + 1 } : item) });
+  state = applyHouseholdAction(state, { type: "setSuggestionDirection", direction: "Use rice" });
+  state = applyHouseholdAction(state, { type: "setSuggestionStreamEnabled", enabled: false });
+  const input = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+  const block = suggestionBlock(input);
+  for (const invalid of [
+    { ...block, recipes: [] },
+    { ...block, recipes: Array.from({ length: 7 }, () => recipe()) },
+    { ...block, recipes: [{ ...recipe(), ingredients: [{ ingredientId: "rice", name: "Rice", quantity: -1, unit: "g" as const }] }] },
+  ]) {
+    const rejected = householdReducer({ state, updateError: null }, { type: "appendSuggestionBlock", input, block: invalid });
+    assert.equal(rejected.state, state);
+    assert.ok(rejected.updateError);
+    assert.equal(rejected.state.workspace.suggestions.pendingIngredients.length, 1);
+  }
+  state = applyHouseholdAction(state, { type: "appendSuggestionBlock", input, block });
+  assert.deepEqual(state.workspace.suggestions.pendingIngredients, []);
+  const before = state.workspace.suggestions;
+  state = applyHouseholdAction(state, { type: "recordSuggestions", input, recipes: [recipe()] });
+  assert.deepEqual(state.workspace.suggestions.blocks, before.blocks);
+  assert.equal(state.workspace.suggestions.direction, before.direction);
+  assert.equal(state.workspace.suggestions.streamEnabled, before.streamEnabled);
+  assert.deepEqual(state.pantry, input.pantry);
+  const rejected = householdReducer({ state, updateError: null }, { type: "setSuggestionDirection", direction: "x".repeat(1001) });
+  assert.equal(rejected.state, state);
+  assert.ok(rejected.updateError);
+});
+
 test("AI cooldown is shared, can only extend, and leaves kitchen content untouched", () => {
   const original = createSampleHousehold();
   const until = Date.UTC(2026, 8, 30);
@@ -55,11 +187,11 @@ test("adding an apple prioritizes it until current suggestions complete and reme
   assert.deepEqual(updated.workspace.suggestions.pendingIngredients, [{ ingredientId: "apples", name: "Apple", unit: "each" }]);
   const input = { pantry: updated.pantry, preferences: updated.preferences };
   const done = applyHouseholdAction(updated, { type: "recordSuggestions", input, recipes: [recipe()] });
-  assert.deepEqual(done.workspace.suggestions, { recentRecipeNames: ["Rice bowl"], pendingIngredients: [] });
+  assert.deepEqual(done.workspace.suggestions, { ...updated.workspace.suggestions, recentRecipeNames: ["Rice bowl"], pendingIngredients: [] });
   assert.deepEqual(done.pantry, updated.pantry);
   assert.deepEqual(done.workspace.recipeBox, []);
   assert.deepEqual(done.meals, []);
-  assert.deepEqual(original.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [] });
+  assert.deepEqual(original.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [], direction: "", streamEnabled: true, blocks: [] });
 });
 
 test("empty or stale suggestion responses cannot consume a newer pantry or preference edit", () => {
