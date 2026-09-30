@@ -40,16 +40,17 @@ test("suggestion API rejects malformed and invalid input", async () => {
   assert.equal((await POST(request("🌱".repeat(25001)))).status, 413);
 });
 
-test("suggestion API passes known identities, pantry priorities, recent dishes, and cancellation to the provider", async () => {
+test("suggestion API passes known identities, pantry priorities, recent dishes, direction, and cancellation to the provider", async () => {
   const { pantry, preferences } = createSampleHousehold();
   const knownIngredients = [{ ingredientId: "favorite-mushrooms", name: "Fresh mushrooms", unit: "g" as const }];
   const recentRecipeNames = ["Mushroom rice"];
   const preferredIngredients = [{ ingredientId: "apple", name: "Apple", unit: "each" as const }];
-  const input = request(JSON.stringify({ pantry, preferences, knownIngredients, recentRecipeNames, preferredIngredients }));
+  const input = request(JSON.stringify({ pantry, preferences, knownIngredients, recentRecipeNames, preferredIngredients, direction: "  Bright Mediterranean lunches  " }));
   const handler = createMealHandlers({ chat: chatAboutMeals, suggest: async (body, options) => {
     assert.deepEqual(body.knownIngredients, knownIngredients);
     assert.deepEqual(body.recentRecipeNames, recentRecipeNames);
     assert.deepEqual(body.preferredIngredients, preferredIngredients);
+    assert.equal(body.direction, "Bright Mediterranean lunches");
     assert.ok(options.signal instanceof AbortSignal);
     assert.equal(options.signal.aborted, false);
     throw new AiRuntimeError("configuration");
@@ -67,6 +68,9 @@ test("suggestion API bounds recent dish context and preserves preference explana
   }
   const preferredIngredients = Array.from({ length: 201 }, () => ({ ingredientId: "apple", name: "Apple", unit: "each" }));
   assert.equal((await POST(request(JSON.stringify({ pantry, preferences, preferredIngredients })))).status, 400);
+  for (const direction of ["x".repeat(1001), 42]) {
+    assert.equal((await POST(request(JSON.stringify({ pantry, preferences, direction })))).status, 400);
+  }
   const explanation = "Your preferences conflict; choose which cuisine to prioritize in Chat.";
   const handler = createMealHandlers({ chat: chatAboutMeals, suggest: async () => ({ source: "ai", recipes: [], explanation }) }).suggest;
   const response = await handler(request(JSON.stringify({ pantry, preferences })));

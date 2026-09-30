@@ -28,7 +28,7 @@ import {
   localDate,
   nextWeekStart,
 } from "@/features/planning/calendar";
-import type { MealSlot, SuggestMealsResponse } from "@/lib/contracts";
+import type { MealSlot, RecipeSource } from "@/lib/contracts";
 
 const slots: MealSlot[] = ["breakfast", "lunch", "snack", "dinner"];
 const slotNames: Record<MealSlot, string> = {
@@ -48,12 +48,14 @@ function dateLabel(date: string, options: Intl.DateTimeFormatOptions) {
 export function MealPlanPanel({
   onNotice,
   suggestions,
+  suggestionSource,
   loading,
   error,
   onRefresh,
 }: {
   onNotice: (message: string) => void;
-  suggestions?: SuggestMealsResponse;
+  suggestions: CalendarRecipeChoice[];
+  suggestionSource?: RecipeSource;
   loading: boolean;
   error?: string;
   onRefresh: () => void;
@@ -116,11 +118,7 @@ export function MealPlanPanel({
   const selectedRecipe = selectedChoice?.recipe ?? selectedMeal?.recipe;
   const choices: CalendarRecipeChoice[] =
     source === "ideas"
-      ? (suggestions?.recipes ?? []).map((recipe) => ({
-          recipe,
-          source: suggestions!.source,
-          servings: state.preferences.servings,
-        }))
+      ? [...new Map(suggestions.map((choice) => [choice.recipe.id, choice])).values()]
       : source === "box"
         ? state.workspace.recipeBox.map((entry) => ({
             ...entry,
@@ -391,7 +389,7 @@ export function MealPlanPanel({
           search={search}
           onSearchChange={setSearch}
           choices={filtered}
-          suggestionSource={suggestions?.source}
+          suggestionSource={suggestionSource}
           selectedRecipeId={selectedChoice?.recipe.id}
           canRepeat={Boolean(selectedRecipe)}
           onSelectRecipe={(choice) => setSelection({ kind: "recipe", choice })}

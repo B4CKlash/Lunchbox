@@ -1,6 +1,7 @@
 import {
   chatMessageSchema,
   householdStateSchema,
+  suggestionBlockSchema,
   type CalendarSettings,
   type ChatMessage,
   type HouseholdState,
@@ -10,6 +11,7 @@ import {
   type Recipe,
   type RecipeSource,
   type SuggestMealsRequest,
+  type SuggestionBlock,
   type WorkspaceMode,
 } from "@/lib/contracts";
 import { pendingPantryIngredients, rememberRecipeNames } from "./suggestion-history";
@@ -19,6 +21,9 @@ export type HouseholdAction =
   | { type: "setPantry"; pantry: PantryItem[] }
   | { type: "setPreferences"; preferences: Preferences }
   | { type: "recordSuggestions"; input: SuggestMealsRequest; recipes: Recipe[] }
+  | { type: "setSuggestionDirection"; direction: string }
+  | { type: "setSuggestionStreamEnabled"; enabled: boolean }
+  | { type: "appendSuggestionBlock"; input: SuggestMealsRequest; block: SuggestionBlock }
   | { type: "deferAiRequests"; until: number }
   | {
       type: "addMeal";
@@ -55,6 +60,21 @@ export type HouseholdAction =
       submittedDraft: string;
     }
   | { type: "clearChat" };
+
+function matchesSuggestionInput(current: HouseholdState, input: SuggestMealsRequest) {
+  return JSON.stringify(input.pantry) === JSON.stringify(current.pantry)
+    && JSON.stringify(input.preferences) === JSON.stringify(current.preferences)
+    && (input.direction ?? "") === current.workspace.suggestions.direction;
+}
+
+function retainSuggestionBlocks(blocks: SuggestionBlock[]) {
+  const retained = blocks.slice(-20);
+  // Feed history shares local storage with the pantry, favorites, and plan.
+  // Keep the newest block visible even if it alone exceeds the history budget.
+  while (retained.length > 1 && JSON.stringify(retained).length * 2 > 1_000_000)
+    retained.shift();
+  return retained;
+}
 
 function nextHousehold(
   current: HouseholdState,
@@ -95,6 +115,22 @@ function nextHousehold(
       };
     case "setPreferences":
       return { ...current, preferences: action.preferences };
+    case "setSuggestionDirection":
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          suggestions: { ...current.workspace.suggestions, direction: action.direction },
+        },
+      };
+    case "setSuggestionStreamEnabled":
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          suggestions: { ...current.workspace.suggestions, streamEnabled: action.enabled },
+        },
+      };
     case "deferAiRequests":
       if (!Number.isSafeInteger(action.until) || action.until < 0) return current;
       return {
@@ -105,15 +141,40 @@ function nextHousehold(
         },
       };
     case "recordSuggestions": {
-      // A late response must not consume newer pantry edits or preference changes.
-      if (!action.recipes.length || JSON.stringify(action.input.pantry) !== JSON.stringify(current.pantry) || JSON.stringify(action.input.preferences) !== JSON.stringify(current.preferences))
+      // A late response must not consume newer kitchen edits or direction changes.
+      if (!action.recipes.length || !matchesSuggestionInput(current, action.input))
         return current;
       return {
         ...current,
         workspace: {
           ...current.workspace,
           suggestions: {
+            ...current.workspace.suggestions,
             recentRecipeNames: rememberRecipeNames(current.workspace.suggestions.recentRecipeNames, action.recipes),
+            pendingIngredients: [],
+          },
+        },
+      };
+    }
+    case "appendSuggestionBlock": {
+      if (!matchesSuggestionInput(current, action.input)) return current;
+      const block = suggestionBlockSchema.parse(action.block);
+      const contextKey = JSON.stringify({ pantry: action.input.pantry, preferences: action.input.preferences, direction: action.input.direction ?? "" });
+      if (block.contextKey !== contextKey || block.servings !== action.input.preferences.servings || block.direction !== (action.input.direction ?? ""))
+        return current;
+      const suggestions = current.workspace.suggestions;
+      const exists = suggestions.blocks.some((previous) => previous.id === block.id);
+      const blocks = retainSuggestionBlocks(exists
+        ? suggestions.blocks.map((previous) => previous.id === block.id ? block : previous)
+        : [...suggestions.blocks, block]);
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          suggestions: {
+            ...suggestions,
+            blocks,
+            recentRecipeNames: rememberRecipeNames(suggestions.recentRecipeNames, block.recipes),
             pendingIngredients: [],
           },
         },
