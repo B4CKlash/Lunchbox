@@ -94,7 +94,7 @@
           {
             "id": "local-faa82f6e-fe42-4bd4-9997-6ba4c4f3ff5b",
             "name": "Zucchini-Carrot Pasta",
-            "description": "A quick vegetarian pasta with sautéed zucchini and carrots.",
+            "description": "A quick vegetarian pasta with saut\u00e9ed zucchini and carrots.",
             "servings": 2,
             "minutes": 25,
             "ingredients": [
@@ -125,7 +125,7 @@
             ],
             "steps": [
               "Boil pasta until al dente.",
-              "Sauté chopped zucchini and carrots in olive oil until tender.",
+              "Saut\u00e9 chopped zucchini and carrots in olive oil until tender.",
               "Combine cooked pasta with the vegetables."
             ],
             "provenance": {
@@ -180,7 +180,7 @@
             ],
             "steps": [
               "Boil pasta in salted water for 8-9 minutes.",
-              "While pasta cooks, sauté chopped tomatoes and spinach in olive oil for 3 minutes.",
+              "While pasta cooks, saut\u00e9 chopped tomatoes and spinach in olive oil for 3 minutes.",
               "Drain pasta and combine with the tomato-spinach mixture."
             ],
             "provenance": {
@@ -253,7 +253,7 @@
             ],
             "steps": [
               "Cook pasta according to package instructions.",
-              "Sauté tomatoes and spices (cumin, chili powder) in olive oil.",
+              "Saut\u00e9 tomatoes and spices (cumin, chili powder) in olive oil.",
               "Add spinach and black beans; cook until wilted.",
               "Combine sauce with cooked pasta."
             ],
@@ -686,5 +686,8 @@
         ]
       }
     }
-  ]
+  ],
+  "status": "stopped: quality gate failed; not a release evaluation",
+  "releaseGatePassed": false,
+  "reason": "Manual review found shifted dates and authenticated partner mapped to the wrong member. Initial coarse completion labels must not be treated as release evidence."
 }

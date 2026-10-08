@@ -187,6 +187,7 @@ export const savedRecipeSchema = z.object({
   source: recipeContentSourceSchema,
 });
 export const chatMessageSchema = z.object({
+  authorMemberId: z.string().trim().min(1).max(160).optional(),
   id: z.string().min(1).max(120),
   role: z.enum(["user", "assistant"]),
   text: z.string().min(1).max(2000),
@@ -324,9 +325,20 @@ export const planningProposalSchema = z.object({
 export const pilotOperationSchema = z.discriminatedUnion("type", [
   ...pilotChangeSchema.options,
   z.object({ type: z.literal("set_session"), session: planningSessionSchema }),
-  z.object({ type: z.literal("receive_planning_result"), baseRevision: z.number().int().nonnegative(), session: planningSessionSchema, proposal: z.object({ id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }).optional() }),
+  z.object({ type: z.literal("receive_planning_result"), baseRevision: z.number().int().nonnegative(), session: planningSessionSchema,
+    proposal: z.object({ id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }).optional(),
+    directPlacement: z.object({ jobId: z.uuid(), request: z.string().min(1).max(2000), actorMemberId: pilotIdSchema,
+      change: z.object({ type: z.literal("create_batch"), batch: cookingBatchInputSchema, allocations: z.array(mealAllocationInputSchema).min(1).max(12) }),
+    }).optional(),
+  }).refine((operation) => !(operation.proposal && operation.directPlacement), { message: "A response must either apply its explicit placement or offer a proposal." }),
   z.object({ type: z.literal("propose"), id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }),
-  z.object({ type: z.literal("apply_proposal"), proposalId: pilotIdSchema }),
+  z.object({ type: z.literal("apply_proposal"), proposalId: pilotIdSchema,
+    selectedAllocationIds: z.array(pilotIdSchema).max(5000).optional(), includeOtherChanges: z.boolean().optional(),
+  }).superRefine((operation, context) => {
+    if ((operation.selectedAllocationIds === undefined) !== (operation.includeOtherChanges === undefined)) {
+      context.addIssue({ code: "custom", message: "Choose explicitly whether to include other changes when selecting meal placements." });
+    }
+  }),
   z.object({ type: z.literal("dismiss_proposal"), proposalId: pilotIdSchema }),
   z.object({ type: z.literal("undo"), receiptId: pilotIdSchema }),
 ]);

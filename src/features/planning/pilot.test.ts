@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { householdStateSchema, householdActionSchema, type HouseholdState, type PilotOperation, type Recipe } from "@/lib/contracts";
+import { householdStateSchema, householdActionSchema, type HouseholdState, type PilotChange, type PilotOperation, type Recipe } from "@/lib/contracts";
 import { applyPilotCommand, buildPilotShoppingList, ensurePilot, getMealCoverage, PilotCommandError } from "./pilot";
 
 const recipe: Recipe = {
@@ -204,6 +204,96 @@ test("proposals are review-only, preserve validity across conversation changes, 
   state = run(state, { type: "set_shop_through", date: "2026-10-20" }).state;
   rejectsCode(() => run(state, { type: "apply_proposal", proposalId: "proposal" }), "stale-proposal");
   assert.equal(state.pilot.coverage.length, 0);
+});
+
+test("selected proposal placements retain one correctly sized batch and groceries, and undo restores the complete review", () => {
+  const changes: PilotChange[] = [{ type: "create_batch", batch: { id: "batch", recipe, prepareDate: "2026-10-12", yield: 6, reservedExtra: 2 },
+    allocations: ["you", "partner"].flatMap((memberId) => [12, 13].map((day) => ({ id: `${memberId}-${day}`, memberId, batchId: "batch", date: `2026-10-${day}`, slot: "lunch" as const, portions: 1 }))) },
+  { type: "create_batch", batch: { id: "omit", recipe, prepareDate: "2026-10-14", yield: 1, reservedExtra: 0 }, allocations: [{ id: "omit-meal", memberId: "you", batchId: "omit", date: "2026-10-14", slot: "lunch", portions: 1 }] },
+  { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", unit: "g", quantity: 900 }] }];
+  const proposed = run(makeState(100), { type: "propose", id: "select", title: "Review the week", changes }).state;
+  const operation: PilotOperation = { type: "apply_proposal", proposalId: "select", selectedAllocationIds: ["you-12", "partner-12"], includeOtherChanges: false };
+  const applied = run(proposed, operation, "selected-once");
+  assert.equal(applied.state.pilot.batches.length, 1);
+  assert.equal(applied.state.pilot.batches[0].yield, 4);
+  assert.equal(applied.state.pilot.batches[0].reservedExtra, 2);
+  assert.deepEqual(applied.state.pilot.allocations.map((entry) => entry.id), ["you-12", "partner-12"]);
+  assert.equal(buildPilotShoppingList(applied.state).shortages[0].quantity, 300);
+  assert.equal(applied.state.pantry[0].quantity, 100, "other effects require explicit selection");
+  assert.deepEqual(applied.state.pilot.proposals[0].changes, changes, "the original review is retained");
+  assert.equal(run(applied.state, operation, "selected-once").duplicate, true);
+  const undone = run(applied.state, { type: "undo", receiptId: applied.receipt.id }).state;
+  assert.equal(undone.pilot.batches.length, 0);
+  assert.equal(undone.pilot.proposals[0].status, "pending");
+  assert.deepEqual(undone.pilot.proposals[0].changes, changes);
+});
+
+test("selecting prepared portions preserves physical stock and requires opt-in for separate changes", () => {
+  let state = run(makeState(1000), batch("cooked", 6, 2)).state;
+  state = run(state, { type: "cook_batch", batchId: "cooked", actualPortions: 6, freezerPortions: 2 }).state;
+  const changes: PilotChange[] = [
+    { type: "allocate", allocation: { id: "first", batchId: "cooked", memberId: "you", date: "2026-10-13", slot: "lunch", portions: 1 } },
+    { type: "allocate", allocation: { id: "second", batchId: "cooked", memberId: "partner", date: "2026-10-13", slot: "lunch", portions: 1 } },
+    { type: "set_shop_through", date: "2026-10-25" },
+  ];
+  state = run(state, { type: "propose", id: "prepared", title: "Plan prepared food", changes }).state;
+  const partial = run(state, { type: "apply_proposal", proposalId: "prepared", selectedAllocationIds: ["second"], includeOtherChanges: false }).state;
+  assert.deepEqual(partial.pilot.allocations.map((entry) => entry.id), ["second"]);
+  assert.deepEqual(partial.pilot.prepared, state.pilot.prepared);
+  assert.deepEqual(partial.pantry, state.pantry);
+  assert.equal(partial.pilot.shopThrough, state.pilot.shopThrough);
+  const otherOnly = run(state, { type: "apply_proposal", proposalId: "prepared", selectedAllocationIds: [], includeOtherChanges: true }).state;
+  assert.equal(otherOnly.pilot.allocations.length, 0);
+  assert.equal(otherOnly.pilot.shopThrough, "2026-10-25");
+});
+
+test("partial proposal review rejects unknown, duplicate, implicit and dependent selections atomically", () => {
+  const changes: PilotChange[] = [
+    { type: "set_coverage", coverage: { id: "covered", memberId: "you", date: "2026-10-13", slot: "lunch", reason: "work" } },
+    { type: "clear_coverage", coverageId: "covered" },
+    { type: "create_batch", batch: { id: "batch", recipe, prepareDate: "2026-10-12", yield: 1, reservedExtra: 0 }, allocations: [] },
+    { type: "allocate", allocation: { id: "dependent", batchId: "batch", memberId: "you", date: "2026-10-13", slot: "lunch", portions: 1 } },
+  ];
+  const state = run(makeState(), { type: "propose", id: "review", title: "Review dependencies", changes }).state;
+  const original = structuredClone(state);
+  for (const selectedAllocationIds of [["unknown"], ["dependent", "dependent"], ["dependent"], []]) {
+    rejectsCode(() => run(state, { type: "apply_proposal", proposalId: "review", selectedAllocationIds, includeOtherChanges: false }), "invalid");
+  }
+  rejectsCode(() => run(state, { type: "apply_proposal", proposalId: "review", selectedAllocationIds: ["dependent"] }), "invalid");
+  rejectsCode(() => run(state, { type: "apply_proposal", proposalId: "review", includeOtherChanges: true }), "invalid");
+  assert.deepEqual(state, original);
+});
+
+test("changing a referenced candidate invalidates its proposal while conversation and focus edits preserve it", () => {
+  let state = makeState();
+  state = run(state, { type: "set_session", session: { ...state.pilot.session, candidates: [recipe], focusedRecipeId: recipe.id } }).state;
+  state = run(state, { type: "propose", id: "candidate", title: "Original recipe", changes: [{ type: "create_batch", batch: { id: "batch", recipe, prepareDate: "2026-10-12", yield: 1, reservedExtra: 0 }, allocations: [{ id: "meal", batchId: "batch", memberId: "you", date: "2026-10-13", slot: "lunch", portions: 1 }] }] }).state;
+  state = run(state, { type: "set_session", session: { ...state.pilot.session, draft: "Thinking", focusedRecipeId: null } }).state;
+  assert.equal(state.pilot.proposals[0].status, "pending");
+  for (const candidates of [[], [{ ...recipe, minutes: 10, steps: ["Use the quicker preparation."] }]]) {
+    const changed = run(state, { type: "set_session", session: { ...state.pilot.session, candidates } }).state;
+    assert.equal(changed.pilot.proposals[0].status, "stale");
+    rejectsCode(() => run(changed, { type: "apply_proposal", proposalId: "candidate", selectedAllocationIds: ["meal"], includeOtherChanges: false }), "stale-proposal");
+    assert.equal(changed.pilot.batches.length, 0);
+    const applied = run(state, { type: "apply_proposal", proposalId: "candidate", selectedAllocationIds: ["meal"], includeOtherChanges: false });
+    const revised = run(applied.state, { type: "set_session", session: { ...applied.state.pilot.session, candidates } }).state;
+    const undone = run(revised, { type: "undo", receiptId: applied.receipt.id }).state;
+    assert.equal(undone.pilot.proposals[0].status, "stale", "undo cannot revive a proposal for an older candidate");
+  }
+  const rejected = run(state, { type: "set_session", session: { ...state.pilot.session, rejectedRecipeIds: [recipe.id] } }).state;
+  assert.equal(rejected.pilot.proposals[0].status, "stale", "rejecting a candidate invalidates its pending placements");
+});
+
+test("material planning requirements stale proposals while calendar browsing preserves dated placements", () => {
+  let state = run(makeState(), { type: "propose", id: "scope", title: "Tuesday coverage", changes: [{ type: "set_coverage", coverage: { id: "work", memberId: "you", date: "2026-10-13", slot: "lunch", reason: "work" } }] }).state;
+  state = run(state, { type: "set_session", session: { ...state.pilot.session, startDate: "2026-10-19", days: 14, focusDate: "2026-10-20", focusSlot: "dinner", draft: "A thought" } }).state;
+  assert.equal(state.pilot.proposals[0].status, "pending");
+  for (const patch of [{ constraints: "Only meals under 10 minutes" }, { equipment: ["No oven available"] }, { memberIds: ["partner"] }]) {
+    const changed = run(state, { type: "set_session", session: { ...state.pilot.session, ...patch } }).state;
+    assert.equal(changed.pilot.proposals[0].status, "stale");
+    rejectsCode(() => run(changed, { type: "apply_proposal", proposalId: "scope" }), "stale-proposal");
+    assert.equal(changed.pilot.coverage.length, 0);
+  }
 });
 
 test("undo preserves conversation and idempotency history while refusing intervening meaningful edits", () => {

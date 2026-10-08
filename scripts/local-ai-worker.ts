@@ -4,8 +4,16 @@ import { createLocalModel, verifyLocalModel } from "../src/features/meals/local-
 import { runLocalPlanning } from "../src/features/meals/local-planner";
 import { liveChatAboutMeals, liveSuggestMeals } from "../src/features/meals/live-provider";
 import { importRecipe } from "../src/features/meals/import-provider";
+import { publicAiError } from "../src/features/meals/ai-runtime";
 
 try { process.loadEnvFile(".env.local"); } catch { /* Environment injection also works. */ }
+
+const workerErrorCodes = new Set(["invalid_result", "lease_lost", "actor_unavailable", "invalid_request", "worker_not_authorized", "worker_unconfigured", "household_unconfigured", "storage_unavailable"]);
+class WorkerServiceError extends Error {
+  constructor(readonly status: number, readonly code: string) {
+    super(`Worker service returned HTTP ${status}.`);
+  }
+}
 
 export function workerEndpoint(value: string) {
   const url = new URL(value);
@@ -33,7 +41,11 @@ async function main() {
       body: JSON.stringify(body),
       signal: AbortSignal.any([AbortSignal.timeout(15000), shutdown.signal, ...(signal ? [signal] : [])]),
     });
-    if (!response.ok) throw new Error(`Worker service returned ${response.status}.`);
+    if (!response.ok) {
+      const failure: unknown = await response.json().catch(() => null);
+      const code = failure && typeof failure === "object" && "code" in failure && typeof failure.code === "string" && workerErrorCodes.has(failure.code) ? failure.code : "unexpected_status";
+      throw new WorkerServiceError(response.status, code);
+    }
     return await response.json() as { job?: unknown; active?: boolean };
   };
   console.info("LunchBox local worker is online. Inference stays on this Mac.");
@@ -58,12 +70,16 @@ async function main() {
         } catch { controller.abort(new Error("The worker lost its server connection.")); }
         finally { heartbeatRunning = false; }
       }, 20000);
+      let stage: "generation" | "result-validation" | "completion" = "generation";
       try {
-        const result = aiJobResultSchema.parse(await processJob(job, signal));
+        const candidate = await processJob(job, signal);
+        stage = "result-validation";
+        const result = aiJobResultSchema.parse(candidate);
         signal.throwIfAborted();
         // Retry only this exact completion. Server deduplicates the job/lease;
         // a lost response cannot cause a second generation or household action.
         let delivered = false;
+        stage = "completion";
         for (let attempt = 0; attempt < 3 && !delivered; attempt++) {
           try { await call({ action: "complete", jobId: job.id, leaseToken: job.leaseToken, result }, signal); delivered = true; }
           catch (error) {
@@ -77,7 +93,13 @@ async function main() {
           const message = error instanceof Error ? error.message : "The local model could not produce a valid reply.";
           await call({ action: "fail", jobId: job.id, leaseToken: job.leaseToken, error: message.slice(0, 1000) }).catch(() => undefined);
         }
-        console.warn("Local AI job ended without an accepted result", { kind: job.kind, cancelled: signal.aborted });
+        // Only application-owned categories are diagnostic output. Never log
+        // model text, raw errors, request context, credentials, or URLs.
+        console.warn("Local AI job ended without an accepted result", {
+          kind: job.kind, cancelled: signal.aborted, stage,
+          code: error instanceof WorkerServiceError ? error.code : publicAiError(error).code,
+          ...(error instanceof WorkerServiceError ? { status: error.status } : {}),
+        });
       } finally { clearInterval(heartbeat); }
       if (process.argv.includes("--once")) break;
     } catch {

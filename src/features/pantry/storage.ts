@@ -1,15 +1,40 @@
-import { householdStateSchema, type HouseholdState } from "@/lib/contracts";
+import { householdStateSchema, type HouseholdState, type PlanningProposal } from "@/lib/contracts";
 
 export const HOUSEHOLD_STORAGE_KEY = "lunchbox.household.v1";
 // Recovery archive only. The active household still has one storage key/adapter.
 export const HOUSEHOLD_RECOVERY_KEY = "lunchbox.household.recovery.v1";
-export type PlanningComposer = { draft: string; mode: "fixture" | "local" };
+export type ProposalReviewSelection = { excludedAllocationIds: string[]; includeOtherChanges: boolean };
+export type CachedProposalReview = ProposalReviewSelection & { proposalId: string; fingerprint: string };
+export type PlanningComposer = { draft: string; mode: "fixture" | "local"; proposalReviews?: CachedProposalReview[] };
 export type CachedPlanningComposer = PlanningComposer & { sessionId: string };
 export type HouseholdCache = { ownerId: string | null; householdId: string | null; pending?: unknown; planningComposer?: CachedPlanningComposer };
 
-export function readPlanningComposer(value: unknown, sessionId: string): CachedPlanningComposer | undefined {
+/** Revisions may advance for conversation edits; the reviewed effects must stay identical. */
+export function proposalReviewFingerprint(proposal: PlanningProposal) {
+  // Database JSON and schema parsing can reorder keys without changing meaning.
+  return JSON.stringify({ title: proposal.title, changes: proposal.changes, legacyMeals: proposal.legacyMeals }, (_key, value: unknown) => value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+}
+
+export function readProposalReview(value: unknown, proposal: PlanningProposal): CachedProposalReview | undefined {
+  if (proposal.status !== "pending" || !value || typeof value !== "object"
+    || !("proposalId" in value) || value.proposalId !== proposal.id
+    || !("fingerprint" in value) || value.fingerprint !== proposalReviewFingerprint(proposal)
+    || !("includeOtherChanges" in value) || typeof value.includeOtherChanges !== "boolean"
+    || !("excludedAllocationIds" in value) || !Array.isArray(value.excludedAllocationIds)) return undefined;
+  const available = new Set(proposal.changes.flatMap((change) => change.type === "create_batch" ? change.allocations.map((allocation) => allocation.id) : change.type === "allocate" ? [change.allocation.id] : []));
+  if (value.excludedAllocationIds.length > available.size || !value.excludedAllocationIds.every((id) => typeof id === "string" && available.has(id)) || new Set(value.excludedAllocationIds).size !== value.excludedAllocationIds.length) return undefined;
+  return { proposalId: proposal.id, fingerprint: value.fingerprint, excludedAllocationIds: [...value.excludedAllocationIds], includeOtherChanges: value.includeOtherChanges };
+}
+
+export function readPlanningComposer(value: unknown, sessionId: string, proposals: readonly PlanningProposal[] = []): CachedPlanningComposer | undefined {
   if (!value || typeof value !== "object" || !("sessionId" in value) || value.sessionId !== sessionId || !("draft" in value) || typeof value.draft !== "string" || value.draft.length > 2000 || !("mode" in value) || (value.mode !== "fixture" && value.mode !== "local")) return undefined;
-  return { sessionId, draft: value.draft, mode: value.mode };
+  const reviews = "proposalReviews" in value && Array.isArray(value.proposalReviews) ? value.proposalReviews.slice(0, 100) : [];
+  const proposalReviews = proposals.flatMap((proposal) => {
+    const review = readProposalReview(reviews.find((entry) => entry?.proposalId === proposal.id), proposal);
+    return review ? [review] : [];
+  });
+  return { sessionId, draft: value.draft, mode: value.mode, ...(proposalReviews.length ? { proposalReviews } : {}) };
 }
 
 /** Save the original bytes before migration, importing, or changing accounts.
@@ -70,7 +95,8 @@ export function readHouseholdCache(storage: Pick<Storage, "getItem">): Household
   if (!raw) return { ownerId: null, householdId: null };
   const parsed = JSON.parse(raw);
   if (parsed?.cacheVersion !== 1) return { ownerId: null, householdId: null };
-  const planningComposer = readPlanningComposer(parsed.planningComposer, parsed.state?.pilot?.session?.id);
+  const state = householdStateSchema.safeParse(parsed.state);
+  const planningComposer = readPlanningComposer(parsed.planningComposer, parsed.state?.pilot?.session?.id, state.success ? state.data.pilot?.proposals : []);
   return { ownerId: parsed.ownerId ?? null, householdId: parsed.householdId ?? null, pending: parsed.pending, ...(planningComposer ? { planningComposer } : {}) };
 }
 

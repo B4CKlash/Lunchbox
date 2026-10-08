@@ -14,6 +14,7 @@ import {
   type Unit,
 } from "@/lib/contracts";
 import { addDays, localDate } from "./calendar";
+import { directPlacementForRequest } from "./direct-placement";
 
 export class PilotCommandError extends Error {
   constructor(
@@ -331,12 +332,54 @@ function summaryFor(operation: PilotOperation) {
     case "cook_batch": return `Recorded cooking: ${operation.actualPortions} portions, including ${operation.freezerPortions} for the freezer.`;
     case "record_feedback": return "Saved recipe feedback for future planning.";
     case "set_session": return "Saved the planning conversation and recipe candidates.";
-    case "receive_planning_result": return operation.proposal ? "Saved the assistant response and its reviewable proposal." : "Saved the assistant response and recipe candidates.";
+    case "receive_planning_result": return operation.directPlacement ? "Placed the requested recipe and saved the assistant response." : operation.proposal ? "Saved the assistant response and its reviewable proposal." : "Saved the assistant response and recipe candidates.";
     case "propose": return `Prepared proposal: ${operation.title}.`;
     case "apply_proposal": return "Applied the reviewed planning proposal.";
     case "dismiss_proposal": return "Dismissed the planning proposal.";
     case "undo": return "Undid the latest action.";
     default: return `${operation.type.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase())} applied.`;
+  }
+}
+
+/** Derive exactly the reviewed placements while retaining one cooking batch.
+ * Non-placement effects require their own explicit opt-in in a partial review.
+ */
+export function selectProposalChanges(changes: PilotChange[], selectedAllocationIds?: string[], includeOtherChanges?: boolean): PilotChange[] {
+  if (selectedAllocationIds === undefined) return structuredClone(changes);
+  if (includeOtherChanges === undefined) fail("Choose whether to include the proposal's other changes.");
+  const available = changes.flatMap((change) => change.type === "create_batch" ? change.allocations.map((entry) => entry.id) : change.type === "allocate" ? [change.allocation.id] : []);
+  if (new Set(available).size !== available.length) fail("The proposal has ambiguous meal placement IDs. Request an updated proposal.");
+  const selected = new Set(selectedAllocationIds);
+  if (selected.size !== selectedAllocationIds.length || selectedAllocationIds.some((id) => !available.includes(id))) fail("Choose each meal placement once from this proposal.");
+  const result: PilotChange[] = [];
+  for (const change of changes) {
+    if (change.type === "create_batch") {
+      const allocations = change.allocations.filter((entry) => selected.has(entry.id));
+      if (!allocations.length && (!includeOtherChanges || change.batch.reservedExtra === 0)) continue;
+      const yieldPortions = round(allocations.reduce((sum, entry) => sum + entry.portions, 0) + change.batch.reservedExtra);
+      if (yieldPortions > 0) result.push({ ...structuredClone(change), batch: { ...structuredClone(change.batch), yield: yieldPortions }, allocations: structuredClone(allocations) });
+    } else if (change.type === "allocate") {
+      if (selected.has(change.allocation.id)) result.push(structuredClone(change));
+    } else if (includeOtherChanges) result.push(structuredClone(change));
+  }
+  if (!result.length) fail("Select a meal placement or another proposed change before applying.");
+  return result;
+}
+
+function invalidateRevisedPlanningProposals(pilot: PilotState, previousSession: PilotState["session"]) {
+  const ordered = (values: string[]) => JSON.stringify([...values].sort());
+  const changedRequirements = previousSession.constraints.trim() !== pilot.session.constraints.trim()
+    || ordered(previousSession.equipment) !== ordered(pilot.session.equipment)
+    || ordered(previousSession.memberIds) !== ordered(pilot.session.memberIds);
+  const changedCandidates = new Set(previousSession.candidates.filter((previous) => {
+    const next = pilot.session.candidates.find((candidate) => candidate.id === previous.id);
+    return !next || JSON.stringify(previous) !== JSON.stringify(next);
+  }).map((candidate) => candidate.id));
+  for (const id of pilot.session.rejectedRecipeIds) {
+    if (!previousSession.rejectedRecipeIds.includes(id)) changedCandidates.add(id);
+  }
+  for (const proposal of pilot.proposals) {
+    if (proposal.status === "pending" && (changedRequirements || proposal.changes.some((change) => change.type === "create_batch" && changedCandidates.has(change.batch.recipe.id)))) proposal.status = "stale";
   }
 }
 
@@ -365,7 +408,10 @@ export function applyPilotCommand(
   if (operation.type === "receive_planning_result" && operation.baseRevision !== revision) {
     throw new PilotCommandError("conflict", "The household changed after this assistant request. Refresh its suggestions before saving them.");
   }
-  const sessionOnly = operation.type === "set_session" || (operation.type === "receive_planning_result" && !operation.proposal);
+  const directPlacement = operation.type === "receive_planning_result" && operation.directPlacement
+    ? directPlacementForRequest(current, operation.directPlacement.request, operation.directPlacement.actorMemberId, [operation.directPlacement.change]) : null;
+  if (operation.type === "receive_planning_result" && operation.directPlacement && !directPlacement) fail("This response needs a proposal review before changing the calendar.");
+  const sessionOnly = operation.type === "set_session" || (operation.type === "receive_planning_result" && !operation.proposal && !operation.directPlacement);
   if (operation.type === "undo") {
     const last = oldReceipts.findLast((entry) => entry.inverse);
     if (!last || last.id !== operation.receiptId || !last.inverse || last.undoneBy || last.undoRevision !== revision) {
@@ -373,12 +419,16 @@ export function applyPilotCommand(
     }
     current.pantry = structuredClone(last.inverse.pantry);
     current.pilot = { ...structuredClone(last.inverse.data), session: current.pilot.session, revision, receipts: oldReceipts };
+    invalidateRevisedPlanningProposals(current.pilot, last.inverse.data.session);
     for (const proposal of current.pilot.proposals) {
       if (proposal.status === "pending" && proposal.baseRevision === last.revision - 1) proposal.baseRevision = revision + 1;
     }
     last.undoneBy = command.id;
   } else if (operation.type === "set_session" || operation.type === "receive_planning_result") {
+    const previousSession = current.pilot.session;
     current.pilot.session = operation.session;
+    invalidateRevisedPlanningProposals(current.pilot, previousSession);
+    if (directPlacement) applyChange(current, directPlacement, now);
     if (operation.type === "receive_planning_result" && operation.proposal) {
       const proposal = operation.proposal;
       if (current.pilot.proposals.some((entry) => entry.id === proposal.id)) fail("This proposal ID already exists.");
@@ -411,7 +461,8 @@ export function applyPilotCommand(
     if (!proposal) throw new PilotCommandError("not-found", "This proposal is no longer available.");
     if (proposal.status !== "pending" || proposal.baseRevision !== revision) throw new PilotCommandError("stale-proposal", "The household changed after this proposal. Review a refreshed proposal before applying it.");
     if (proposal.legacyMeals) fail("Recovered drafts are preserved for review. Recreate their placements in the live calendar before applying them.");
-    for (const change of proposal.changes) { applyChange(current, change, now); validatePilot(current.pilot); }
+    const selectedChanges = selectProposalChanges(proposal.changes, operation.selectedAllocationIds, operation.includeOtherChanges);
+    for (const change of selectedChanges) { applyChange(current, change, now); validatePilot(current.pilot); }
     proposal.status = "applied";
   } else {
     applyChange(current, operation, now);

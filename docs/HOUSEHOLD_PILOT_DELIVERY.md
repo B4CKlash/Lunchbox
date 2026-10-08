@@ -23,13 +23,13 @@ Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR 
 
 | Gate | Evidence / status |
 |---|---|
-| Domain, UI, recovery and transport implementation | Implemented; independent review fixed queued-snapshot races, account-switch callbacks, uncertain-stock display/inference, and atomic assistant result persistence. |
-| Check and production build | Passed locally: lint, TypeScript, 224 tests (one opt-in database suite skipped in ordinary checks), and all 20 production routes. The database suite also ran separately. |
-| Real local database | Ten opt-in Supabase checks pass, including authorization, invitations, concurrency, actor identity, cancellations, interrupted leases and duplicate completion. See [server verification](HOUSEHOLD_SERVER_VERIFICATION.md). |
+| Domain, UI, recovery and transport implementation | Implemented; independent review fixed queued-snapshot races, account-switch callbacks, uncertain-stock display/inference, atomic assistant result persistence, cross-device manual-request priority, direct placement authority, and conversation authorship. |
+| Check and production build | Passed locally: lint, TypeScript, 307 tests (one opt-in database suite skipped in ordinary checks), and all 20 production routes. The database suite also ran separately. |
+| Real local database | Twelve opt-in Supabase checks pass, including authorization, invitations, concurrency, actor identity, cancellations, interrupted leases and duplicate completion. See [server verification](HOUSEHOLD_SERVER_VERIFICATION.md). |
 | Browser interaction and household loops | Desktop/mobile fixtures, purchases surviving cancellation, cooking/freezer/feedback, account-separated sync, uncertain stock and draft resumption verified. See [browser verification](HOUSEHOLD_BROWSER_VERIFICATION.md). |
-| Local AI quality | Initial 9B baseline failed (31/40, 77.5%). The first grounded 27B run also failed the gate due to unrelated actions and wrong existing-record references. Its artifacts are retained while a constrained output format is evaluated. A correct person/date is part of task completion; a schema-valid response alone does not pass. |
-| Protected hosted preview | Pending branch deployment and separate hosted development Supabase configuration. The Vercel CLI can access the existing project; its connector currently lacks this team scope. |
+| Local AI quality | **Passed: final 27B thinking-off configuration, 40/40 (100%)**, including both required multi-occasion batch cases twice, zero accepted unsupported completion claims or invalid state changes. Median 9.445 s, p95 20.160 s; source hashes unchanged, exact digest pinned. Both independent output reviews passed. Earlier failed 9B/27B reports remain in [the evaluation record](evaluations/README.md). |
+| Protected hosted preview | The `c03ceec` preview passed protected HTTP and browser fixture checks. Shared endpoints fail closed while a separate hosted development Supabase project and worker credential remain unconfigured. See [preview verification](HOUSEHOLD_PREVIEW_VERIFICATION.md). Later code changes require another preview check. |
 | Linear roadmap | Publishing queue above is ready; connector reauthentication still required. No Linear issue IDs are fabricated. |
-| Real household cycle | Pending household participation. This cannot be replaced by fixture tests. |
+| Real household cycle | Pending household participation. Use [the pilot run guide](HOUSEHOLD_PILOT_RUN.md) after hosted development setup; this cannot be replaced by fixture tests. |
 
 Production stays gated until hosted verification and the requested real planning, shopping and cooking cycle are complete. The continuous recipe-feed PR remains independent.

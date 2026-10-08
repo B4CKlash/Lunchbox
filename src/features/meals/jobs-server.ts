@@ -6,6 +6,8 @@ import { authorizeHouseholdRequest, checkDatabaseError, getHouseholdDatabase, Ho
 import { readRemoteHousehold } from "@/features/accounts/server-household";
 import { applyPilotCommand } from "@/features/planning/pilot";
 import { aiJobSchema, claimedAiJobSchema, enqueueAiJobSchema, isWorkerOnline, publicAiJob, workerActionSchema, type AiJobResult, type ClaimedAiJob } from "./jobs";
+import { claimsCompletedAction, favoriteClaimFacts } from "./planning-claims";
+import { findPlanningFavorites } from "./planning-fixtures";
 
 export function authorizeWorker(request: Request, env: Record<string, string | undefined> = process.env) {
   const configured = env.LUNCHBOX_WORKER_TOKEN;
@@ -21,6 +23,8 @@ export function authorizeWorker(request: Request, env: Record<string, string | u
 
 export function validateAiJobResult(job: ClaimedAiJob, result: AiJobResult) {
   if (job.kind !== result.kind) throw new HouseholdApiError(400, "invalid_result", "The worker returned the wrong kind of result.");
+  const favoriteFacts = result.kind === "planning" ? favoriteClaimFacts(findPlanningFavorites(job.context), result.data) : [];
+  if ((result.kind === "planning" || result.kind === "chat") && claimsCompletedAction(result.data.reply, favoriteFacts)) throw new HouseholdApiError(400, "invalid_result", "The worker claimed an action was completed without a household receipt.");
   if (result.kind !== "planning") return result;
   let state = job.context;
   // Preview only. Actual changes must be accepted through /commands.
@@ -37,6 +41,12 @@ async function claimDetails(db: SupabaseClient, row: Record<string, unknown>) {
   return claimedAiJobSchema.parse({ ...publicAiJob(row), context: row.context, actorMemberId: membership.data.member_id, leaseToken: row.lease_token, leaseExpiresAt: row.lease_expires_at });
 }
 
+async function publicJobWithActor(db: SupabaseClient, row: Record<string, unknown>) {
+  const actor = await db.from("household_members").select("member_id").eq("household_id", row.household_id).eq("user_id", row.requested_by).maybeSingle();
+  checkDatabaseError(actor.error);
+  return { ...publicAiJob(row), ...(actor.data?.member_id ? { actorMemberId: actor.data.member_id } : {}) };
+}
+
 export async function enqueueAiJob(request: Request) {
   try {
     const { db, user } = await authorizeHouseholdRequest(request);
@@ -50,7 +60,7 @@ export async function enqueueAiJob(request: Request) {
     if (data.conflict) throw new HouseholdApiError(409, "conflict", "The household changed before the request was queued. Refresh and retry.", household);
     const worker = await db.from("household_ai_workers").select("last_seen_at").eq("household_id", input.householdId).maybeSingle();
     checkDatabaseError(worker.error);
-    return householdResponse({ job: publicAiJob(data), workerOnline: isWorkerOnline(worker.data?.last_seen_at) }, 202);
+    return householdResponse({ job: await publicJobWithActor(db, data.deferred ? data.job : data), workerOnline: isWorkerOnline(worker.data?.last_seen_at), ...(data.deferred ? { deferred: true } : {}) }, 202);
   } catch (error) { return householdFailure(error); }
 }
 
@@ -67,7 +77,7 @@ export async function getAiJob(request: Request) {
     if (!result.data && input.id) throw new HouseholdApiError(404, "job_not_found", "This assistant request was not found.");
     const worker = await db.from("household_ai_workers").select("last_seen_at").eq("household_id", input.householdId).maybeSingle();
     checkDatabaseError(worker.error);
-    return householdResponse({ job: result.data ? publicAiJob(result.data) : null, workerOnline: isWorkerOnline(worker.data?.last_seen_at) });
+    return householdResponse({ job: result.data ? await publicJobWithActor(db, result.data) : null, workerOnline: isWorkerOnline(worker.data?.last_seen_at) });
   } catch (error) { return householdFailure(error); }
 }
 

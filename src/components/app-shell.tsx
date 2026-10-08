@@ -115,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {updateError}
             </p>
           )}
-          {pendingChange && <div className="storage-warning" role="status">
+          {pendingChange && syncStatus !== "Saving household change…" && <div className="storage-warning" role="status">
             A household change is waiting to be saved. Retry safely saves the same change once.
             <div className="actions"><button className="button secondary" onClick={() => void retryPending()}>Retry saving</button>
             <button className="text-button" onClick={discardPending}>Discard unsaved change</button></div>

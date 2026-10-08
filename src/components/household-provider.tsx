@@ -8,7 +8,7 @@ import {
 } from "@/lib/contracts";
 import { applyHouseholdAction, type HouseholdAction } from "@/features/meals/workspace-state";
 import { createSampleHousehold } from "@/features/pantry/seed";
-import { loadHousehold, saveHousehold, preserveHouseholdRecovery, readHouseholdCache, recoverHouseholdForOwner, readPlanningComposer, type PlanningComposer, type CachedPlanningComposer } from "@/features/pantry/storage";
+import { loadHousehold, saveHousehold, preserveHouseholdRecovery, readHouseholdCache, recoverHouseholdForOwner, readPlanningComposer, readProposalReview, type PlanningComposer, type CachedPlanningComposer, type CachedProposalReview } from "@/features/pantry/storage";
 import { ensurePilot, applyPilotCommand } from "@/features/planning/pilot";
 import { getAccountClient } from "@/features/accounts/client";
 import { loadRemoteHousehold, createRemoteHousehold, sendRemoteCommand, joinRemoteHousehold, RemoteHouseholdError } from "@/features/pantry/remote";
@@ -20,7 +20,8 @@ type HouseholdContextValue = {
   state: HouseholdState; ready: boolean; storageError: string | null; updateError: string | null;
   chatResetVersion: number; householdResetVersion: number;
   householdId: string | null; currentMemberId: string | null; syncStatus: string; pendingChange: boolean;
-  planningComposer: PlanningComposer; setPlanningComposer: (patch: Partial<PlanningComposer>) => void;
+  planningComposer: PlanningComposer; setPlanningComposer: (patch: Partial<Pick<PlanningComposer, "draft" | "mode">>) => void;
+  setProposalReview: (review: CachedProposalReview) => void;
   dispatchPilot: (operation: PilotOperation) => Promise<EditResult>;
   createSharedHousehold: (name: string) => Promise<EditResult>;
   joinHousehold: (token: string) => Promise<EditResult>;
@@ -77,7 +78,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
 
   const publishComposer = useCallback((next: CachedPlanningComposer | undefined) => {
     composer.current = next;
-    setComposerState(next ? { draft: next.draft, mode: next.mode } : { draft: "", mode: "fixture" });
+    setComposerState(next ? { draft: next.draft, mode: next.mode, ...(next.proposalReviews ? { proposalReviews: next.proposalReviews } : {}) } : { draft: "", mode: "fixture" });
   }, []);
 
   const persist = useCallback(() => {
@@ -89,7 +90,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     }
   }, []);
   const publish = useCallback((next: HouseholdState) => {
-    if (next.pilot && composer.current?.sessionId !== next.pilot.session.id) publishComposer({ sessionId: next.pilot.session.id, draft: next.pilot.session.draft, mode: "fixture" });
+    if (next.pilot) publishComposer(readPlanningComposer(composer.current, next.pilot.session.id, next.pilot.proposals) ?? { sessionId: next.pilot.session.id, draft: next.pilot.session.draft, mode: "fixture" });
     stateRef.current = next;
     setState(next);
     persist();
@@ -191,7 +192,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         setPendingChange(Boolean(pending.current));
         setHouseholdId(remote.current?.householdId ?? null);
         setCurrentMemberId(remote.current?.currentMemberId ?? null);
-        publishComposer(compatible && base.pilot ? readPlanningComposer(cache.planningComposer, base.pilot.session.id) : undefined);
+        publishComposer(compatible && base.pilot ? readPlanningComposer(cache.planningComposer, base.pilot.session.id, base.pilot.proposals) : undefined);
         publish(ensurePilot(base));
         if (remote.current) remote.current.state = stateRef.current;
         hydrated.current = true;
@@ -332,9 +333,22 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
       const sessionId = stateRef.current.pilot?.session.id;
       if (!sessionId) return;
       const previous = composer.current?.sessionId === sessionId ? composer.current : { sessionId, draft: "", mode: "fixture" as const };
-      const next = readPlanningComposer({ ...previous, ...patch }, sessionId);
+      const next = readPlanningComposer({ ...previous, ...patch }, sessionId, stateRef.current.pilot?.proposals);
       if (!next) return;
       publishComposer(next); persist();
+    },
+    setProposalReview: (review) => {
+      if (accountId !== owner.current || householdId !== (remote.current?.householdId ?? null) || state.pilot?.session.id !== stateRef.current.pilot?.session.id) return;
+      const pilot = stateRef.current.pilot;
+      const proposal = pilot?.proposals.find((entry) => entry.id === review.proposalId);
+      if (!pilot || !proposal) return;
+      // Match the content shown by the caller before recording a device-only
+      // choice. A changed proposal must be reviewed afresh, even with the same ID.
+      const valid = readProposalReview(review, proposal);
+      if (!valid) return;
+      const previous = readPlanningComposer(composer.current, pilot.session.id, pilot.proposals) ?? { sessionId: pilot.session.id, draft: pilot.session.draft, mode: "fixture" as const };
+      publishComposer({ ...previous, proposalReviews: [...(previous.proposalReviews ?? []).filter((entry) => entry.proposalId !== proposal.id), valid] });
+      persist();
     },
     dispatchPilot: (operation) => edit(operation, true),
     createSharedHousehold: (name) => transition(() => createRemoteHousehold(name, stateRef.current)),

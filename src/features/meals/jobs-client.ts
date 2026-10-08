@@ -2,7 +2,7 @@ import { z } from "zod";
 import { householdFetch } from "@/features/pantry/remote";
 import { aiJobSchema, type EnqueueAiJob } from "./jobs";
 
-const responseSchema = z.object({ job: aiJobSchema, workerOnline: z.boolean() });
+const responseSchema = z.object({ job: aiJobSchema, workerOnline: z.boolean(), deferred: z.boolean().optional() });
 export async function requestLocalAiJob(input: EnqueueAiJob) {
   return responseSchema.parse(await householdFetch("/jobs", input));
 }

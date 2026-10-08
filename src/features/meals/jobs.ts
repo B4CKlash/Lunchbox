@@ -26,6 +26,7 @@ export const enqueueAiJobSchema = z.object({
 export const aiJobSchema = z.object({
   id: z.uuid(), householdId: z.uuid(), sessionId: z.string(), householdRevision: z.number().int().nonnegative(),
   kind: z.enum(["planning", "suggest", "chat", "extract"]), request: aiJobRequestSchema,
+  actorMemberId: z.string().min(1).max(120).optional(),
   status: z.enum(["queued", "running", "completed", "cancelled", "stale", "failed"]),
   result: aiJobResultSchema.nullable(), error: z.string().nullable(), attempts: z.number().int().nonnegative(),
   createdAt: z.string(), updatedAt: z.string(),

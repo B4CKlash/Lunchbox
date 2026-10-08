@@ -4,6 +4,7 @@ import { createSampleHousehold } from "@/features/pantry/seed";
 import { ensurePilot } from "@/features/planning/pilot";
 import { claimedAiJobSchema, isWorkerOnline } from "./jobs";
 import { authorizeWorker, validateAiJobResult } from "./jobs-server";
+import { planningFixtureRecipe } from "./planning-fixtures";
 
 const householdId = "37c631af-22a3-455c-a598-eeb2a1d14ea1";
 const job = () => claimedAiJobSchema.parse({
@@ -37,4 +38,26 @@ test("worker operations are validated as proposals without applying them to hous
   assert.deepEqual(input.context, before);
   assert.throws(() => validateAiJobResult(input, { kind: "planning", data: { reply: "Invalid", recipes: [], operations: [{ type: "remove_batch", batchId: "does-not-exist" }] } }));
   assert.throws(() => validateAiJobResult(input, { kind: "suggest", data: { source: "ai", recipes: [] } }));
+  for (const reply of ["I already scheduled your meals.", "Your pasta was cooked.", "Done!", "Scheduled Tuesday lunch."]) {
+    assert.throws(() => validateAiJobResult(input, { kind: "planning", data: { reply, recipes: [], operations: [] } }), /claimed an action/);
+  }
+});
+
+test("planning favorite facts require exact current evidence and no operations", () => {
+  const input = job();
+  const recipe = planningFixtureRecipe(input.context);
+  input.context.workspace.recipeBox = [{ recipe, source: "demo" }];
+  const reply = `${recipe.name} is marked as a favorite.`;
+  const result = { kind: "planning" as const, data: { reply, recipes: [recipe], operations: [] } };
+  const before = structuredClone(input.context);
+  assert.equal(validateAiJobResult(input, result), result);
+  assert.deepEqual(input.context, before);
+  assert.throws(() => validateAiJobResult(job(), result), /claimed an action/, "a matching name without saved household evidence is not enough");
+  assert.throws(() => validateAiJobResult(input, { ...result, data: { ...result.data, recipes: [{ ...recipe, minutes: recipe.minutes + 10 }] } }), /claimed an action/, "a modified recipe is not the saved snapshot");
+  assert.throws(() => validateAiJobResult(input, { ...result, data: { ...result.data, recipes: [] } }), /claimed an action/);
+  assert.throws(() => validateAiJobResult(input, { ...result, data: { ...result.data, operations: [{ type: "set_shop_through", date: "2026-10-15" }] } }), /claimed an action/, "the factual allowance is read-only");
+  for (const claimed of ["Unknown curry is marked as a favorite.", `${recipe.name} sounds good and Unknown curry is marked as a favorite.`, `I saved ${recipe.name}.`, `${recipe.name} is now marked as a favorite.`, `${recipe.name} was added to your recipe box.`, `${recipe.name} is saved in your recipe box.`, `No worries, I saved ${recipe.name}.`]) {
+    assert.throws(() => validateAiJobResult(input, { ...result, data: { ...result.data, reply: claimed } }), /claimed an action/);
+  }
+  assert.throws(() => validateAiJobResult({ ...input, kind: "chat" }, { kind: "chat", data: { source: "ai", reply, recipes: [recipe], servings: 2 } }), /claimed an action/, "chat has no matching factual-output proof and retains the conservative guard");
 });

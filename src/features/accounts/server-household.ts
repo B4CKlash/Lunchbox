@@ -1,9 +1,11 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { householdStateSchema } from "@/lib/contracts";
 import { applyHouseholdAction } from "@/features/meals/workspace-state";
+import { aiJobRequestSchema, aiJobResultSchema } from "@/features/meals/jobs";
 import { applyPilotCommand, ensurePilot, PilotCommandError } from "@/features/planning/pilot";
 import { remoteCommandSchema, remoteHouseholdSchema, type RemoteCommand, type RemoteHousehold } from "@/features/pantry/remote-protocol";
 import { authorizeHouseholdRequest, checkDatabaseError, HouseholdApiError, householdFailure, householdRequestBody, householdResponse, requireHouseholdMember } from "./server";
@@ -52,6 +54,20 @@ export async function applyRemoteCommand(db: SupabaseClient, userId: string, inp
     // applied before the database existed. A retried purchase stays a no-op.
     const duplicate = applyPilotCommand(current.state, mutation.command);
     if (duplicate.duplicate) return { ...current, receipt: duplicate.receipt, duplicate: true };
+  }
+  if (mutation.kind === "pilot" && mutation.command.operation.type === "receive_planning_result" && mutation.command.operation.directPlacement) {
+    const source = mutation.command.operation.directPlacement;
+    const job = await db.from("household_ai_jobs").select("status,household_revision,session_id,requested_by,request,result").eq("household_id", input.householdId).eq("id", source.jobId).maybeSingle();
+    checkDatabaseError(job.error);
+    const request = aiJobRequestSchema.safeParse(job.data?.request);
+    const result = aiJobResultSchema.safeParse(job.data?.result);
+    const actor = job.data ? await db.from("household_members").select("member_id").eq("household_id", input.householdId).eq("user_id", job.data.requested_by).maybeSingle() : null;
+    if (actor) checkDatabaseError(actor.error);
+    if (!job.data || job.data.status !== "completed" || job.data.household_revision !== current.revision || job.data.session_id !== current.state.pilot?.session.id
+      || actor?.data?.member_id !== source.actorMemberId || !request.success || request.data.kind !== "planning" || request.data.message !== source.request
+      || !result.success || result.data.kind !== "planning" || !isDeepStrictEqual(result.data.data.operations, [source.change])) {
+      throw new HouseholdApiError(409, "invalid_direct_placement", "This response cannot directly place a meal. Refresh it or review a planning proposal.");
+    }
   }
   const result = reduceRemoteCommand(current, input);
   const { data, error } = await db.rpc("lunchbox_apply_command", {

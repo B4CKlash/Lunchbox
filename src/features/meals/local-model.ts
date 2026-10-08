@@ -6,9 +6,12 @@ export function localModelSettings(env: Record<string, string | undefined> = pro
   if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) {
     throw new Error("Ollama must use a private loopback HTTP address.");
   }
-  const model = env.LUNCHBOX_LOCAL_MODEL || "qwen3.5:9b";
+  const model = env.LUNCHBOX_LOCAL_MODEL;
+  if (!model) throw new Error("Set LUNCHBOX_LOCAL_MODEL to an explicitly evaluated local model.");
   if (!/^[a-zA-Z0-9_.:-]+$/.test(model) || /cloud|remote/i.test(model)) throw new Error("Only an installed local model is allowed.");
-  return { url: url.origin, model, digest: env.LUNCHBOX_LOCAL_MODEL_DIGEST };
+  const thinking = env.LUNCHBOX_LOCAL_THINKING || "off";
+  if (thinking !== "on" && thinking !== "off") throw new Error("Local thinking must be explicitly on or off.");
+  return { url: url.origin, model, digest: env.LUNCHBOX_LOCAL_MODEL_DIGEST, thinking };
 }
 
 export async function verifyLocalModel(env: Record<string, string | undefined> = process.env, signal?: AbortSignal) {
@@ -28,7 +31,9 @@ export function createLocalModel(env: Record<string, string | undefined> = proce
     name: "ollama-local",
     baseURL: `${settings.url}/v1`,
     supportsStructuredOutputs: true,
-    transformRequestBody: (body) => ({ ...body, reasoning_effort: "none" }),
+    // These Qwen models advertise boolean thinking. Ollama maps the standard
+    // low compatibility value to true; it is not a separate token budget.
+    transformRequestBody: (body) => ({ ...body, reasoning_effort: settings.thinking === "on" ? "low" : "none" }),
     fetch: (input, init) => fetch(input, { ...init, redirect: "error" }),
   }).chatModel(settings.model);
 }

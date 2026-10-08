@@ -6,6 +6,7 @@ import { createSampleHousehold } from "@/features/pantry/seed";
 import { ensurePilot, applyPilotCommand } from "@/features/planning/pilot";
 import { householdCommand, householdCreate, householdGet, householdInvite, householdJoin } from "./server-household";
 import { aiWorkerRequest, cancelAiJob, enqueueAiJob, getAiJob } from "@/features/meals/jobs-server";
+import { createPlanningRefreshMessage } from "@/features/meals/planning-refresh";
 
 // Explicitly opt in. These tests create/delete disposable users in LOCAL Supabase
 // only. Normal checks have no credentials and make no database/network changes.
@@ -187,5 +188,54 @@ test("local Supabase proves household authorization, CAS, invitations and worker
     changed.pilot.members = [changed.pilot.members[0]];
     const direct = await admin.rpc("lunchbox_apply_command", { p_household: householdId, p_user: owner.id, p_command_id: randomUUID(), p_expected_revision: revision, p_command: {}, p_snapshot: changed, p_receipt: {} });
     assert.equal(direct.error?.code, "22004", "database preserves account/person bindings even if the server regresses");
+  });
+
+  await t.test("another member's automatic refresh defers to an active manual request without cancelling it", async () => {
+    const manual = await enqueue("Keep this explicit manual request.");
+    const deferredInput = { ...manual.input, id: randomUUID(), request: { kind: "planning", message: createPlanningRefreshMessage(["partner changed a preference"]) } };
+    const refresh = await enqueueAiJob(request(partner.token, deferredInput));
+    assert.equal(refresh.status, 202);
+    const deferred = await refresh.json(); assert.equal(deferred.deferred, true); assert.equal(deferred.job.id, manual.input.id); assert.equal(deferred.job.status, "queued");
+    assert.equal(deferred.job.actorMemberId, initial.currentMemberId);
+    assert.equal((await admin.from("household_ai_jobs").select("id").eq("id", deferredInput.id)).data?.length, 0, "deferred refresh creates no competing job");
+    const claimed = await claim(); assert.equal(claimed.id, manual.input.id);
+    const running = await (await enqueueAiJob(request(partner.token, deferredInput))).json(); assert.equal(running.deferred, true); assert.equal(running.job.status, "running");
+    await cancelAiJob(request(owner.token, { householdId, id: manual.input.id }, undefined, "DELETE"));
+    const queued = await (await enqueueAiJob(request(partner.token, deferredInput))).json(); assert.equal(queued.deferred, undefined); assert.equal(queued.job.id, deferredInput.id);
+    await cancelAiJob(request(partner.token, { householdId, id: deferredInput.id }, undefined, "DELETE"));
+  });
+
+  await t.test("direct placement requires a genuine completed job and atomically saves a retry-safe receipt", async () => {
+    let latest = await getLatest();
+    const recipe = { id: "direct-pasta", name: "Direct pasta", description: "A candidate", servings: 2, minutes: 20, ingredients: [{ ingredientId: "pasta", name: "Pasta", quantity: 200, unit: "g" }], steps: ["Cook pasta."] };
+    const session = { ...latest.state.pilot.session, startDate: "2026-10-12", days: 7, focusDate: "2026-10-13", focusSlot: "lunch", focusedRecipeId: recipe.id, candidates: [recipe] };
+    const sendOperation = (operation: unknown, commandId = randomUUID()) => ({ householdId, expectedRevision: revision, commandId, command: { kind: "pilot", command: { id: commandId, expectedRevision: revision, operation } } });
+    assert.equal((await householdCommand(request(owner.token, sendOperation({ type: "set_session", session })))).status, 200);
+    latest = await getLatest();
+    const queued = await enqueue("Put this on 2026-10-13 lunch for me.");
+    const job = await claim(); assert.equal(job.id, queued.input.id);
+    const placement = { type: "create_batch", batch: { id: "direct-batch", recipe, prepareDate: "2026-10-13", yield: 1, reservedExtra: 0 }, allocations: [{ id: "direct-meal", batchId: "direct-batch", memberId: initial.currentMemberId, date: "2026-10-13", slot: "lunch", portions: 1 }] };
+    const complete = await worker({ action: "complete", jobId: job.id, leaseToken: job.leaseToken, result: { kind: "planning", data: { reply: "Here is the requested placement.", recipes: [], operations: [placement] } } });
+    assert.equal(complete.status, 200);
+    const resumed = await (await getAiJob(request(partner.token, undefined, `/api/household/jobs?householdId=${householdId}&sessionId=${encodeURIComponent(job.sessionId)}&kind=planning`))).json();
+    assert.equal(resumed.job.id, job.id); assert.equal(resumed.job.actorMemberId, initial.currentMemberId, "the partner resumes the original requester's identity");
+    const directPlacement = { jobId: job.id, request: queued.input.request.message, actorMemberId: initial.currentMemberId, change: placement };
+    const operation = { type: "receive_planning_result", baseRevision: revision, session: { ...latest.state.pilot.session, messages: [...latest.state.pilot.session.messages, { id: `job-${job.id}-assistant`, role: "assistant", text: "Requested placement", recipes: [], servings: 2 }] }, directPlacement };
+    for (const forged of [{ ...directPlacement, jobId: randomUUID() }, { ...directPlacement, actorMemberId: initial.state.pilot.members[1].id }, { ...directPlacement, request: "Put this on Friday lunch for me." }, { ...directPlacement, change: { ...placement, batch: { ...placement.batch, yield: 2 } } }]) {
+      assert.equal((await householdCommand(request(owner.token, sendOperation({ ...operation, directPlacement: forged })))).status, 409);
+    }
+    const originalRevision = revision;
+    const envelope = sendOperation(operation);
+    const accepted = await householdCommand(request(partner.token, envelope)); assert.equal(accepted.status, 200, JSON.stringify(await accepted.clone().json()));
+    const saved = await accepted.json(); assert.equal(saved.revision, originalRevision + 1); assert.equal(saved.state.pilot.batches.find((batch: { id: string }) => batch.id === "direct-batch").yield, 1); assert.ok(saved.receipt.inverse);
+    assert.equal(saved.state.pilot.session.messages.at(-1).id, `job-${job.id}-assistant`);
+    assert.equal(saved.state.pilot.allocations.find((entry: { id: string }) => entry.id === "direct-meal").memberId, initial.currentMemberId, "resumption cannot turn the owner's 'me' into the applying partner");
+    assert.equal((await (await householdCommand(request(owner.token, envelope))).json()).duplicate, true);
+    await getLatest();
+    const undo = await householdCommand(request(owner.token, sendOperation({ type: "undo", receiptId: saved.receipt.id }))); assert.equal(undo.status, 200);
+    assert.equal((await undo.json()).state.pilot.batches.some((batch: { id: string }) => batch.id === "direct-batch"), false);
+    await getLatest();
+    assert.equal((await householdCommand(request(partner.token, sendOperation(operation)))).status, 409, "a fresh envelope cannot revive an old source job revision");
+    assert.equal((await getLatest()).state.pilot.batches.some((batch: { id: string }) => batch.id === "direct-batch"), false);
   });
 });
