@@ -1,6 +1,6 @@
 # Run the real household pilot
 
-This is the remaining household acceptance run, not a record of a completed week. Development fixtures and automated tests are documented separately in [browser verification](HOUSEHOLD_BROWSER_VERIFICATION.md). Use the final protected preview only after the development database, membership, and tested Mac worker are connected.
+This is the remaining household acceptance run, not a record of a completed week. Development fixtures and automated tests are documented separately in [browser verification](HOUSEHOLD_BROWSER_VERIFICATION.md). Complete [the hosted bootstrap checklist](HOUSEHOLD_DEVELOPMENT.md#bootstrap-the-protected-hosted-pilot) first so the final protected preview has its development database, membership, and tested Mac worker connected.
 
 ## Start together
 

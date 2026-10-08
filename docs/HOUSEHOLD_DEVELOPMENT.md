@@ -45,4 +45,30 @@ npm run evaluate:local
 
 The integration test refuses nonlocal database hosts and uses disposable test users/households. A skipped integration suite in the ordinary checks is not proof of database behavior. See [the executed server verification](HOUSEHOLD_SERVER_VERIFICATION.md), [model reports](evaluations/), and [release tracker](HOUSEHOLD_PILOT_DELIVERY.md).
 
-For a protected hosted preview, provision a separate hosted development Supabase project, apply migrations there, and configure preview-only variables in the existing Vercel project. Keep Deployment Protection enabled. Verify two independent sign-ins, conflict recovery, cancellation, worker interruption and the complete shopping/cooking flow before production activation. A localhost database and fixture demo do not satisfy hosted verification or the real household pilot.
+## Bootstrap the protected hosted pilot
+
+This sequence is still pending. Use the existing Vercel project `no-name-4c11/lunchbox`, restrict variables to Preview and branch `codex/household-pilot`, and retain Deployment Protection. Both people need normal access to the protected preview in addition to their separate LunchBox accounts.
+
+1. Identify a separate hosted development Supabase project. Authenticate the Supabase CLI privately, confirm its project reference, then link and inspect the migration plan before applying it:
+
+   ```sh
+   npx supabase@2.120.0 link --project-ref YOUR_DEVELOPMENT_PROJECT_REF
+   npx supabase@2.120.0 db push --dry-run
+   npx supabase@2.120.0 db push
+   ```
+
+   All five committed migrations, `202610080001` through `202610080005`, must be applied in order. Confirm the selected target is the development project before the final command. Keep database passwords and access tokens in the CLI's private credential flow.
+2. Configure confirmed-email delivery for both pilot addresses in development Supabase. In the branch's Vercel Preview settings, configure `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, server-only `SUPABASE_SERVICE_ROLE_KEY`, `LUNCHBOX_HOUSEHOLD_ENABLED=true`, `LUNCHBOX_AI_BACKEND=local-worker`, and initially `LUNCHBOX_AI_MODE=demo`. Redeploy; public variables are embedded at build time. Set the Supabase site URL to this protected preview origin and allow its exact `/account` email-confirmation redirect. If a later deployment changes the origin, update this redirect before signing up there.
+3. Open `/account` from each device, register and confirm both development accounts, and sign in separately. The first account creates the household and generates an invitation bound to the partner's email; the partner joins with the displayed code. The app does not send invitation mail. Confirm the account-to-person mapping and shared pantry/calendar before enabling AI. Preserve any browser recovery download before importing data.
+4. Obtain the created household UUID from the development household record privately. Configure server-only `LUNCHBOX_WORKER_HOUSEHOLD_ID` and a random `LUNCHBOX_WORKER_TOKEN` of at least 32 characters in the same branch-specific Preview environment. Store that worker token privately on the Mac too. Set `LUNCHBOX_AI_MODE=ai` and redeploy; do not put either credential in chat, issue bodies, screenshots, or committed files.
+5. Point the Mac's ignored `LUNCHBOX_APP_URL` at the resulting protected HTTPS preview. Follow [the worker runbook](LOCAL_AI_WORKER.md) for the tested model, exact digest, loopback Ollama and cloud-disabled setting. Stop the existing development worker before starting another one against this household. From this checkout, use the authenticated Vercel CLI to inject the preview environment and its short-lived protection token:
+
+   ```sh
+   source ./scripts/use-hackathon-tools.sh
+   npx vercel@63.1.0 env run -e preview --git-branch codex/household-pilot --scope no-name-4c11 --project lunchbox -- node --conditions=react-server --import tsx scripts/local-ai-worker.ts
+   ```
+
+   The worker reads missing local model settings from ignored `.env.local`; injected preview variables take precedence. Keep `LUNCHBOX_APP_URL` current after redeploying. Re-run through the authenticated CLI when its short-lived protection token expires; retain preview protection rather than creating a bypass secret.
+6. Verify both sign-ins, invitation membership, shared edits, conflict recovery, all four worker job kinds, cancellation, and worker interruption on the hosted preview. Confirm that manual planning still works with the worker stopped. Then complete [the real household run](HOUSEHOLD_PILOT_RUN.md) and record its outcome.
+
+A localhost database and fixture demo do not satisfy hosted verification or the real household pilot. Production activation remains a separate integration action after these gates pass.
