@@ -28,6 +28,19 @@ test("explicit additive purchase retry preserves its identity and updates both r
   assert.equal(input.expectedRevision, 3);
 });
 
+test("absolute stock and prepared corrections cannot rebase over later household measurements or consumption", () => {
+  for (const operation of [
+    { type: "set_stock", stock: { ingredientId: "rice", name: "Rice", unit: "g", status: "exact", quantity: 300 } },
+    { type: "set_stock", stock: { ingredientId: "rice", name: "Rice", unit: "g", status: "some" } },
+    { type: "correct_prepared", batchId: "cooked", produced: 6, freezerPortions: 2, reason: "Measured current food" },
+  ]) {
+    const input = remoteCommandSchema.parse({ ...base, command: { kind: "pilot", command: { id: base.commandId, expectedRevision: 3, operation } } });
+    assert.equal(rebaseRemoteCommand(input, 4), null);
+    assert.throws(() => checkQueuedMutationRevision(input.command, 3, 4), /newer changes were kept/);
+    assert.doesNotThrow(() => checkQueuedMutationRevision(input.command, 3, 3));
+  }
+});
+
 test("cached household data is only readable by its signed-in account", () => {
   assert.equal(canReadHouseholdCache({ ownerId: "owner", householdId: base.householdId }, "owner"), true);
   assert.equal(canReadHouseholdCache({ ownerId: "owner", householdId: base.householdId }, "partner"), false);

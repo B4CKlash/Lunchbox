@@ -41,6 +41,7 @@ export type LocalPlanningResult = z.infer<typeof planningResultSchema>;
 export function localPlanningWireSchema(state: HouseholdState, actorMemberId: string, request?: string) {
   const current = ensurePilot(state);
   if (!current.pilot.members.some((member) => member.id === actorMemberId)) throw new Error("Unknown household actor.");
+  const rejected = new Set(current.pilot.session.rejectedRecipeIds);
   const others = current.pilot.members.filter((member) => member.id !== actorMemberId);
   const enumeration = (values: string[]) => z.enum([...new Set(values.length ? values : ["unavailable"])] as [string, ...string[]]);
   const person = enumeration(["requester", ...others.map((_, index) => others.length === 1 ? "other" : `member_${index + 2}`)]);
@@ -50,7 +51,7 @@ export function localPlanningWireSchema(state: HouseholdState, actorMemberId: st
   const favoriteId = enumeration(favorites.map((recipe) => recipe.id));
   const cookable = current.pilot.batches.filter((batch) => batch.status === "planned");
   const consumable = current.pilot.allocations.filter((allocation) => !allocation.consumedAt && current.pilot.prepared.some((prepared) => prepared.batchId === allocation.batchId));
-  const recipeRef = enumeration([...current.workspace.recipeBox.map((entry) => entry.recipe.id), ...current.pilot.session.candidates.map((recipe) => recipe.id), ...current.pilot.batches.map((batch) => batch.recipe.id), "new:0", "new:1", "new:2"]);
+  const recipeRef = enumeration([...current.workspace.recipeBox.map((entry) => entry.recipe.id), ...current.pilot.session.candidates.map((recipe) => recipe.id), ...current.pilot.batches.map((batch) => batch.recipe.id)].filter((id) => !rejected.has(id)).concat(["new:0", "new:1", "new:2"]));
   const fields = localPlanningDraftSchema.shape;
   // Calendar arithmetic belongs to the adapter. Do not offer unrelated ISO
   // dates from another visible week as valid arguments for a weekday request.
@@ -119,6 +120,7 @@ function knownIngredients(state: HouseholdState): KnownIngredient[] {
 export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, idFactory: () => string = randomUUID): LocalPlanningResult {
   const current = ensurePilot(state);
   const draft = localPlanningDraftSchema.parse(input);
+  const rejected = new Set(current.pilot.session.rejectedRecipeIds);
   const known = knownIngredients(current);
   const existingRecipes = [...current.workspace.recipeBox.map((entry) => entry.recipe), ...current.pilot.session.candidates, ...current.pilot.batches.map((batch) => batch.recipe)];
   const resolve = (item: { name: string; unit: z.infer<typeof unitSchema> }) => {
@@ -133,7 +135,9 @@ export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, 
     known.push(...ingredients);
     // Copying or only scaling a known recipe does not create new authorship.
     // Exact canonical amounts per serving, steps, and duration must all match.
-    return existingRecipes.find((existing) => sameRecipeContent(existing, recipe)) ?? recipe;
+    const matching = existingRecipes.filter((existing) => sameRecipeContent(existing, recipe));
+    if (matching.some((existing) => rejected.has(existing.id))) throw new Error("This recipe was ruled out for the current planning session. Suggest a different recipe.");
+    return matching[0] ?? recipe;
   });
   const saved = new Map(findPlanningFavorites(current).map((recipe) => [recipe.id, recipe]));
   const favorites = draft.favoriteRecipeIds.map((id) => {
@@ -143,8 +147,8 @@ export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, 
   });
   const recipeRefs = new Map([
     ...saved,
-    ...current.pilot.session.candidates.map((recipe): [string, Recipe] => [recipe.id, recipe]),
-    ...current.pilot.batches.map((batch): [string, Recipe] => [batch.recipe.id, batch.recipe]),
+    ...current.pilot.session.candidates.filter((recipe) => !rejected.has(recipe.id)).map((recipe): [string, Recipe] => [recipe.id, recipe]),
+    ...current.pilot.batches.filter((batch) => !rejected.has(batch.recipe.id)).map((batch): [string, Recipe] => [batch.recipe.id, batch.recipe]),
     ...generated.map((recipe, index): [string, Recipe] => [`new:${index}`, recipe]),
   ]);
   const operations: PilotOperation[] = [];
@@ -257,6 +261,7 @@ export function groundLocalPlanningDraft(state: HouseholdState, input: unknown, 
 
 function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMemberId: string) {
   const others = state.pilot.members.filter((member) => member.id !== actorMemberId);
+  const focusedRecipeId = state.pilot.session.rejectedRecipeIds.includes(state.pilot.session.focusedRecipeId ?? "") ? null : state.pilot.session.focusedRecipeId;
   const refs = new Map<string, string>([[actorMemberId, "requester"], ...others.map((member, index): [string, string] => [member.id, others.length === 1 ? "other" : `member_${index + 2}`])]);
   const map = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(map);
@@ -266,11 +271,11 @@ function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMember
   return {
     actorMemberId: "requester",
     members: [state.pilot.members.find((member) => member.id === actorMemberId)!, ...others].map((member) => ({ id: refs.get(member.id), role: member.id === actorMemberId ? "person making this request (I/me/my)" : "the requesting person's partner", preferences: member.preferences, displayName: /^(you|partner)$/i.test(member.name) ? undefined : member.name })),
-    planningDates: Array.from({ length: 14 }, (_, index) => {
+    planningDates: Array.from({ length: Math.max(14, state.pilot.session.days) }, (_, index) => {
       const date = addDays(state.pilot.session.startDate, index);
       return { date, weekday: weekdays[new Date(`${date}T12:00:00Z`).getUTCDay()] };
     }),
-    session: map({ ...state.pilot.session, messages: state.pilot.session.messages.slice(-8).map(({ role, text, authorMemberId }) => ({ role, text, ...(authorMemberId && refs.has(authorMemberId) ? { author: refs.get(authorMemberId) } : {}) })), candidates: undefined }),
+    session: map({ ...state.pilot.session, focusedRecipeId, messages: state.pilot.session.messages.slice(-8).map(({ role, text, authorMemberId }) => ({ role, text, ...(authorMemberId && refs.has(authorMemberId) ? { author: refs.get(authorMemberId) } : {}) })), candidates: undefined }),
     allocations: map(state.pilot.allocations), coverage: map(state.pilot.coverage), feedback: map(state.pilot.feedback.slice(-20)),
   };
 }
@@ -291,7 +296,7 @@ export async function runLocalPlanning(
     preferences: current.preferences,
     pantry: pantryForModel(current.pantry, current),
     stock: current.pilot.stock,
-    candidates: current.pilot.session.candidates,
+    candidates: current.pilot.session.candidates.filter((recipe) => !current.pilot.session.rejectedRecipeIds.includes(recipe.id)),
     savedRecipes: findPlanningFavorites(current).slice(0, 15),
     batches: current.pilot.batches,
     prepared: current.pilot.prepared,

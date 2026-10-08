@@ -47,19 +47,23 @@ export function planningFixtureRecipe(state: HouseholdState, variation: "pasta" 
 export function findPlanningFavorites(state: HouseholdState): Recipe[] {
   // Saved recipes and "make again" are explicit household choices.
   const feedback = new Map(state.pilot?.feedback.map((entry) => [entry.recipeId, entry]) ?? []);
+  const rejected = new Set(state.pilot?.session.rejectedRecipeIds ?? []);
   const recipes = new Map<string, Recipe>();
   for (const { recipe, source } of state.workspace.recipeBox) recipes.set(recipe.id, { ...recipe, provenance: recipe.provenance ?? { source } });
   for (const batch of state.pilot?.batches ?? []) if (feedback.get(batch.recipe.id)?.makeAgain) recipes.set(batch.recipe.id, batch.recipe);
-  return [...recipes.values()].filter((recipe) => feedback.get(recipe.id)?.makeAgain !== false)
+  return [...recipes.values()].filter((recipe) => !rejected.has(recipe.id) && feedback.get(recipe.id)?.makeAgain !== false)
     .sort((left, right) => (feedback.get(right.id)?.rating ?? 0) - (feedback.get(left.id)?.rating ?? 0));
 }
 
 export function fixtureRecipeForRequest(state: HouseholdState, request: string): { reply: string; recipes: Recipe[] } {
   if (/favou?rite|recipe box|saved recipe/i.test(request)) {
     const recipes = findPlanningFavorites(state);
-    return { reply: recipes.length ? "Here are your saved recipes and meals marked ‘make again,’ ordered by your latest ratings. Select one to discuss it or place a batch on the calendar." : "No favorites to show yet: your recipe box is empty or its recipes are marked not to make again. Save or import a recipe in the library, then ask again. You can also explore the clearly labeled examples here.", recipes: recipes.slice(0, 8) };
+    return { reply: recipes.length ? "Here are your saved recipes and meals marked ‘make again,’ ordered by your latest ratings. Select one to discuss it or place a batch on the calendar." : "No favorites fit this session: your recipe box may be empty, marked not to make again, or ruled out while planning. Save another recipe or explicitly reconsider an earlier card. You can also explore the clearly labeled examples here.", recipes: recipes.slice(0, 8) };
   }
   const variation = /quick|quicker|effort|20.minute/i.test(request) ? "quick" : /cuisine|mediterranean|lemon/i.test(request) ? "cuisine" : /vegetable|garden|farm/i.test(request) ? "vegetables" : "pasta";
   const recipe = planningFixtureRecipe(state, variation);
+  if (state.pilot?.session.rejectedRecipeIds.includes(recipe.id)) return {
+    reply: "You ruled out this authored example for this session. Choose another example, explicitly reconsider its earlier card, or use Local AI to explore a different recipe.", recipes: [],
+  };
   return { reply: `Here is an authored ${variation === "quick" ? "quicker" : variation === "cuisine" ? "Mediterranean" : variation === "vegetables" ? "vegetable-focused" : "batch-cooking"} example. This is a fixture, not a generated recipe. Discussing it leaves your calendar unchanged; choose a placement when it fits.`, recipes: [recipe] };
 }

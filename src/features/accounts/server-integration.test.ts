@@ -238,4 +238,53 @@ test("local Supabase proves household authorization, CAS, invitations and worker
     assert.equal((await householdCommand(request(partner.token, sendOperation(operation)))).status, 409, "a fresh envelope cannot revive an old source job revision");
     assert.equal((await getLatest()).state.pilot.batches.some((batch: { id: string }) => batch.id === "direct-batch"), false);
   });
+
+  await t.test("purchase provenance persists and a partner can correct prepared food without repeating pantry deductions", async () => {
+    await getLatest();
+    const inputFor = (operation: unknown) => {
+      const id = randomUUID();
+      return { householdId, expectedRevision: revision, commandId: id, command: { kind: "pilot", command: { id, expectedRevision: revision, operation } } };
+    };
+    const send = async (token: string, operation: unknown) => {
+      const response = await householdCommand(request(token, inputFor(operation)));
+      assert.equal(response.status, 200);
+      const result = await response.json(); await getLatest(); return result;
+    };
+    const ingredientId = "test-correction-pasta";
+    const item = { ingredientId, name: "Test pasta", unit: "g", quantity: 500, purchasedOn: "2026-10-08", bestBefore: "2027-10-08", sourceNote: "Development test receipt", lotCode: "TEST-LOT" };
+    const purchase = inputFor({ type: "record_purchase", items: [item] });
+    assert.equal((await householdCommand(request(owner.token, purchase))).status, 200);
+    let latest = await getLatest();
+    const lot = latest.state.pilot.purchaseLots.find((entry: { commandId: string }) => entry.commandId === purchase.commandId);
+    assert.equal(lot.quantity, 500); assert.equal(lot.purchasedOn, item.purchasedOn); assert.equal(lot.bestBefore, item.bestBefore);
+    assert.equal(lot.sourceNote, item.sourceNote); assert.equal(lot.lotCode, item.lotCode); assert.ok(lot.recordedAt);
+    const recipe = { id: "correction-pasta", name: "Correction pasta", description: "Development fixture", servings: 2, minutes: 20, ingredients: [{ ingredientId, name: item.name, quantity: 100, unit: "g" }], steps: ["Cook pasta."] };
+    await send(owner.token, { type: "create_batch", batch: { id: "correctable-batch", recipe, prepareDate: "2026-10-12", yield: 4, reservedExtra: 3 }, allocations: [{ id: "correctable-meal", batchId: "correctable-batch", memberId: initial.currentMemberId, date: "2026-10-12", slot: "dinner", portions: 1 }] });
+    await send(owner.token, { type: "cook_batch", batchId: "correctable-batch", actualPortions: 4, freezerPortions: 2 });
+    await send(owner.token, { type: "consume", allocationId: "correctable-meal", fromFreezer: true });
+    latest = await getLatest();
+    const pantryBefore = structuredClone(latest.state.pantry);
+    const usesBefore = latest.state.pilot.prepared.find((entry: { batchId: string }) => entry.batchId === "correctable-batch").ingredientUses;
+    assert.equal(pantryBefore.find((entry: { id: string }) => entry.id === ingredientId).quantity, 300);
+    const correction = inputFor({ type: "correct_prepared", batchId: "correctable-batch", produced: 3, freezerPortions: 1, reopenAllocationIds: ["correctable-meal"], reason: "The meal was not eaten; three portions remain." });
+    const staleAbsolute = inputFor({ type: "correct_prepared", batchId: "correctable-batch", produced: 2, freezerPortions: 0, reason: "An older count." });
+    const response = await householdCommand(request(partner.token, correction)); assert.equal(response.status, 200);
+    const corrected = await response.json();
+    const prepared = corrected.state.pilot.prepared.find((entry: { batchId: string }) => entry.batchId === "correctable-batch");
+    assert.equal(prepared.produced, 3); assert.equal(prepared.consumed, 0); assert.equal(prepared.freezerPortions, 1);
+    assert.deepEqual(prepared.ingredientUses, usesBefore); assert.deepEqual(corrected.state.pantry, pantryBefore); assert.ok(corrected.receipt.inverse);
+    assert.equal(corrected.state.pilot.allocations.find((entry: { id: string }) => entry.id === "correctable-meal").consumedAt, undefined);
+    const retry = await (await householdCommand(request(partner.token, correction))).json();
+    assert.equal(retry.duplicate, true); assert.equal(retry.revision, corrected.revision);
+    assert.equal((await householdCommand(request(owner.token, staleAbsolute))).status, 409);
+    await getLatest();
+    const undone = await send(partner.token, { type: "undo", receiptId: corrected.receipt.id });
+    const restored = undone.state.pilot.prepared.find((entry: { batchId: string }) => entry.batchId === "correctable-batch");
+    assert.equal(restored.produced, 4); assert.equal(restored.consumed, 1); assert.equal(restored.freezerPortions, 1);
+    assert.deepEqual(undone.state.pantry, pantryBefore);
+    assert.equal((await (await householdCommand(request(owner.token, purchase))).json()).duplicate, true);
+    const reloaded = await (await householdGet(request(partner.token))).json();
+    assert.deepEqual(reloaded.state.pilot.purchaseLots.filter((entry: { commandId: string }) => entry.commandId === purchase.commandId), [lot]);
+    assert.deepEqual(reloaded.state.pantry, pantryBefore);
+  });
 });

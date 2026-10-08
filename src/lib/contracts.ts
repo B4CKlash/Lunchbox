@@ -258,6 +258,8 @@ export const flexibleStockSchema = z.object({
   quantity: z.number().finite().nonnegative().max(100000).optional(),
   useSoon: z.boolean().optional(),
   sourceNote: z.string().max(1000).optional(),
+  purchasedOn: calendarDateSchema.optional(),
+  bestBefore: calendarDateSchema.optional(),
 }).refine((stock) => stock.status === "exact" ? stock.quantity !== undefined : stock.quantity === undefined, {
   message: "Exact stock requires a quantity; uncertain stock must not invent one.",
 });
@@ -266,9 +268,22 @@ export const stockCheckSchema = z.object({
   unit: unitSchema,
   fingerprint: z.string().min(1).max(100000),
 });
+export const purchaseItemSchema = recipeIngredientSchema.extend({
+  purchasedOn: calendarDateSchema.optional(),
+  bestBefore: calendarDateSchema.optional(),
+  sourceNote: z.string().max(1000).optional(),
+  lotCode: z.string().trim().max(120).optional(),
+});
+// Historical amounts brought home, never a remaining balance or a stock-lot
+// identity for ingredient matching. Unknown purchase dates stay absent.
+export const purchaseLotSchema = purchaseItemSchema.extend({
+  id: z.string().min(1).max(200),
+  commandId: pilotIdSchema,
+  recordedAt: z.iso.datetime(),
+});
 export const preparedPortionsSchema = z.object({
   batchId: pilotIdSchema,
-  produced: portionsSchema,
+  produced: z.number().finite().nonnegative().max(1000),
   consumed: z.number().finite().nonnegative().max(1000),
   freezerPortions: z.number().finite().nonnegative().max(1000),
   ingredientUses: z.array(recipeIngredientSchema).max(200).default([]),
@@ -308,8 +323,12 @@ export const pilotChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_shop_through"), date: calendarDateSchema }),
   z.object({ type: z.literal("set_stock"), stock: flexibleStockSchema }),
   z.object({ type: z.literal("confirm_stock"), ...stockCheckSchema.shape }),
-  z.object({ type: z.literal("record_purchase"), items: z.array(recipeIngredientSchema).min(1).max(200) }),
+  z.object({ type: z.literal("record_purchase"), items: z.array(purchaseItemSchema).min(1).max(200) }),
   z.object({ type: z.literal("cook_batch"), batchId: pilotIdSchema, actualPortions: portionsSchema, freezerPortions: z.number().finite().nonnegative().max(1000) }),
+  z.object({ type: z.literal("correct_prepared"), batchId: pilotIdSchema,
+    produced: z.number().finite().nonnegative().max(1000), freezerPortions: z.number().finite().nonnegative().max(1000),
+    reopenAllocationIds: z.array(pilotIdSchema).max(5000).default([]), reason: z.string().trim().min(1).max(1000),
+  }),
   z.object({ type: z.literal("consume"), allocationId: pilotIdSchema, fromFreezer: z.boolean().optional() }),
   z.object({ type: z.literal("record_feedback"), feedback: recipeFeedbackSchema }),
   z.object({ type: z.literal("set_members"), members: z.array(householdMemberSchema).min(1).max(12) }),
@@ -356,6 +375,7 @@ const pilotDataSchema = z.object({
   stock: z.array(flexibleStockSchema).max(200),
   stockChecks: z.array(stockCheckSchema).max(200),
   prepared: z.array(preparedPortionsSchema).max(1000),
+  purchaseLots: z.array(purchaseLotSchema).max(10000).default([]),
   feedback: z.array(recipeFeedbackSchema).max(1000),
   proposals: z.array(planningProposalSchema).max(100),
   unplacedMeals: plannedMealsSchema,
@@ -503,6 +523,8 @@ export type MealAllocation = z.infer<typeof mealAllocationSchema>;
 export type FlexibleStock = z.infer<typeof flexibleStockSchema>;
 export type StockCheck = z.infer<typeof stockCheckSchema>;
 export type PreparedPortions = z.infer<typeof preparedPortionsSchema>;
+export type PurchaseItem = z.infer<typeof purchaseItemSchema>;
+export type PurchaseLot = z.infer<typeof purchaseLotSchema>;
 export type RecipeFeedback = z.infer<typeof recipeFeedbackSchema>;
 export type PlanningSession = z.infer<typeof planningSessionSchema>;
 export type PlanningProposal = z.infer<typeof planningProposalSchema>;

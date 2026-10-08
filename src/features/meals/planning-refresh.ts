@@ -27,9 +27,10 @@ export function planningResponseChanges(request: string, operations: PilotOperat
 
 /** Background ideas cannot replace or evict the recipe the user is discussing. */
 export function planningResponseCandidates(session: PlanningSession, recipes: Recipe[], automatic: boolean) {
-  const focused = automatic ? session.candidates.find((recipe) => recipe.id === session.focusedRecipeId) : undefined;
-  const incoming = recipes.filter((recipe) => recipe.id !== focused?.id);
-  const merged = [...session.candidates.filter((recipe) => recipe.id !== focused?.id && !incoming.some((candidate) => candidate.id === recipe.id)), ...incoming];
+  const rejected = new Set(session.rejectedRecipeIds);
+  const focused = automatic ? session.candidates.find((recipe) => recipe.id === session.focusedRecipeId && !rejected.has(recipe.id)) : undefined;
+  const incoming = recipes.filter((recipe) => !rejected.has(recipe.id) && recipe.id !== focused?.id);
+  const merged = [...session.candidates.filter((recipe) => !rejected.has(recipe.id) && recipe.id !== focused?.id && !incoming.some((candidate) => candidate.id === recipe.id)), ...incoming];
   return focused ? [...merged.slice(-29), focused] : merged.slice(-30);
 }
 

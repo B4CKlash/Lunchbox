@@ -3,7 +3,7 @@ import type { RemoteCommand, HouseholdMutation } from "./remote-protocol";
 /** Whole-list edits cannot be safely replayed over another person's changes. */
 export function canRebaseRemoteCommand(input: Pick<RemoteCommand, "command">) {
   if (input.command.kind === "legacy") return !["setPantry", "setPreferences", "setCalendarDraft", "setCalendarSettings"].includes(input.command.action.type);
-  return !["set_session", "receive_planning_result", "set_members"].includes(input.command.command.operation.type);
+  return !["set_session", "receive_planning_result", "set_members", "set_stock", "correct_prepared"].includes(input.command.command.operation.type);
 }
 
 /** Queuing must not turn a stale whole-snapshot edit into an authorized rebase. */

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { householdStateSchema, householdActionSchema, type HouseholdState, type PilotChange, type PilotOperation, type Recipe } from "@/lib/contracts";
 import { applyPilotCommand, buildPilotShoppingList, ensurePilot, getMealCoverage, PilotCommandError } from "./pilot";
+import { loadHousehold, saveHousehold } from "@/features/pantry/storage";
 
 const recipe: Recipe = {
   id: "pasta", name: "Vegetable pasta", description: "A household favorite", servings: 2, minutes: 20,
@@ -358,4 +359,174 @@ test("dismissing proposals keeps other current proposals valid and undo recovers
   assert.deepEqual(restored.pilot.proposals.find((p) => p.id === "legacy")?.legacyMeals, original.pilot.proposals[0].legacyMeals);
   assert.ok(restored.pilot.proposals.every((proposal) => proposal.status === "pending" && proposal.baseRevision === restored.pilot.revision));
   assert.deepEqual(restored.pilot.batches, original.pilot.batches);
+});
+
+test("older pilot snapshots gain empty purchase history without inventing dates or lots from receipts", () => {
+  const original = run(makeState(500), { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", unit: "g", quantity: 100 }] }).state;
+  const old = JSON.parse(JSON.stringify(original));
+  delete old.pilot.purchaseLots;
+  for (const receipt of old.pilot.receipts) if (receipt.inverse) delete receipt.inverse.data.purchaseLots;
+  const migrated = ensurePilot(old);
+  assert.deepEqual(migrated.pilot.purchaseLots, []);
+  assert.deepEqual(migrated.pilot.receipts[0].inverse?.data.purchaseLots, []);
+  assert.equal(migrated.pilot.receipts[0].fingerprint, original.pilot.receipts[0].fingerprint);
+  assert.deepEqual(migrated.pantry, original.pantry);
+});
+
+test("purchase lots survive storage and later undo restores their true chronology after an older snapshot migrates", () => {
+  const purchase: PilotOperation = { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", quantity: 100, unit: "g", purchasedOn: "2026-10-10", sourceNote: "Market", lotCode: "A" }] };
+  const legacy = run(makeState(), purchase, "pre-lots").state;
+  const raw = JSON.parse(JSON.stringify(legacy));
+  delete raw.pilot.purchaseLots;
+  delete raw.pilot.receipts[0].inverse.data.purchaseLots;
+  let state = ensurePilot(raw);
+  const first = run(state, purchase, "first-known-lot");
+  state = first.state;
+  assert.equal(state.pilot.receipts[0].inverse, undefined);
+  const second = run(state, purchase, "second-known-lot");
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  saveHousehold(storage, second.state);
+  const loaded = loadHousehold(storage);
+  assert.ok(loaded);
+  assert.deepEqual(loaded.pilot?.purchaseLots, second.state.pilot.purchaseLots);
+  assert.deepEqual(loaded.pilot?.receipts.at(-1)?.inverse?.data.purchaseLots, first.state.pilot.purchaseLots);
+  state = run(loaded, { type: "undo", receiptId: second.receipt.id }).state;
+  assert.deepEqual(state.pilot.purchaseLots, first.state.pilot.purchaseLots);
+  assert.equal(state.pilot.purchaseLots.length, 1);
+  assert.equal(state.pantry[0].quantity, 200); // Includes the preserved pre-feature purchase.
+  rejectsCode(() => run(state, { type: "undo", receiptId: "pre-lots" }), "conflict");
+  const repeated = applyPilotCommand(state, { id: "second-known-lot", expectedRevision: 0, operation: purchase });
+  assert.equal(repeated.duplicate, true);
+  assert.deepEqual(repeated.state.pilot.purchaseLots, first.state.pilot.purchaseLots);
+});
+
+test("purchases retain historical metadata and stable per-item lots without making uncertain stock exact", () => {
+  let state = run(makeState(900), { type: "set_stock", stock: { ingredientId: "pasta", name: "Pasta", unit: "g", status: "some", purchasedOn: "2026-10-01", bestBefore: "2027-01-01", sourceNote: "Original pantry" } }).state;
+  const command = { id: "x".repeat(160), expectedRevision: state.pilot.revision, operation: { type: "record_purchase", items: [
+    { ingredientId: "pasta", name: "Pasta", unit: "g", quantity: 100, purchasedOn: "2026-10-10", bestBefore: "2027-04-01", sourceNote: "Market", lotCode: "LOT-A" },
+    { ingredientId: "pasta", name: "Pasta", unit: "g", quantity: 200 },
+  ] } };
+  state = applyPilotCommand(state, command, { now: "2026-10-12T12:00:00.000Z" }).state;
+  assert.equal(state.pantry[0].quantity, 1200);
+  assert.equal(state.pilot.stock[0].status, "some");
+  assert.equal(state.pilot.stock[0].quantity, undefined);
+  assert.equal(state.pilot.stock[0].purchasedOn, "2026-10-01");
+  assert.deepEqual(state.pilot.purchaseLots.map((lot) => lot.quantity), [100, 200]);
+  assert.equal(new Set(state.pilot.purchaseLots.map((lot) => lot.id)).size, 2);
+  assert.ok(state.pilot.purchaseLots.every((lot) => lot.id.length <= 200 && lot.commandId === command.id && lot.ingredientId === "pasta" && lot.unit === "g"));
+  assert.equal(state.pilot.purchaseLots[0].purchasedOn, "2026-10-10");
+  assert.equal(state.pilot.purchaseLots[0].bestBefore, "2027-04-01");
+  assert.equal(state.pilot.purchaseLots[0].sourceNote, "Market");
+  assert.equal(state.pilot.purchaseLots[0].lotCode, "LOT-A");
+  assert.equal(state.pilot.purchaseLots[1].purchasedOn, undefined);
+  assert.equal(state.pilot.purchaseLots[1].recordedAt, "2026-10-12T12:00:00.000Z");
+  assert.deepEqual(applyPilotCommand(state, command).state.pilot.purchaseLots, state.pilot.purchaseLots);
+  const lots = structuredClone(state.pilot.purchaseLots);
+  state = run(state, batch()).state;
+  state = run(state, { type: "cook_batch", batchId: "batch", actualPortions: 6, freezerPortions: 2 }).state;
+  assert.deepEqual(state.pilot.purchaseLots, lots);
+  assert.equal(state.pilot.purchaseLots[0].quantity, 100); // Purchased amount, not remaining food.
+  assert.equal(state.pilot.stock[0].status, "some");
+});
+
+test("purchase proposals create lots only on apply and multiple purchases keep distinct identities", () => {
+  const purchase: PilotChange = { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", quantity: 100, unit: "g" }] };
+  const proposed = run(makeState(), { type: "propose", id: "buy", title: "Two purchases", changes: [purchase, purchase] }).state;
+  assert.deepEqual(proposed.pilot.purchaseLots, []);
+  assert.equal(proposed.pantry[0].quantity, 0);
+  const result = run(proposed, { type: "apply_proposal", proposalId: "buy" });
+  assert.equal(result.state.pilot.purchaseLots.length, 2);
+  assert.equal(new Set(result.state.pilot.purchaseLots.map((lot) => lot.id)).size, 2);
+  assert.equal(result.state.pantry[0].quantity, 200);
+  const undone = run(result.state, { type: "undo", receiptId: result.receipt.id }).state;
+  assert.deepEqual(undone.pilot.purchaseLots, []);
+  assert.equal(undone.pantry[0].quantity, 0);
+});
+
+test("invalid purchase dates and a full lot history reject the entire purchase atomically", () => {
+  const state = makeState(100);
+  const invalid = { id: "invalid-date", expectedRevision: 0, operation: { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", quantity: 100, unit: "g", purchasedOn: "2026-02-30" }] } };
+  rejectsCode(() => applyPilotCommand(state, invalid), "invalid");
+  assert.equal(state.pantry[0].quantity, 100);
+  state.pilot.purchaseLots = Array.from({ length: 10000 }, (_, index) => ({ id: `lot-${index}`, commandId: `purchase-${index}`, ingredientId: "pasta", name: "Pasta", quantity: 1, unit: "g", recordedAt: "2026-10-12T12:00:00.000Z" }));
+  const original = structuredClone(state);
+  assert.throws(() => run(state, { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", quantity: 100, unit: "g" }] }), /purchase history is full/);
+  assert.deepEqual(state, original);
+});
+
+function correctionState() {
+  let state = run(makeState(5000), batch()).state;
+  state = run(state, batch("other", 2)).state;
+  state = run(state, allocation("eaten", "2026-10-12", "you", "batch", 2)).state;
+  state = run(state, allocation("pending", "2026-10-13", "partner", "batch", 1)).state;
+  state = run(state, { type: "cook_batch", batchId: "batch", actualPortions: 6, freezerPortions: 2 }).state;
+  state = run(state, { type: "consume", allocationId: "eaten", fromFreezer: true }).state;
+  state = run(state, { type: "record_purchase", items: [{ ingredientId: "pasta", name: "Pasta", quantity: 100, unit: "g" }] }).state;
+  return run(state, { type: "record_feedback", feedback: { id: "review", recipeId: recipe.id, rating: 4, makeAgain: true, notes: "Check portion count" } }).state;
+}
+
+test("prepared correction repairs older yield and consumption after later edits without rewriting inventory or ingredient use", () => {
+  const before = correctionState();
+  const correction: PilotOperation = { type: "correct_prepared", batchId: "batch", produced: 5, freezerPortions: 2, reopenAllocationIds: ["eaten"], reason: "Lunch was marked eaten by mistake; five portions were actually made." };
+  const applied = run(before, correction, "correct-once");
+  assert.equal(applied.state.pilot.prepared[0].produced, 5);
+  assert.equal(applied.state.pilot.prepared[0].consumed, 0);
+  assert.equal(applied.state.pilot.prepared[0].freezerPortions, 2);
+  assert.equal(applied.state.pilot.allocations.find((entry) => entry.id === "eaten")?.consumedAt, undefined);
+  assert.deepEqual(applied.state.pantry, before.pantry);
+  assert.deepEqual(applied.state.pilot.stock, before.pilot.stock);
+  assert.deepEqual(applied.state.pilot.prepared[0].ingredientUses, before.pilot.prepared[0].ingredientUses);
+  assert.deepEqual(applied.state.pilot.batches, before.pilot.batches);
+  assert.deepEqual(applied.state.pilot.purchaseLots, before.pilot.purchaseLots);
+  assert.deepEqual(applied.state.pilot.feedback, before.pilot.feedback);
+  assert.deepEqual(applied.state.pilot.receipts.slice(0, -1).map((receipt) => receipt.fingerprint), before.pilot.receipts.map((receipt) => receipt.fingerprint));
+  const duplicate = applyPilotCommand(applied.state, { id: "correct-once", expectedRevision: 0, operation: correction });
+  assert.equal(duplicate.duplicate, true);
+  assert.deepEqual(duplicate.state, applied.state);
+  rejectsCode(() => run(applied.state, { ...correction, produced: 6 }, "correct-once"), "conflict");
+  rejectsCode(() => applyPilotCommand(applied.state, { id: "stale-correction", expectedRevision: before.pilot.revision, operation: correction }), "conflict");
+  const undone = run(applied.state, { type: "undo", receiptId: applied.receipt.id }).state;
+  assert.deepEqual(undone.pilot.prepared, before.pilot.prepared);
+  assert.deepEqual(undone.pilot.allocations, before.pilot.allocations);
+  assert.deepEqual(undone.pantry, before.pantry);
+  assert.deepEqual(undone.pilot.purchaseLots, before.pilot.purchaseLots);
+});
+
+test("prepared correction rejects impossible balances, invalid reopen targets and missing reasons atomically", () => {
+  let state = correctionState();
+  state = run(state, allocation("other-eaten", "2026-10-14", "you", "other")).state;
+  state = run(state, { type: "cook_batch", batchId: "other", actualPortions: 2, freezerPortions: 0 }).state;
+  state = run(state, { type: "consume", allocationId: "other-eaten" }).state;
+  const original = structuredClone(state);
+  const correction: PilotOperation = { type: "correct_prepared", batchId: "batch", produced: 6, freezerPortions: 0, reopenAllocationIds: [], reason: "Measured correction" };
+  for (const patch of [
+    { batchId: "missing" }, { produced: 2 }, { produced: 0 }, { freezerPortions: 5 },
+    { reopenAllocationIds: ["missing"] }, { reopenAllocationIds: ["pending"] },
+    { reopenAllocationIds: ["other-eaten"] }, { reopenAllocationIds: ["eaten", "eaten"] },
+    { reopenAllocationIds: ["eaten"], produced: 2 }, { reason: " " },
+  ]) {
+    rejectsCode(() => run(state, { ...correction, ...patch }), "invalid");
+    assert.deepEqual(state, original);
+  }
+  rejectsCode(() => run(run(makeState(), batch()).state, correction), "invalid");
+});
+
+test("zero and qualitative-stock corrections preserve honest ingredient history and require no committed meals", () => {
+  let state = run(makeState(1234), { type: "set_stock", stock: { ingredientId: "pasta", name: "Pasta", unit: "g", status: "low", purchasedOn: "2026-10-01", bestBefore: "2027-01-01" } }).state;
+  state = run(state, batch()).state;
+  state = run(state, { type: "cook_batch", batchId: "batch", actualPortions: 6, freezerPortions: 2 }).state;
+  state = run(state, { type: "set_shop_through", date: "2026-10-20" }).state;
+  const before = structuredClone(state);
+  const result = applyPilotCommand(state, { id: "zero", expectedRevision: state.pilot.revision, operation: { type: "correct_prepared", batchId: "batch", produced: 0, freezerPortions: 0, reason: "Corrected prepared count after checking the kitchen" } });
+  assert.equal(result.state.pilot.prepared[0].produced, 0);
+  assert.equal(result.state.pilot.prepared[0].consumed, 0);
+  assert.equal(result.state.pilot.prepared[0].freezerPortions, 0);
+  assert.deepEqual(result.state.pantry, before.pantry);
+  assert.deepEqual(result.state.pilot.stock, before.pilot.stock);
+  assert.deepEqual(result.state.pilot.prepared[0].ingredientUses, before.pilot.prepared[0].ingredientUses);
+  assert.deepEqual(result.state.pilot.batches, before.pilot.batches);
+  assert.equal(result.state.pilot.stock[0].quantity, undefined);
+  const tinyAllocation = run(before, allocation("tiny", "2026-10-13", "you", "batch", 0.0000001)).state;
+  rejectsCode(() => applyPilotCommand(tinyAllocation, { id: "zero-tiny", expectedRevision: tinyAllocation.pilot.revision, operation: { type: "correct_prepared", batchId: "batch", produced: 0, freezerPortions: 0, reason: "A tiny pending meal is still a meal" } }), "invalid");
 });

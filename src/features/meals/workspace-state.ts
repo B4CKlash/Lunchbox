@@ -67,6 +67,7 @@ function nextHousehold(
         ...pilot.session,
         candidates: [...pilot.session.candidates.filter((recipe) => recipe.id !== action.recipe.id), action.recipe].slice(-30),
         focusedRecipeId: action.recipe.id,
+        rejectedRecipeIds: pilot.session.rejectedRecipeIds.filter((recipeId) => recipeId !== action.recipe.id),
       } } };
     }
     if (["removeMeal", "setMealServings", "setCalendarDraft", "commitCalendar", "discardCalendarDraft", "setCalendarSettings"].includes(action.type)) {
@@ -277,11 +278,19 @@ export function applyHouseholdAction(
     };
     if (action.type === "setPantry") {
       const confirmed = new Set((action.confirmedExactStock ?? []).map((item) => JSON.stringify([item.ingredientId, item.unit])));
-      next.pilot.stock = next.pilot.stock.filter((stock) => {
-        if (confirmed.has(JSON.stringify([stock.ingredientId, stock.unit]))) return false;
+      next.pilot.stock = next.pilot.stock.flatMap((stock) => {
+        const key = JSON.stringify([stock.ingredientId, stock.unit]);
         const before = current.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
         const after = next.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
-        return JSON.stringify(before.map((item) => item.quantity)) === JSON.stringify(after.map((item) => item.quantity));
+        const changed = confirmed.has(key) || JSON.stringify(before.map((item) => item.quantity)) !== JSON.stringify(after.map((item) => item.quantity));
+        const useSoonChanged = JSON.stringify(before.map((item) => item.useSoon)) !== JSON.stringify(after.map((item) => item.useSoon));
+        const metadata = { ...stock, ...(useSoonChanged ? { useSoon: after.some((item) => item.useSoon) } : {}) };
+        if (!changed) return [metadata];
+        confirmed.add(key);
+        if (!after.length) return [];
+        // A fresh measurement changes certainty without erasing optional dates
+        // or source details. Historical purchase lots are a separate record.
+        return [{ ...metadata, status: "exact" as const, quantity: after.reduce((sum, item) => sum + item.quantity, 0), name: after[0].name }];
       });
       next.pilot.stockChecks = next.pilot.stockChecks.filter((stock) => !confirmed.has(JSON.stringify([stock.ingredientId, stock.unit])));
     }

@@ -168,3 +168,21 @@ test("background ideas preserve the focused recipe snapshot even when the candid
   assert.equal(manual.length, 30);
   assert.deepEqual(manual.find((candidate) => candidate.id === recipe.id), revised);
 });
+
+test("returned recipes cannot revive a rejected candidate or trigger another refresh", () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const recipe = planningFixtureRecipe(state);
+  const replacement = { ...recipe, id: "different-recipe", name: "A different recipe" };
+  state.pilot.session.candidates = [recipe];
+  state.pilot.session.focusedRecipeId = recipe.id;
+  const before = planningRefreshFingerprint(state);
+  state.pilot.session.rejectedRecipeIds = [recipe.id];
+  // Rejection uses one explicit UI interaction callback, not a second automatic
+  // fingerprint trigger. A returned response cannot reintroduce the passed idea.
+  assert.equal(planningRefreshFingerprint(state), before);
+  for (const automatic of [true, false]) {
+    assert.deepEqual(planningResponseCandidates(state.pilot.session, [recipe, replacement], automatic), [replacement]);
+  }
+  const reconsidered = { ...state.pilot.session, rejectedRecipeIds: [] };
+  assert.deepEqual(planningResponseCandidates(reconsidered, [], true), [recipe]);
+});

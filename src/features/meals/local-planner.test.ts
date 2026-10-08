@@ -18,6 +18,43 @@ test("local planning preserves favorite provenance without rewriting it", () => 
   assert.throws(() => reviewLocalPlanningDraft(state(), draft({ favoriteRecipeIds: ["invented"] }), ids));
 });
 
+test("rejected recipes cannot reappear through favorites, batch references, or renamed copies", () => {
+  const current = state();
+  current.pilot.session.candidates = [recipe];
+  current.pilot.session.rejectedRecipeIds = [recipe.id];
+  const before = structuredClone(current);
+  assert.throws(() => reviewLocalPlanningDraft(current, draft({ intent: "favorite", favoriteRecipeIds: [recipe.id] }), ids), /not available/);
+  const batch = { recipeRef: recipe.id, prepareDate: "2026-10-12", portions: 2, reservedExtra: 2, allocations: [] };
+  assert.throws(() => reviewLocalPlanningDraft(current, draft({ intent: "place", batches: [batch] }), ids), /available recipe/);
+  assert.equal(localPlanningWireSchema(current, "you").safeParse({ intent: "favorite", reply: "Review this favorite.", favoriteRecipeIds: [recipe.id] }).success, false);
+  assert.equal(localPlanningWireSchema(current, "you").safeParse({ intent: "place", reply: "Review this batch.", recipes: [], favoriteRecipeIds: [], coverage: [], batches: [batch], allocations: [], removeAllocationIds: [] }).success, false);
+  assert.throws(() => reviewLocalPlanningDraft(current, draft({ intent: "generate", recipes: [{ name: "Renamed pasta", description: "Same recipe", servings: recipe.servings, minutes: recipe.minutes, ingredients: recipe.ingredients.map(({ name, quantity, unit }) => ({ name, quantity, unit })), steps: recipe.steps }] }), ids), /ruled out/);
+  assert.deepEqual(current, before);
+});
+
+test("model context preserves rejection and supplies all dates in a four-week session", async () => {
+  const current = state();
+  current.pilot.session.candidates = [recipe];
+  current.pilot.session.focusedRecipeId = recipe.id;
+  current.pilot.session.rejectedRecipeIds = [recipe.id];
+  current.pilot.session.days = 28;
+  const before = structuredClone(current);
+  const model = new MockLanguageModelV4({ doGenerate: { content: [{ type: "text", text: JSON.stringify({ intent: "discuss", reply: "You could explore a different recipe for this session." }) }], finishReason: { unified: "stop", raw: undefined }, usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 20, text: 20, reasoning: undefined } }, warnings: [] } });
+  await runLocalPlanning(current, "Suggest something different for these four weeks.", { verify: false, model });
+  const message = model.doGenerateCalls[0].prompt.find((entry) => entry.role === "user");
+  assert.ok(message && Array.isArray(message.content));
+  const content = message.content.find((part) => part.type === "text");
+  assert.ok(content && content.type === "text");
+  const context = JSON.parse(content.text.split("\nCURRENT USER REQUEST")[0]);
+  assert.deepEqual(context.savedRecipes, []);
+  assert.deepEqual(context.candidates, []);
+  assert.deepEqual(context.session.rejectedRecipeIds, [recipe.id]);
+  assert.equal(context.session.focusedRecipeId, null);
+  assert.equal(context.planningDates.length, 28);
+  assert.equal(context.planningDates.at(-1).date, "2026-11-08");
+  assert.deepEqual(current, before);
+});
+
 test("new local recipes resolve identity independently and remain candidates", () => {
   const current = state();
   const before = structuredClone(current);

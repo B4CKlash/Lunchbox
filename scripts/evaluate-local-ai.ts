@@ -18,6 +18,13 @@ const evaluationSources = [
   "src/features/meals/planning-claims.ts",
   "src/features/meals/local-model.ts",
   "src/features/meals/planning-fixtures.ts",
+  "src/lib/contracts.ts",
+  "src/features/planning/pilot.ts",
+  "src/features/planning/direct-placement.ts",
+  "src/features/planning/calendar.ts",
+  "src/features/pantry/ingredients.ts",
+  "src/features/meals/live-provider.ts",
+  "src/features/meals/jobs.ts",
 ] as const;
 
 async function evaluationSourceHashes() {

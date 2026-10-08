@@ -494,7 +494,35 @@ test("measuring the historical amount again explicitly replaces uncertain stock"
   const preserved = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry });
   assert.equal(preserved.pilot?.stock[0]?.status, "some");
   const confirmed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry, confirmedExactStock: [{ ingredientId: item.id, unit: item.unit }] });
-  assert.equal(confirmed.pilot?.stock.length, 0);
+  assert.equal(confirmed.pilot?.stock[0]?.status, "exact");
+  assert.equal(confirmed.pilot?.stock[0]?.quantity, item.quantity);
   assert.equal(confirmed.pantry[0].quantity, item.quantity);
   assert.equal(state.pilot.stock[0].status, "some");
+});
+
+test("pantry measurements preserve optional stock details and historical purchase lots", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const item = state.pantry[0];
+  const details = { purchasedOn: "2026-10-07", bestBefore: "2026-10-14", sourceNote: "Farm box", useSoon: true };
+  state.pilot.stock = [{ ingredientId: item.id, name: item.name, unit: item.unit, status: "some", ...details }];
+  state.pilot.purchaseLots.push({ id: "purchase:0", commandId: "purchase", recordedAt: "2026-10-08T12:00:00.000Z", ingredientId: item.id, name: item.name, unit: item.unit, quantity: 100, purchasedOn: details.purchasedOn, bestBefore: details.bestBefore, sourceNote: details.sourceNote, lotCode: "box-A" });
+  const changed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry.map((entry) => entry === item ? { ...entry, quantity: 123 } : entry) });
+  assert.deepEqual(changed.pilot?.stock[0], { ingredientId: item.id, name: item.name, unit: item.unit, status: "exact", quantity: 123, ...details });
+  assert.deepEqual(changed.pilot?.purchaseLots, state.pilot.purchaseLots);
+  const removed = applyHouseholdAction(changed, { type: "setPantry", pantry: changed.pantry.filter((entry) => entry.id !== item.id || entry.unit !== item.unit) });
+  assert.equal(removed.pilot?.stock.length, 0);
+  assert.deepEqual(removed.pilot?.purchaseLots, state.pilot.purchaseLots);
+});
+
+test("explicitly discussing a library recipe reconsiders only that rejected candidate", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const chosen = recipe();
+  state.pilot.session.rejectedRecipeIds = [chosen.id, "another-rejected-recipe"];
+  const result = applyHouseholdAction(state, { type: "discussRecipe", recipe: chosen, servings: 2 });
+  assert.deepEqual(result.pilot?.session.rejectedRecipeIds, ["another-rejected-recipe"]);
+  assert.equal(result.pilot?.session.focusedRecipeId, chosen.id);
+  assert.deepEqual(result.pilot?.allocations, state.pilot.allocations);
+  assert.deepEqual(state.pilot.session.rejectedRecipeIds, [chosen.id, "another-rejected-recipe"]);
 });

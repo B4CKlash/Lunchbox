@@ -45,3 +45,19 @@ test("latest feedback influences favorite retrieval without changing planned mea
   assert.deepEqual(findPlanningFavorites(state).map((recipe) => recipe.id), [vegetables.id]);
   assert.deepEqual(state.pilot.batches, []);
 });
+
+test("session rejections exclude saved and make-again recipes without losing their history", () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const pasta = planningFixtureRecipe(state);
+  const vegetables = planningFixtureRecipe(state, "vegetables");
+  state.workspace.recipeBox = [{ recipe: pasta, source: "demo" }, { recipe: vegetables, source: "demo" }];
+  state.pilot.batches = [{ id: "previous-batch", recipe: pasta, prepareDate: "2026-10-08", yield: 2, reservedExtra: 2, status: "planned" }];
+  state.pilot.feedback = [{ id: "rating", recipeId: pasta.id, rating: 5, makeAgain: true, notes: "Loved it last week" }];
+  state.pilot.session.rejectedRecipeIds = [pasta.id];
+  const before = structuredClone(state);
+  assert.deepEqual(findPlanningFavorites(state), [vegetables]);
+  assert.deepEqual(fixtureRecipeForRequest(state, "find our favorites").recipes, [vegetables]);
+  assert.deepEqual(fixtureRecipeForRequest(state, "pasta").recipes, []);
+  assert.match(fixtureRecipeForRequest(state, "pasta").reply, /ruled out/);
+  assert.deepEqual(state, before);
+});

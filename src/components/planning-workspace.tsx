@@ -5,16 +5,17 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Bookmark, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, CookingPot, Leaf, MessageCircle, Plus, Send, ShoppingBasket, Snowflake, Star, Undo2, Users, Utensils } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { LocalPlanningAssistant, type LocalAssistantHandle } from "@/components/local-planning-assistant";
-import { fixtureRecipeForRequest, planningFixtureRecipe } from "@/features/meals/planning-fixtures";
+import { fixtureRecipeForRequest } from "@/features/meals/planning-fixtures";
 import { planningUserMessageAuthor } from "@/features/meals/planning-message-author";
 import { isPlanningRefresh, planningRefreshFingerprint, planningRefreshSummary, planningResponseChanges, planningResponseCandidates } from "@/features/meals/planning-refresh";
 import type { AiJob } from "@/features/meals/jobs";
 import { addDays, calendarDates } from "@/features/planning/calendar";
 import { buildPilotShoppingList, getMealCoverage } from "@/features/planning/pilot";
+import { previewCandidateShopping } from "@/features/planning/candidate-shopping";
 import { directPlacementForRequest } from "@/features/planning/direct-placement";
 import { createSettingsDraft, resolveSettingsDraft } from "@/features/planning/settings-draft";
 import { proposalReviewFingerprint, readProposalReview } from "@/features/pantry/storage";
-import { type CookingBatch, type HouseholdState, type MealSlot, type PilotChange, type PilotOperation, type PlanningProposal, type PlanningSession, type Recipe, type ShoppingItem } from "@/lib/contracts";
+import { calendarDateSchema, type CookingBatch, type HouseholdState, type MealSlot, type PilotChange, type PilotOperation, type PlanningProposal, type PlanningSession, type PreparedPortions, type PurchaseItem as PurchasedIngredient, type Recipe, type ShoppingItem } from "@/lib/contracts";
 import styles from "./planning-workspace.module.css";
 
 type RunCommand = (operation: PilotOperation) => Promise<boolean>;
@@ -43,6 +44,7 @@ function describeChange(change: PilotChange, state: HouseholdState) {
   if (change.type === "confirm_stock") return `Confirm that you have enough ${state.pantry.find((item) => item.id === change.ingredientId)?.name ?? change.ingredientId} (${change.unit}) for the current requirements.`;
   if (change.type === "record_purchase") return `Record purchase: ${change.items.map((item) => `${item.name} ${amount(item.quantity, item.unit)}`).join(", ")}.`;
   if (change.type === "cook_batch") return `Confirm cooked: ${state.pilot?.batches.find((batch) => batch.id === change.batchId)?.recipe.name ?? change.batchId}, ${change.actualPortions} portions made, ${change.freezerPortions} frozen.`;
+  if (change.type === "correct_prepared") return `Correct ${state.pilot?.batches.find((batch) => batch.id === change.batchId)?.recipe.name ?? change.batchId}: ${change.produced} total portions made, ${change.freezerPortions} remaining in the freezer; reopen ${change.reopenAllocationIds.length} mistaken eaten meals. Reason: ${change.reason}. Recorded ingredient use stays unchanged.`;
   if (change.type === "set_stock") return `Update ${change.stock.name}: ${change.stock.status === "exact" ? amount(change.stock.quantity ?? 0, change.stock.unit) : change.stock.status}.`;
   if (change.type === "set_shop_through") return `Shop for cooking through ${dateLabel(change.date)}.`;
   if (change.type === "record_feedback") return `Save rating ${change.feedback.rating}/5 for ${state.pilot?.batches.find((batch) => batch.recipe.id === change.feedback.recipeId)?.recipe.name ?? state.pilot?.session.candidates.find((recipe) => recipe.id === change.feedback.recipeId)?.name ?? change.feedback.recipeId}; ${change.feedback.makeAgain ? "make again" : "do not prioritize again"}. ${change.feedback.notes}`;
@@ -67,11 +69,12 @@ export function PlanningWorkspace() {
   const assistantMode = planningComposer.mode;
   const setAssistantMode = (mode: "fixture" | "local") => setPlanningComposer({ mode });
   const sending = useRef(false);
+  const rejecting = useRef(false);
   const localAssistant = useRef<LocalAssistantHandle>(null);
   const dates = calendarDates(session.startDate, session.days);
   const focusDate = session.focusDate ?? session.startDate;
   const focusSlot = session.focusSlot ?? "lunch";
-  const focusedRecipe = session.candidates.find((recipe) => recipe.id === session.focusedRecipeId);
+  const focusedRecipe = session.candidates.find((recipe) => recipe.id === session.focusedRecipeId && !session.rejectedRecipeIds.includes(recipe.id));
   const recipeIsSaved = state.workspace.recipeBox.some((entry) => entry.recipe.id === focusedRecipe?.id);
   const focusCoverage = getMealCoverage(state, focusDate, focusSlot);
   const focusedMembers = pilot.members.filter((member) => session.memberIds.includes(member.id));
@@ -107,14 +110,14 @@ export function PlanningWorkspace() {
       return false;
     }
     const result = job.result.data;
-    const recipes = result.recipes;
+    const recipes = result.recipes.filter((recipe) => !session.rejectedRecipeIds.includes(recipe.id));
     const automatic = isPlanningRefresh(job.request.message);
     const changes = planningResponseChanges(job.request.message, result.operations);
     const direct = !automatic && job.actorMemberId ? directPlacementForRequest(state, job.request.message, job.actorMemberId, result.operations) : null;
     const nextSession: PlanningSession = { ...session,
       draft: automatic ? session.draft : "",
       candidates: planningResponseCandidates(session, recipes, automatic),
-      focusedRecipeId: automatic && session.candidates.some((recipe) => recipe.id === session.focusedRecipeId) ? session.focusedRecipeId : recipes[0]?.id ?? session.focusedRecipeId,
+      focusedRecipeId: automatic && focusedRecipe ? focusedRecipe.id : recipes[0]?.id ?? focusedRecipe?.id ?? null,
       messages: [...session.messages, { id: `job-${job.id}-${automatic ? "context" : "user"}`, role: automatic ? "assistant" : "user", ...(automatic ? {} : { authorMemberId: job.actorMemberId }), text: planningRefreshSummary(job.request.message), recipes: [], servings: state.preferences.servings }, { id: `job-${job.id}-assistant`, role: "assistant", source: "ai", text: `${result.reply.slice(0, 1870)}\n\n${automatic ? "Ideas only. Your existing meals and inventory are unchanged." : direct ? "Your explicit meal placement is saved with the action receipt below." : "Suggestions only. Calendar and inventory changes require your review."}`, recipes, servings: state.preferences.servings }].slice(-100) as PlanningSession["messages"],
     };
     // The transcript and its reviewable proposal are one validated mutation.
@@ -127,10 +130,18 @@ export function PlanningWorkspace() {
 
   async function focusRecipe(recipe: Recipe) {
     const candidates = [...session.candidates.filter((entry) => entry.id !== recipe.id), recipe].slice(-30);
-    if (await setSession({ candidates, focusedRecipeId: recipe.id })) {
+    if (await setSession({ candidates, focusedRecipeId: recipe.id, rejectedRecipeIds: session.rejectedRecipeIds.filter((recipeId) => recipeId !== recipe.id) })) {
       setView("context");
       refreshIdeas(`you’re discussing ${recipe.name}`);
     }
+  }
+
+  async function rejectRecipe(recipe: Recipe) {
+    if (rejecting.current) return;
+    rejecting.current = true;
+    try {
+      if (await setSession({ rejectedRecipeIds: [...new Set([...session.rejectedRecipeIds, recipe.id])].slice(-200), focusedRecipeId: null })) refreshIdeas(`you passed on ${recipe.name} and would like another idea`);
+    } finally { rejecting.current = false; }
   }
 
   function createBatchChange(recipe: Recipe, occasions: { date: string; slot: MealSlot }[], freezer = 0): PilotChange | null {
@@ -180,19 +191,20 @@ export function PlanningWorkspace() {
         reply = change ? `Requested: place ${focusedRecipe.name} on ${dateLabel(requestedDate)} ${requestedSlot} for the people with an open meal. See the saved-action receipt.` : "That occasion is already covered. Select the calendar cell to change an existing meal first.";
         action = change ?? undefined;
       } else if (/\b(fill|several days|batch|two lunches|three meals|whole week)\b/i.test(clean)) {
-        recipes = [focusedRecipe ?? planningFixtureRecipe(state)];
-        reply = "One cooking batch can cover several occasions. I’ll show a proposal for the first three open occasions in this view. The groceries count this batch once; review before applying.";
+        recipes = focusedRecipe ? [focusedRecipe] : fixtureRecipeForRequest(state, "Explore a pasta recipe").recipes;
+        reply = recipes.length ? "One cooking batch can cover several occasions. I’ll show a proposal for the first three open occasions in this view. The groceries count this batch once; review before applying." : "Choose a recipe you want to consider before reviewing a batch. The earlier pasta example was passed over.";
       } else if (/freez/i.test(clean)) {
         reply = "Open the focused recipe’s placement controls and reserve extra portions before cooking. When you confirm cooking, record how many actually went into the freezer. Prepared food can then be scheduled later without creating another grocery requirement.";
       } else {
         ({ reply, recipes } = fixtureRecipeForRequest(state, clean));
       }
-      const nextCandidates = [...session.candidates.filter((recipe) => !recipes.some((candidate) => candidate.id === recipe.id)), ...recipes].slice(-30);
-      const saved = await setSession({ draft: "", candidates: nextCandidates, focusedRecipeId: recipes[0]?.id ?? session.focusedRecipeId, messages: [...session.messages, { id: id(), role: "user" as const, authorMemberId: householdId ? currentMemberId ?? undefined : pilot.members[0]?.id, text: clean, recipes: [], servings: state.preferences.servings }, { id: id(), role: "assistant" as const, text: reply, source: "demo" as const, recipes, servings: state.preferences.servings }].slice(-100) });
+      recipes = recipes.filter((recipe) => !session.rejectedRecipeIds.includes(recipe.id));
+      const nextCandidates = planningResponseCandidates(session, recipes, false);
+      const saved = await setSession({ draft: "", candidates: nextCandidates, focusedRecipeId: recipes[0]?.id ?? focusedRecipe?.id ?? null, messages: [...session.messages, { id: id(), role: "user" as const, authorMemberId: householdId ? currentMemberId ?? undefined : pilot.members[0]?.id, text: clean, recipes: [], servings: state.preferences.servings }, { id: id(), role: "assistant" as const, text: reply, source: "demo" as const, recipes, servings: state.preferences.servings }].slice(-100) });
       if (saved) {
         clearSubmittedDraft(text);
         if (action) await run(action);
-        else if (/\b(fill|several days|batch|two lunches|three meals|whole week)\b/i.test(clean)) await proposeBatch(recipes[0]);
+        else if (recipes.length && /\b(fill|several days|batch|two lunches|three meals|whole week)\b/i.test(clean)) await proposeBatch(recipes[0]);
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The fixture request could not be completed.");
@@ -215,7 +227,7 @@ export function PlanningWorkspace() {
       <section className={`${styles.panel} ${styles.conversation} ${view !== "conversation" ? styles.mobileHidden : ""}`} aria-label="Planning conversation">
         <div className={styles.panelHeader}><div><h2><MessageCircle size={17} />At the kitchen table</h2><p>A conversation with your calendar in view.</p></div><Leaf size={19} /></div>
         <div className={styles.messages} aria-live="polite">
-          {!session.messages.length ? <div className={styles.welcome}><div className={styles.welcomeIcon}><Leaf size={22} /></div><h3>What does your week need?</h3><p>Start with an occasion, a favorite, or the vegetables you’d like to use. We’ll keep the plan and grocery implications together.</p><button disabled={busy} className={styles.prompt} onClick={() => void send("Only my Tuesday lunch is covered by work")}>Only my Tuesday lunch is covered by work <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Find something from our favorites")}>Find something from our favorites <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Try a new vegetable-focused recipe")}>Use the vegetables we brought home <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Could one pasta batch cover three meals?")}>One pasta batch, three meals <ArrowRight size={12} /></button></div> : session.messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === "user" ? styles.userMessage : styles.assistantMessage}`}><div className={styles.messageAuthor}>{message.id.startsWith("job-") && message.id.endsWith("-context") ? "Context refresh" : message.role === "user" ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : pilot.members[0]?.id, members: pilot.members, shared: Boolean(householdId) }) : message.source === "ai" ? message.id.startsWith("job-") ? "Local assistant" : "AI assistant" : "Planning helper · fixture"}</div><p>{message.text}</p>{message.recipes.map((recipe) => <button key={recipe.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(recipe)}><Utensils size={14} /><span>{recipe.name}</span><ArrowRight size={12} /></button>)}</div>)}
+          {!session.messages.length ? <div className={styles.welcome}><div className={styles.welcomeIcon}><Leaf size={22} /></div><h3>What does your week need?</h3><p>Start with an occasion, a favorite, or the vegetables you’d like to use. We’ll keep the plan and grocery implications together.</p><button disabled={busy} className={styles.prompt} onClick={() => void send("Only my Tuesday lunch is covered by work")}>Only my Tuesday lunch is covered by work <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Find something from our favorites")}>Find something from our favorites <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Try a new vegetable-focused recipe")}>Use the vegetables we brought home <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Could one pasta batch cover three meals?")}>One pasta batch, three meals <ArrowRight size={12} /></button></div> : session.messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === "user" ? styles.userMessage : styles.assistantMessage}`}><div className={styles.messageAuthor}>{message.id.startsWith("job-") && message.id.endsWith("-context") ? "Context refresh" : message.role === "user" ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : pilot.members[0]?.id, members: pilot.members, shared: Boolean(householdId) }) : message.source === "ai" ? message.id.startsWith("job-") ? "Local assistant" : "AI assistant" : "Planning helper · fixture"}</div><p>{message.text}</p>{message.recipes.map((recipe) => <button key={recipe.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(recipe)}><Utensils size={14} /><span>{session.rejectedRecipeIds.includes(recipe.id) ? `Reconsider ${recipe.name}` : recipe.name}</span><ArrowRight size={12} /></button>)}</div>)}
         </div>
         {assistantMode === "local" ? <LocalPlanningAssistant key={`${householdId}:${currentMemberId}:${session.id}`} householdId={householdId} actorMemberId={currentMemberId} revision={pilot.revision} session={session} contextFingerprint={planningRefreshFingerprint(state)} onResult={receiveLocalResult} requestRef={localAssistant} draft={draft} onDraftChange={setDraft} onDraftSubmitted={clearSubmittedDraft} storageError={storageError} /> : <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void send(draft); }}>
           <div className={styles.focusPill}><CalendarDays size={12} />{dateLabel(focusDate, { weekday: "short", month: "short", day: "numeric" })} · {focusSlot}{focusedRecipe ? ` · ${focusedRecipe.name}` : " · choose a recipe"}</div>
@@ -251,7 +263,7 @@ export function PlanningWorkspace() {
         <section className={styles.panel}>
           <div className={styles.panelHeader}><div><h2><Utensils size={17} />On the table</h2><p>Explore first. Place when it fits.</p></div><span className={styles.count}>{session.candidates.length}</span></div>
           {session.candidates.length > 1 ? <div className={styles.panelBody}><div className={styles.recipeChooser}>{session.candidates.filter((recipe) => !session.rejectedRecipeIds.includes(recipe.id)).map((recipe) => <button className={`${styles.smallButton} ${recipe.id === focusedRecipe?.id ? styles.selectedChoice : ""}`} key={recipe.id} onClick={() => void focusRecipe(recipe)}>{recipe.name}</button>)}</div></div> : null}
-          {focusedRecipe ? <><div className={styles.recipeHero}><span className={styles.recipeTag}>{focusedRecipe.provenance?.source === "import" ? "Your imported recipe" : focusedRecipe.provenance?.source === "ai" ? recipeIsSaved ? "Saved AI recipe" : "AI recipe candidate" : "Authored example · fixture"}</span><h3>{focusedRecipe.name}</h3><div className={styles.recipeMeta}><span><Clock3 size={12} />{focusedRecipe.minutes} min</span><span><Users size={12} />{focusedRecipe.servings} base portions</span></div></div><div className={styles.panelBody}><p className={styles.recipeDescription}>{focusedRecipe.description}</p><div className={styles.buttonRow}><button className={styles.smallButton} onClick={() => void send("Make this quicker")}>Less effort</button><button className={styles.smallButton} onClick={() => void send("Change the cuisine to Mediterranean")}>Try another cuisine</button><button className={styles.smallButton} disabled={recipeIsSaved} onClick={() => saveRecipe(focusedRecipe, focusedRecipe.provenance?.source ?? "demo")}><Bookmark size={12} />{recipeIsSaved ? "Saved" : "Save"}</button></div><CandidatePlacement key={`${focusedRecipe.id}:${focusDate}:${focusSlot}`} recipe={focusedRecipe} state={state} focusDate={focusDate} focusSlot={focusSlot} run={run} /><button className={`${styles.quietButton} ${styles.fullWidth}`} onClick={() => void proposeBatch()}><CalendarDays size={14} />Review a batch across 3 meals</button><RecipeDetail recipe={focusedRecipe} /><button className={styles.textButton} onClick={() => void setSession({ rejectedRecipeIds: [...new Set([...session.rejectedRecipeIds, focusedRecipe.id])].slice(-200), focusedRecipeId: null })}>Not this one</button></div></> : <div className={styles.empty}><Utensils size={28} /><h3>A good meal starts with an idea.</h3><p>Ask about your favorites or explore a vegetable-focused example. Selected cards stay connected to the conversation.</p><button className={styles.quietButton} onClick={() => void send("Try a vegetable-focused recipe")}><Leaf size={14} />Explore an example</button></div>}
+          {focusedRecipe ? <><div className={styles.recipeHero}><span className={styles.recipeTag}>{focusedRecipe.provenance?.source === "import" ? "Your imported recipe" : focusedRecipe.provenance?.source === "ai" ? recipeIsSaved ? "Saved AI recipe" : "AI recipe candidate" : "Authored example · fixture"}</span><h3>{focusedRecipe.name}</h3><div className={styles.recipeMeta}><span><Clock3 size={12} />{focusedRecipe.minutes} min</span><span><Users size={12} />{focusedRecipe.servings} base portions</span></div></div><div className={styles.panelBody}><p className={styles.recipeDescription}>{focusedRecipe.description}</p><div className={styles.buttonRow}><button className={styles.smallButton} onClick={() => void send("Make this quicker")}>Less effort</button><button className={styles.smallButton} onClick={() => void send("Change the cuisine to Mediterranean")}>Try another cuisine</button><button className={styles.smallButton} disabled={recipeIsSaved} onClick={() => saveRecipe(focusedRecipe, focusedRecipe.provenance?.source ?? "demo")}><Bookmark size={12} />{recipeIsSaved ? "Saved" : "Save"}</button></div><CandidatePlacement key={`${focusedRecipe.id}:${focusDate}:${focusSlot}`} recipe={focusedRecipe} state={state} focusDate={focusDate} focusSlot={focusSlot} run={run} /><button className={`${styles.quietButton} ${styles.fullWidth}`} onClick={() => void proposeBatch()}><CalendarDays size={14} />Review a batch across 3 meals</button><RecipeDetail recipe={focusedRecipe} /><button className={styles.textButton} onClick={() => void rejectRecipe(focusedRecipe)}>Not this one</button></div></> : <div className={styles.empty}><Utensils size={28} /><h3>A good meal starts with an idea.</h3><p>Ask about your favorites or explore a vegetable-focused example. Selected cards stay connected to the conversation.</p><button className={styles.quietButton} onClick={() => void send("Try a vegetable-focused recipe")}><Leaf size={14} />Explore an example</button></div>}
         </section>
         {pilot.unplacedMeals.length ? <section className={styles.panel}><div className={styles.panelHeader}><div><h2>Earlier undated meals</h2><p>Preserved from your previous plan. Choose a recipe to place it.</p></div></div><div className={styles.panelBody}>{pilot.unplacedMeals.map((meal) => <button key={meal.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(meal.recipe)}>{meal.recipe.name}<ArrowRight size={12} /></button>)}</div></section> : null}
         <ShoppingPreview state={state} run={run} compact />
@@ -391,7 +403,20 @@ function CandidatePlacement({ recipe, state, focusDate, focusSlot, run }: { reci
       await run({ type: "create_batch", batch: { id: batchId, recipe, prepareDate, yield: selected.length + extra, reservedExtra: extra }, allocations: selected.map((memberId) => ({ id: id(), batchId, memberId, date: focusDate, slot: focusSlot, portions: 1 })) });
     } finally { savingRef.current = false; setSaving(false); }
   }
-  return <form className={styles.details} onSubmit={(event) => void place(event)}><p className={styles.subtle}>Place on <strong>{dateLabel(focusDate)} · {focusSlot}</strong></p>{openMembers.length ? openMembers.map(({ member }) => <label className={styles.allocationChoice} key={member.id}><input type="checkbox" checked={selected.includes(member.id)} onChange={(event) => setExcluded(event.target.checked ? excluded.filter((memberId) => memberId !== member.id) : [...excluded, member.id])} />{member.name} · 1 portion</label>) : <p className={styles.subtle}>Everyone is covered. Select an open occasion or prepare extra portions.</p>}<div className={styles.fieldRow}><label className={styles.field}>Prepare on<input className={styles.input} type="date" value={prepareDate} max={focusDate} required onChange={(event) => setPrepareDate(event.target.value)} /></label><label className={styles.field}>Reserve extra portions<input className={styles.input} type="number" min={0} max={30} step={1} value={extra} onChange={(event) => setExtra(Number(event.target.value))} /></label></div><button className={`${styles.quietButton} ${styles.primary} ${styles.fullWidth}`} disabled={saving || (!selected.length && !extra)} type="submit"><Plus size={14} />{saving ? "Saving…" : `Plan ${selected.length + extra} ${selected.length + extra === 1 ? "portion" : "portions"}`}</button><p className={styles.formNotice}>Ingredients counted once for this batch. Pantry changes only when you record cooking.</p></form>;
+  return <form className={styles.details} onSubmit={(event) => void place(event)}><p className={styles.subtle}>Place on <strong>{dateLabel(focusDate)} · {focusSlot}</strong></p>{openMembers.length ? openMembers.map(({ member }) => <label className={styles.allocationChoice} key={member.id}><input type="checkbox" checked={selected.includes(member.id)} onChange={(event) => setExcluded(event.target.checked ? excluded.filter((memberId) => memberId !== member.id) : [...excluded, member.id])} />{member.name} · 1 portion</label>) : <p className={styles.subtle}>Everyone is covered. Select an open occasion or prepare extra portions.</p>}<div className={styles.fieldRow}><label className={styles.field}>Prepare on<input className={styles.input} type="date" value={prepareDate} max={focusDate} required onChange={(event) => setPrepareDate(event.target.value)} /></label><label className={styles.field}>Reserve extra portions<input className={styles.input} type="number" min={0} max={30} step={1} value={extra} onChange={(event) => setExtra(Number(event.target.value))} /></label></div><CandidateGroceries state={state} recipe={recipe} portions={selected.length + extra} prepareDate={prepareDate} /><button className={`${styles.quietButton} ${styles.primary} ${styles.fullWidth}`} disabled={saving || (!selected.length && !extra)} type="submit"><Plus size={14} />{saving ? "Saving…" : `Plan ${selected.length + extra} ${selected.length + extra === 1 ? "portion" : "portions"}`}</button><p className={styles.formNotice}>Ingredients counted once for this batch. Pantry changes only when you record cooking.</p></form>;
+}
+
+function CandidateGroceries({ state, recipe, portions, prepareDate }: { state: HouseholdState; recipe: Recipe; portions: number; prepareDate: string }) {
+  if (!Number.isFinite(portions) || portions <= 0 || portions > 1000 || !calendarDateSchema.safeParse(prepareDate).success) return <p className={styles.formNotice}>Choose a preparation date and people or extra portions to preview this recipe’s grocery needs.</p>;
+  const preview = previewCandidateShopping(state, recipe, portions, prepareDate);
+  return <section className={styles.candidatePreview} aria-label="Candidate grocery preview">
+    <h4>Extra groceries for this candidate</h4>
+    <p>If you plan {portions} {portions === 1 ? "portion" : "portions"}, including reserved extras. Existing cooking plans through {dateLabel(preview.shopThrough)} are counted first.</p>
+    {preview.extendsShoppingHorizon ? <p className={styles.formNotice}>This preview looks through the preparation date. Your saved shopping date stays {dateLabel(state.pilot!.shopThrough)}.</p> : null}
+    {preview.shortages.length ? <ul className={styles.ingredients}>{preview.shortages.map((item) => <li key={`${item.ingredientId}:${item.unit}`}><span>{item.name}</span><strong>+{amount(item.quantity, item.unit)}</strong></li>)}</ul> : <p>No additional calculated shortages.</p>}
+    {preview.checks.length ? <><strong className={styles.checkBadge}>Stock checks · amounts uncertain</strong><ul className={styles.candidateChecks}>{preview.checks.map((item) => <li key={`${item.ingredientId}:${item.unit}`}><strong>{item.name}</strong><span>Check for {amount(item.required, item.unit)} in total; {amount(item.candidateRequired, item.unit)} is for this candidate.</span></li>)}</ul></> : null}
+    <p className={styles.formNotice}>Preview only. Your live groceries change when you plan the batch.</p>
+  </section>;
 }
 
 function MemberSettings({ state, run }: { state: HouseholdState; run: RunCommand }) {
@@ -432,7 +457,15 @@ function ShoppingPreview({ state, run, compact = false }: { state: HouseholdStat
 function PurchaseItem({ item, run }: { item: ShoppingItem; run: RunCommand }) {
   const [quantity, setQuantity] = useState(item.quantity);
   const [saving, setSaving] = useState(false);
-  return <li className={styles.shoppingItem}><div><strong>{item.name}</strong><small>Need {amount(item.quantity, item.unit)} more</small></div><form className={styles.purchaseRow} onSubmit={async (event) => { event.preventDefault(); if (saving) return; setSaving(true); await run({ type: "record_purchase", items: [{ ingredientId: item.ingredientId, name: item.name, unit: item.unit, quantity }] }); setSaving(false); }}><label><span className="sr-only">Purchased {item.name}, {item.unit}</span><input className={styles.input} type="number" min={0.01} max={100000} step="any" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label><button className={styles.smallButton} type="submit" disabled={saving || quantity <= 0}>{saving ? "Saving…" : "Bought"}</button></form></li>;
+  const savingRef = useRef(false);
+  return <li className={styles.purchaseItem}><form onSubmit={async (event) => {
+    event.preventDefault();
+    if (savingRef.current) return;
+    const details = purchaseDetails(new FormData(event.currentTarget));
+    savingRef.current = true; setSaving(true);
+    try { await run({ type: "record_purchase", items: [{ ingredientId: item.ingredientId, name: item.name, unit: item.unit, quantity, ...details }] }); }
+    finally { savingRef.current = false; setSaving(false); }
+  }}><fieldset className={styles.settingsFields} disabled={saving}><div className={styles.shoppingItem}><div><strong>{item.name}</strong><small>Need {amount(item.quantity, item.unit)} more</small></div><div className={styles.purchaseRow}><label><span className="sr-only">Purchased {item.name}, {item.unit}</span><input className={styles.input} type="number" min={0.01} max={100000} step="any" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label><button className={styles.smallButton} type="submit" disabled={quantity <= 0}>{saving ? "Saving…" : "Bought"}</button></div></div><PurchaseDetailsFields /></fieldset></form></li>;
 }
 
 export function PilotShoppingPanel() {
@@ -451,14 +484,36 @@ export function PilotShoppingPanel() {
 function StockEditor({ state, run }: { state: HouseholdState; run: RunCommand }) {
   const [ingredientKey, setIngredientKey] = useState(state.pantry[0] ? `${state.pantry[0].id}:${state.pantry[0].unit}` : "");
   const ingredient = state.pantry.find((item) => `${item.id}:${item.unit}` === ingredientKey);
-  return <section className={styles.panel}><div className={styles.panelHeader}><div><h2><Leaf size={17} />What’s actually in the kitchen?</h2><p>“Some” is useful. A made-up quantity isn’t.</p></div></div><div className={styles.panelBody}>{state.pantry.length ? <><label className={styles.field}>Ingredient<select className={styles.select} value={ingredientKey} onChange={(event) => setIngredientKey(event.target.value)}>{state.pantry.map((item) => <option key={`${item.id}:${item.unit}`} value={`${item.id}:${item.unit}`}>{item.name} ({item.unit})</option>)}</select></label>{ingredient ? <><StockForm key={`${ingredient.id}:${ingredient.unit}:${ingredient.quantity}:${JSON.stringify(state.pilot!.stock.find((entry) => entry.ingredientId === ingredient.id && entry.unit === ingredient.unit))}`} state={state} ingredient={ingredient} run={run} /><StockPurchaseForm ingredient={ingredient} run={run} /></> : null}</> : <p className={styles.subtle}>Add ingredients in <Link href="/pantry">your pantry</Link> first.</p>}</div></section>;
+  return <section className={styles.panel}><div className={styles.panelHeader}><div><h2><Leaf size={17} />What’s actually in the kitchen?</h2><p>“Some” is useful. A made-up quantity isn’t.</p></div></div><div className={styles.panelBody}>{state.pantry.length ? <><label className={styles.field}>Ingredient<select className={styles.select} value={ingredientKey} onChange={(event) => setIngredientKey(event.target.value)}>{state.pantry.map((item) => <option key={`${item.id}:${item.unit}`} value={`${item.id}:${item.unit}`}>{item.name} ({item.unit})</option>)}</select></label>{ingredient ? <><StockForm key={`stock:${ingredient.id}:${ingredient.unit}`} state={state} ingredient={ingredient} run={run} /><StockPurchaseForm key={`purchase:${ingredient.id}:${ingredient.unit}`} ingredient={ingredient} run={run} /><PurchaseHistory state={state} ingredient={ingredient} /></> : null}</> : <p className={styles.subtle}>Add ingredients in <Link href="/pantry">your pantry</Link> first.</p>}</div></section>;
 }
 
 function StockForm({ state, ingredient, run }: { state: HouseholdState; ingredient: HouseholdState["pantry"][number]; run: RunCommand }) {
   const stock = state.pilot!.stock.find((item) => item.ingredientId === ingredient.id && item.unit === ingredient.unit);
-  const [status, setStatus] = useState<"exact" | "some" | "low" | "out">(stock?.status ?? "exact");
-  const [quantity, setQuantity] = useState(stock?.status === "some" || stock?.status === "low" ? "" : String(stock?.quantity ?? ingredient.quantity));
-  return <form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void run({ type: "set_stock", stock: { ingredientId: ingredient.id, name: ingredient.name, unit: ingredient.unit, status, ...(status === "exact" ? { quantity: Number(quantity) } : {}), sourceNote: String(data.get("source") ?? ""), useSoon: data.get("useSoon") === "on" } }); }}><div className={styles.fieldRow}><label className={styles.field}>Stock state<select className={styles.select} value={status} onChange={(event) => { if (event.target.value === "exact" && (status === "some" || status === "low")) setQuantity(""); setStatus(event.target.value as typeof status); }}><option value="exact">Exact quantity</option><option value="some">Some</option><option value="low">Running low</option><option value="out">Out</option></select></label>{status === "exact" ? <label className={styles.field}>Amount ({ingredient.unit})<input className={styles.input} type="number" min={0} max={100000} step="any" required placeholder="Measured total" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label> : <p className={styles.subtle}>No numerical balance will be invented.</p>}</div><label className={styles.field}>Farm, source, or storage note<input className={styles.input} name="source" defaultValue={stock?.sourceNote ?? ""} maxLength={1000} placeholder="Saturday farm box" /></label><label className={styles.allocationChoice}><input name="useSoon" type="checkbox" defaultChecked={stock?.useSoon ?? ingredient.useSoon} />Use soon</label><button className={styles.quietButton}>Update kitchen stock</button></form>;
+  const incoming = { status: stock?.status ?? "exact" as const, quantity: stock?.status === "some" || stock?.status === "low" ? "" : String(stock?.quantity ?? ingredient.quantity), sourceNote: stock?.sourceNote ?? "", useSoon: stock?.useSoon ?? ingredient.useSoon, purchasedOn: stock?.purchasedOn ?? "", bestBefore: stock?.bestBefore ?? "" };
+  const [form, setForm] = useState(() => createSettingsDraft(incoming));
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const resolved = resolveSettingsDraft(form, incoming);
+  if (resolved.draft !== form) setForm(resolved.draft);
+  const values = resolved.draft.values;
+  const update = (patch: Partial<typeof values>) => setForm((current) => ({ ...current, values: { ...current.values, ...patch } }));
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (resolved.conflict || savingRef.current) return;
+    savingRef.current = true; setSaving(true);
+    try {
+      if (await run({ type: "set_stock", stock: { ingredientId: ingredient.id, name: ingredient.name, unit: ingredient.unit, status: values.status, ...(values.status === "exact" ? { quantity: Number(values.quantity) } : {}), sourceNote: values.sourceNote, useSoon: values.useSoon, ...(values.purchasedOn ? { purchasedOn: values.purchasedOn } : {}), ...(values.bestBefore ? { bestBefore: values.bestBefore } : {}) } })) setForm(createSettingsDraft(values));
+    } finally { savingRef.current = false; setSaving(false); }
+  }
+  return <>
+    {resolved.conflict ? <div className={styles.notice} role="alert"><p>This ingredient changed while you were editing. Your draft is kept below.</p><button type="button" className={styles.smallButton} onClick={() => setForm(createSettingsDraft(incoming))}>Load current stock</button></div> : null}
+    <form onSubmit={(event) => void save(event)}><fieldset className={styles.settingsFields} disabled={saving}>
+      <div className={styles.fieldRow}><label className={styles.field}>Stock state<select className={styles.select} value={values.status} onChange={(event) => update({ status: event.target.value as typeof values.status, ...(event.target.value === "exact" && (values.status === "some" || values.status === "low") ? { quantity: "" } : {}) })}><option value="exact">Exact quantity</option><option value="some">Some</option><option value="low">Running low</option><option value="out">Out</option></select></label>{values.status === "exact" ? <label className={styles.field}>Amount ({ingredient.unit})<input className={styles.input} type="number" min={0} max={100000} step="any" required placeholder="Measured total" value={values.quantity} onChange={(event) => update({ quantity: event.target.value })} /></label> : <p className={styles.subtle}>No numerical balance will be invented.</p>}</div>
+      <label className={styles.field}>Farm, source, or storage note<input className={styles.input} value={values.sourceNote} onChange={(event) => update({ sourceNote: event.target.value })} maxLength={1000} placeholder="Saturday farm box" /></label>
+      <div className={styles.fieldRow}><label className={styles.field}>Purchased on (optional)<input className={styles.input} type="date" value={values.purchasedOn} onChange={(event) => update({ purchasedOn: event.target.value })} /></label><label className={styles.field}>Best before (optional)<input className={styles.input} type="date" value={values.bestBefore} onChange={(event) => update({ bestBefore: event.target.value })} /></label></div>
+      <label className={styles.allocationChoice}><input type="checkbox" checked={values.useSoon} onChange={(event) => update({ useSoon: event.target.checked })} />Use soon</label><button className={styles.quietButton} disabled={resolved.conflict}>{saving ? "Saving…" : "Update kitchen stock"}</button>
+    </fieldset></form>
+  </>;
 }
 
 function BatchControls({ batch, state, run }: { batch: CookingBatch; state: HouseholdState; run: RunCommand }) {
@@ -476,18 +531,90 @@ function BatchControls({ batch, state, run }: { batch: CookingBatch; state: Hous
   const available = prepared ? prepared.produced - prepared.consumed : 0;
   const unallocated = available - allocations.filter((entry) => !entry.consumedAt).reduce((sum, entry) => sum + entry.portions, 0);
   return <article className={styles.batchCard}><div className={styles.batchStatus}><span>{dateLabel(batch.prepareDate)} · preparation</span><span>{batch.status === "cooked" ? "Cooked" : "Planned"}</span></div><h3>{batch.recipe.name}</h3><p>{batch.status === "cooked" ? `${available} portions remain · ${prepared?.freezerPortions ?? 0} in freezer · ${Math.max(0, unallocated)} unallocated` : `${batch.yield} intended portions · ${batch.reservedExtra} reserved extra · ingredients counted once`}</p>{batch.status === "planned" ? <><form onSubmit={async (event) => { event.preventDefault(); if (saving) return; setSaving(true); await run({ type: "cook_batch", batchId: batch.id, actualPortions: actual, freezerPortions: freezer }); setSaving(false); }}><div className={styles.fieldRow}><label className={styles.field}>Actual portions made<input className={styles.input} type="number" min={1} max={1000} step="any" value={actual} onChange={(event) => setActual(Number(event.target.value))} /></label><label className={styles.field}>Put in the freezer<input className={styles.input} type="number" min={0} max={actual} step="any" value={freezer} onChange={(event) => setFreezer(Number(event.target.value))} /></label></div><div className={styles.buttonRow}><button className={`${styles.quietButton} ${styles.primary}`} disabled={saving} type="submit"><CookingPot size={14} />{saving ? "Saving…" : "Confirm cooked"}</button><button className={styles.smallButton} type="button" onClick={() => void run({ type: "remove_batch", batchId: batch.id })}>Cancel batch</button></div></form><p className={styles.formNotice}>Cooking records ingredient use. Purchases stay in inventory if you cancel a batch.</p></> : <>{unallocated > 0 ? <details className={styles.details}><summary><Snowflake size={12} /> Schedule prepared portions later</summary><form onSubmit={(event) => { event.preventDefault(); void run({ type: "allocate", allocation: { id: id(), batchId: batch.id, memberId, date: laterDate, slot: laterSlot, portions: 1 } }); }}><div className={styles.fieldRow}><label className={styles.field}>Date<input className={styles.input} type="date" required min={batch.prepareDate} value={laterDate} onChange={(event) => setLaterDate(event.target.value)} /></label><label className={styles.field}>Meal<select className={styles.select} value={laterSlot} onChange={(event) => setLaterSlot(event.target.value as MealSlot)}>{slotOptions.map((slot) => <option key={slot} value={slot}>{slotLabel(slot)}</option>)}</select></label></div><label className={styles.field}>Person<select className={styles.select} value={memberId} onChange={(event) => setMemberId(event.target.value)}>{pilot.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label><button className={styles.quietButton}>Schedule 1 prepared portion</button><p className={styles.formNotice}>Scheduling reserves a portion. Mark it eaten to reduce prepared food.</p></form></details> : null}{allocations.filter((entry) => !entry.consumedAt).map((allocation) => <div className={styles.shoppingItem} key={allocation.id}><div><strong>{pilot.members.find((member) => member.id === allocation.memberId)?.name}</strong><small>{dateLabel(allocation.date)} · {allocation.slot} · {allocation.portions} portion</small></div><div className={styles.buttonRow}><button className={styles.smallButton} onClick={() => void run({ type: "consume", allocationId: allocation.id })}>Eaten</button>{(prepared?.freezerPortions ?? 0) >= allocation.portions ? <button className={styles.smallButton} onClick={() => void run({ type: "consume", allocationId: allocation.id, fromFreezer: true })}>Eaten from freezer</button> : null}</div></div>)}</>}
+    {batch.status === "cooked" && prepared ? <PreparedCorrection batch={batch} state={state} prepared={prepared} run={run} /> : null}
     <details className={styles.details}><summary>Rate this recipe & leave a cooking note</summary>{feedback ? <p className={styles.formNotice}>Saved: {feedback.rating}/5 · {feedback.makeAgain ? "make again" : "not a repeat"}{feedback.notes ? ` · ${feedback.notes}` : ""}</p> : null}<form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void run({ type: "record_feedback", feedback: { id: id(), recipeId: batch.recipe.id, rating, makeAgain: data.get("again") === "on", notes: String(data.get("notes") ?? "") } }); }}><div className={styles.rating} role="group" aria-label="Recipe rating">{[1, 2, 3, 4, 5].map((value) => <button type="button" key={value} aria-label={`${value} stars`} aria-pressed={value === rating} onClick={() => setRating(value)}><Star size={20} fill={value <= rating ? "currentColor" : "none"} /></button>)}</div><label className={styles.allocationChoice}><input type="checkbox" name="again" defaultChecked={feedback?.makeAgain ?? true} />Make again</label><label className={styles.field}>Cooking note<textarea className={styles.textarea} name="notes" maxLength={2000} defaultValue={feedback?.notes ?? ""} placeholder="What worked? What would you change next time?" /></label><button className={styles.quietButton}>Save feedback</button></form></details>
   </article>;
 }
 
+function PreparedCorrection({ batch, state, prepared, run }: { batch: CookingBatch; state: HouseholdState; prepared: PreparedPortions; run: RunCommand }) {
+  const incoming = {
+    produced: prepared.produced, freezerPortions: prepared.freezerPortions, consumed: prepared.consumed,
+    reopenAllocationIds: [] as string[], reason: "",
+    meals: state.pilot!.allocations.filter((allocation) => allocation.batchId === batch.id).map(({ id, memberId, date, slot, portions, consumedAt }) => ({ id, memberId, date, slot, portions, consumedAt })).sort((left, right) => left.id.localeCompare(right.id)),
+  };
+  const [form, setForm] = useState(() => createSettingsDraft(incoming));
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const resolved = resolveSettingsDraft(form, incoming);
+  if (resolved.draft !== form) setForm(resolved.draft);
+  const values = resolved.draft.values;
+  const update = (patch: Partial<typeof values>) => setForm((current) => ({ ...current, values: { ...current.values, ...patch } }));
+  const reopened = new Set(values.reopenAllocationIds);
+  const reopenedPortions = values.meals.filter((meal) => reopened.has(meal.id)).reduce((sum, meal) => sum + meal.portions, 0);
+  const consumed = values.consumed - reopenedPortions;
+  const remaining = values.produced - consumed;
+  const planned = values.meals.filter((meal) => !meal.consumedAt || reopened.has(meal.id)).reduce((sum, meal) => sum + meal.portions, 0);
+  const validBalance = Number.isFinite(values.produced) && Number.isFinite(values.freezerPortions) && values.produced >= 0 && values.produced <= 1000 && remaining >= planned && values.freezerPortions >= 0 && values.freezerPortions <= remaining;
+  async function correct(event: FormEvent) {
+    event.preventDefault();
+    if (savingRef.current || resolved.conflict || !validBalance || !values.reason.trim()) return;
+    savingRef.current = true; setSaving(true);
+    try {
+      if (await run({ type: "correct_prepared", batchId: batch.id, produced: values.produced, freezerPortions: values.freezerPortions, reopenAllocationIds: values.reopenAllocationIds, reason: values.reason })) setForm(createSettingsDraft({ ...values, reopenAllocationIds: [], reason: "" }));
+    } finally { savingRef.current = false; setSaving(false); }
+  }
+  return <details className={styles.details}>
+    <summary>Correct prepared food or an eaten meal</summary>
+    <p>Enter the total portions actually made and how many remain in the freezer now. Reopen only meals mistakenly marked eaten.</p>
+    {resolved.conflict ? <div className={styles.notice} role="alert"><p>This batch’s portions or meals changed while you were editing. Your draft is kept below. Load current portions before correcting it.</p><button type="button" className={styles.smallButton} onClick={() => setForm(createSettingsDraft(incoming))}>Load current portions</button></div> : null}
+    <form onSubmit={(event) => void correct(event)}><fieldset className={styles.settingsFields} disabled={saving}>
+      <div className={styles.fieldRow}><label className={styles.field}>Total portions actually made<input className={styles.input} type="number" min={0} max={1000} step="any" required value={values.produced} onChange={(event) => update({ produced: Number(event.target.value) })} /></label><label className={styles.field}>Portions in freezer now<input className={styles.input} type="number" min={0} max={1000} step="any" required value={values.freezerPortions} onChange={(event) => update({ freezerPortions: Number(event.target.value) })} /></label></div>
+      {values.meals.some((meal) => meal.consumedAt) ? <div><p>Meals to mark uneaten again</p>{values.meals.filter((meal) => meal.consumedAt).map((meal) => <label className={styles.allocationChoice} key={meal.id}><input type="checkbox" checked={reopened.has(meal.id)} onChange={(event) => update({ reopenAllocationIds: event.target.checked ? [...values.reopenAllocationIds, meal.id] : values.reopenAllocationIds.filter((entry) => entry !== meal.id) })} /><span>{state.pilot!.members.find((member) => member.id === meal.memberId)?.name ?? "Household member"} · {dateLabel(meal.date)} {meal.slot} · {meal.portions} {meal.portions === 1 ? "portion" : "portions"}</span></label>)}</div> : null}
+      <p className={styles.formNotice}>{validBalance ? `After correction: ${remaining} portions remain, including ${values.freezerPortions} in the freezer; ${planned} reserved for meals.` : "The total must cover eaten and reserved meals, and freezer portions cannot exceed the remaining food."}</p>
+      <label className={styles.field}>Reason for correction<textarea className={styles.textarea} required maxLength={1000} value={values.reason} onChange={(event) => update({ reason: event.target.value })} placeholder="For example, one lunch was marked eaten by mistake." /></label>
+      <button className={styles.quietButton} disabled={resolved.conflict || !validBalance || !values.reason.trim()}>{saving ? "Saving…" : "Save prepared-food correction"}</button>
+      <p className={styles.formNotice}>Recorded ingredient use stays unchanged. Correct pantry stock separately if needed. The saved correction offers Undo.</p>
+    </fieldset></form>
+  </details>;
+}
+
+function purchaseDetails(data: FormData): Partial<Pick<PurchasedIngredient, "purchasedOn" | "bestBefore" | "sourceNote" | "lotCode">> {
+  const purchasedOn = String(data.get("purchasedOn") ?? "");
+  const bestBefore = String(data.get("bestBefore") ?? "");
+  const sourceNote = String(data.get("sourceNote") ?? "").trim();
+  const lotCode = String(data.get("lotCode") ?? "").trim();
+  return { ...(purchasedOn ? { purchasedOn } : {}), ...(bestBefore ? { bestBefore } : {}), ...(sourceNote ? { sourceNote } : {}), ...(lotCode ? { lotCode } : {}) };
+}
+
+function PurchaseDetailsFields() {
+  return <details className={styles.details}><summary>Purchase details (optional)</summary>
+    <div className={styles.fieldRow}><label className={styles.field}>Purchased on<input className={styles.input} type="date" name="purchasedOn" /></label><label className={styles.field}>Best before<input className={styles.input} type="date" name="bestBefore" /></label></div>
+    <label className={styles.field}>Farm, store, or source note<input className={styles.input} name="sourceNote" maxLength={1000} placeholder="Saturday farm box" /></label>
+    <label className={styles.field}>Lot or package reference<input className={styles.input} name="lotCode" maxLength={120} placeholder="Optional label from the package" /></label>
+    <p className={styles.formNotice}>Leave unknown dates blank. These details describe the purchase, not the amount remaining.</p>
+  </details>;
+}
+
+function PurchaseHistory({ state, ingredient }: { state: HouseholdState; ingredient: HouseholdState["pantry"][number] }) {
+  const purchases = state.pilot!.purchaseLots.filter((purchase) => purchase.ingredientId === ingredient.id && purchase.unit === ingredient.unit).slice().reverse();
+  if (!purchases.length) return null;
+  return <details className={styles.details}><summary>Purchase history · {purchases.length}</summary>
+    <p className={styles.formNotice}>Historical amounts brought home. These are not remaining stock balances.</p>
+    <ul className={styles.shoppingList}>{purchases.slice(0, 20).map((purchase) => <li className={styles.shoppingItem} key={purchase.id}><div><strong>{amount(purchase.quantity, purchase.unit)} purchased</strong><small>{purchase.purchasedOn ? `Purchased ${dateLabel(purchase.purchasedOn, { month: "short", day: "numeric", year: "numeric" })}` : "Purchase date not recorded"} · recorded {new Date(purchase.recordedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small>{purchase.bestBefore ? <small>Best before {dateLabel(purchase.bestBefore, { month: "short", day: "numeric", year: "numeric" })}</small> : null}{purchase.sourceNote ? <small>{purchase.sourceNote}</small> : null}{purchase.lotCode ? <small>Lot / package: {purchase.lotCode}</small> : null}</div></li>)}</ul>
+    {purchases.length > 20 ? <p className={styles.formNotice}>Showing the latest 20 purchases. Earlier records remain saved.</p> : null}
+  </details>;
+}
+
 function StockPurchaseForm({ ingredient, run }: { ingredient: HouseholdState["pantry"][number]; run: RunCommand }) {
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   return <details className={styles.details}><summary>Record a purchase of {ingredient.name}</summary><form onSubmit={async (event) => {
     event.preventDefault();
-    if (saving) return;
-    const data = new FormData(event.currentTarget);
-    setSaving(true);
-    await run({ type: "record_purchase", items: [{ ingredientId: ingredient.id, name: ingredient.name, unit: ingredient.unit, quantity: Number(data.get("purchaseQuantity")) }] });
-    setSaving(false);
-  }}><label className={styles.field}>Amount purchased ({ingredient.unit})<input className={styles.input} type="number" name="purchaseQuantity" min={0.001} max={100000} step="any" required placeholder="What you actually brought home" /></label><button className={styles.quietButton} disabled={saving}>{saving ? "Saving…" : "Confirm purchase"}</button><p className={styles.formNotice}>The purchase is recorded even if a meal is later canceled. An unknown prior balance stays uncertain.</p></form></details>;
+    if (savingRef.current) return;
+    const element = event.currentTarget;
+    const data = new FormData(element);
+    savingRef.current = true; setSaving(true);
+    try { if (await run({ type: "record_purchase", items: [{ ingredientId: ingredient.id, name: ingredient.name, unit: ingredient.unit, quantity: Number(data.get("purchaseQuantity")), ...purchaseDetails(data) }] })) element.reset(); }
+    finally { savingRef.current = false; setSaving(false); }
+  }}><fieldset className={styles.settingsFields} disabled={saving}><label className={styles.field}>Amount purchased ({ingredient.unit})<input className={styles.input} type="number" name="purchaseQuantity" min={0.001} max={100000} step="any" required placeholder="What you actually brought home" /></label><PurchaseDetailsFields /><button className={styles.quietButton}>{saving ? "Saving…" : "Confirm purchase"}</button><p className={styles.formNotice}>The purchase is recorded even if a meal is later canceled. An unknown prior balance stays uncertain.</p></fieldset></form></details>;
 }

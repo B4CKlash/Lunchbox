@@ -152,6 +152,7 @@ function validatePilot(pilot: PilotState) {
   unique(pilot.proposals, "Proposals");
   unique(pilot.feedback, "Feedback entries");
   unique(pilot.receipts, "Receipts");
+  unique(pilot.purchaseLots, "Purchase lots");
   if (new Set(pilot.prepared.map((entry) => entry.batchId)).size !== pilot.prepared.length) fail("A batch has only one prepared balance.");
   if (new Set(pilot.stock.map((entry) => keyFor(entry.ingredientId, entry.unit))).size !== pilot.stock.length) fail("Stock entries must have unique ingredient and unit pairs.");
   if (new Set(pilot.stockChecks.map((entry) => keyFor(entry.ingredientId, entry.unit))).size !== pilot.stockChecks.length) fail("Stock checks must have unique ingredient and unit pairs.");
@@ -178,6 +179,7 @@ function validatePilot(pilot: PilotState) {
       if (prepared) fail("Uncooked food cannot have a prepared balance.");
     } else {
       if (!prepared) fail("Cooked batches need a prepared balance.");
+      if (prepared.produced === 0 && allocations.length) fail("A zero-portion batch cannot retain eaten or pending meals.");
       const pending = allocations.filter((entry) => !entry.consumedAt).reduce((sum, entry) => sum + entry.portions, 0);
       const eaten = allocations.filter((entry) => entry.consumedAt).reduce((sum, entry) => sum + entry.portions, 0);
       if (Math.abs(eaten - prepared.consumed) > 0.000001) fail("Prepared food consumption must match recorded eaten allocations.");
@@ -213,7 +215,7 @@ function setPantryBalance(state: PilotHousehold, ingredientId: string, name: str
   if (override?.status === "exact") override.quantity = round(quantity);
 }
 
-function applyChange(state: PilotHousehold, change: PilotChange, now: string) {
+function applyChange(state: PilotHousehold, change: PilotChange, now: string, commandId: string, changeIndex: number) {
   const pilot = state.pilot;
   switch (change.type) {
     case "set_coverage": {
@@ -265,7 +267,8 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string) {
       break;
     }
     case "record_purchase":
-      for (const item of change.items) {
+      if (pilot.purchaseLots.length + change.items.length > 10000) fail("The purchase history is full. Export and archive it before recording more purchases.");
+      for (const [itemIndex, item] of change.items.entries()) {
         const stock = knownStock(state, item.ingredientId, item.unit);
         // Unknown prior stock stays unknown. The exact purchase is retained in
         // the command receipt; it never invents the prior pantry balance.
@@ -276,6 +279,7 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string) {
           stock.override.quantity = item.quantity;
         }
         pilot.stockChecks = pilot.stockChecks.filter((entry) => keyFor(entry.ingredientId, entry.unit) !== keyFor(item.ingredientId, item.unit));
+        pilot.purchaseLots.push({ ...item, id: `${commandId}:purchase:${changeIndex}:${itemIndex}`, commandId, recordedAt: now });
       }
       break;
     case "cook_batch": {
@@ -294,6 +298,31 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string) {
       }
       batch.status = "cooked";
       pilot.prepared.push({ batchId: batch.id, produced: change.actualPortions, consumed: 0, freezerPortions: change.freezerPortions, cookedAt: now, ingredientUses: batchRequirements([batch]).map((entry) => ({ ingredientId: entry.ingredientId, name: entry.name, unit: entry.unit, quantity: entry.required })) });
+      break;
+    }
+    case "correct_prepared": {
+      const batch = pilot.batches.find((entry) => entry.id === change.batchId);
+      const prepared = pilot.prepared.find((entry) => entry.batchId === change.batchId);
+      if (!batch || batch.status !== "cooked" || !prepared) fail("Choose an existing cooked batch to correct.");
+      const reopened = new Set(change.reopenAllocationIds);
+      if (reopened.size !== change.reopenAllocationIds.length) fail("Choose each eaten meal to reopen only once.");
+      for (const allocationId of reopened) {
+        const allocation = pilot.allocations.find((entry) => entry.id === allocationId);
+        if (!allocation || allocation.batchId !== batch.id || !allocation.consumedAt) fail("Only an eaten meal from this batch can be reopened.");
+        delete allocation.consumedAt;
+      }
+      const allocations = pilot.allocations.filter((entry) => entry.batchId === batch.id);
+      if (change.produced === 0 && allocations.length) fail("Remove pending meals and correct eaten meals before setting the produced total to zero.");
+      const consumed = round(allocations.filter((entry) => entry.consumedAt).reduce((sum, entry) => sum + entry.portions, 0));
+      const pending = round(allocations.filter((entry) => !entry.consumedAt).reduce((sum, entry) => sum + entry.portions, 0));
+      if (change.produced + 0.000001 < consumed + pending) fail("The corrected total cannot be below portions already eaten or allocated. Adjust pending allocations first.");
+      if (change.freezerPortions > change.produced - consumed + 0.000001) fail("Corrected freezer portions cannot exceed the food remaining.");
+      // These are confirmed current portion counts. Do not reconstruct pantry
+      // quantities, alter recorded ingredient use, or infer a freezer source
+      // for reopened meals from incomplete historical information.
+      prepared.produced = change.produced;
+      prepared.consumed = consumed;
+      prepared.freezerPortions = change.freezerPortions;
       break;
     }
     case "consume": {
@@ -330,6 +359,7 @@ function summaryFor(operation: PilotOperation) {
     case "create_batch": return `Planned ${operation.batch.yield} portions of ${operation.batch.recipe.name}.`;
     case "record_purchase": return `Recorded ${operation.items.length} purchased ingredient${operation.items.length === 1 ? "" : "s"}.`;
     case "cook_batch": return `Recorded cooking: ${operation.actualPortions} portions, including ${operation.freezerPortions} for the freezer.`;
+    case "correct_prepared": return `Corrected prepared food: ${operation.produced} total portions, ${operation.freezerPortions} remaining in the freezer${operation.reopenAllocationIds.length ? `; reopened ${operation.reopenAllocationIds.length} meal${operation.reopenAllocationIds.length === 1 ? "" : "s"}` : ""}.`;
     case "record_feedback": return "Saved recipe feedback for future planning.";
     case "set_session": return "Saved the planning conversation and recipe candidates.";
     case "receive_planning_result": return operation.directPlacement ? "Placed the requested recipe and saved the assistant response." : operation.proposal ? "Saved the assistant response and its reviewable proposal." : "Saved the assistant response and recipe candidates.";
@@ -405,6 +435,8 @@ export function applyPilotCommand(
   const { receipts: oldReceipts, revision, ...data } = current.pilot;
   const inverse = { pantry: structuredClone(current.pantry), data: structuredClone(data) };
   const operation = command.operation;
+  let changeIndex = 0;
+  const apply = (target: PilotHousehold, change: PilotChange) => applyChange(target, change, now, command.id, changeIndex++);
   if (operation.type === "receive_planning_result" && operation.baseRevision !== revision) {
     throw new PilotCommandError("conflict", "The household changed after this assistant request. Refresh its suggestions before saving them.");
   }
@@ -428,12 +460,12 @@ export function applyPilotCommand(
     const previousSession = current.pilot.session;
     current.pilot.session = operation.session;
     invalidateRevisedPlanningProposals(current.pilot, previousSession);
-    if (directPlacement) applyChange(current, directPlacement, now);
+    if (directPlacement) apply(current, directPlacement);
     if (operation.type === "receive_planning_result" && operation.proposal) {
       const proposal = operation.proposal;
       if (current.pilot.proposals.some((entry) => entry.id === proposal.id)) fail("This proposal ID already exists.");
       const preview = structuredClone(current);
-      for (const change of proposal.changes) { applyChange(preview, change, now); validatePilot(preview.pilot); }
+      for (const change of proposal.changes) { apply(preview, change); validatePilot(preview.pilot); }
       householdStateSchema.parse(preview);
       current.pilot.proposals.push({ ...proposal, baseRevision: revision + 1, status: "pending" });
     }
@@ -447,7 +479,7 @@ export function applyPilotCommand(
     if (current.pilot.proposals.some((entry) => entry.id === operation.id)) fail("This proposal ID already exists.");
     // Validate the proposed result without applying it to the live household.
     const preview = structuredClone(current);
-    for (const change of operation.changes) { applyChange(preview, change, now); validatePilot(preview.pilot); }
+    for (const change of operation.changes) { apply(preview, change); validatePilot(preview.pilot); }
     householdStateSchema.parse(preview);
     current.pilot.proposals.push({ id: operation.id, title: operation.title, baseRevision: revision + 1, changes: operation.changes, status: "pending" });
   } else if (operation.type === "dismiss_proposal") {
@@ -462,10 +494,10 @@ export function applyPilotCommand(
     if (proposal.status !== "pending" || proposal.baseRevision !== revision) throw new PilotCommandError("stale-proposal", "The household changed after this proposal. Review a refreshed proposal before applying it.");
     if (proposal.legacyMeals) fail("Recovered drafts are preserved for review. Recreate their placements in the live calendar before applying them.");
     const selectedChanges = selectProposalChanges(proposal.changes, operation.selectedAllocationIds, operation.includeOtherChanges);
-    for (const change of selectedChanges) { applyChange(current, change, now); validatePilot(current.pilot); }
+    for (const change of selectedChanges) { apply(current, change); validatePilot(current.pilot); }
     proposal.status = "applied";
   } else {
-    applyChange(current, operation, now);
+    apply(current, operation);
   }
   current.pilot.revision = revision + 1;
   for (const proposal of current.pilot.proposals) {
