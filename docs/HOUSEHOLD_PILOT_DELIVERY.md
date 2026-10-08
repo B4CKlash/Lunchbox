@@ -19,7 +19,7 @@ Linear project: **LunchBox — Household Pilot**. Publishing is pending Linear r
 
 ## Release status
 
-Implementation is on `codex/household-pilot` in an isolated worktree. No production database migration or pilot enablement has occurred.
+Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR #23](https://github.com/B4CKlash/Lunchbox/pull/23) coordinates the cross-owner integration. All HP issue definitions above link to this draft PR; individual Linear links will be added after reauthentication. No production database migration or pilot enablement has occurred.
 
 | Gate | Evidence / status |
 |---|---|
@@ -27,7 +27,7 @@ Implementation is on `codex/household-pilot` in an isolated worktree. No product
 | Check and production build | Passed locally: lint, TypeScript, 224 tests (one opt-in database suite skipped in ordinary checks), and all 20 production routes. The database suite also ran separately. |
 | Real local database | Ten opt-in Supabase checks pass, including authorization, invitations, concurrency, actor identity, cancellations, interrupted leases and duplicate completion. See [server verification](HOUSEHOLD_SERVER_VERIFICATION.md). |
 | Browser interaction and household loops | Desktop/mobile fixtures, purchases surviving cancellation, cooking/freezer/feedback, account-separated sync, uncertain stock and draft resumption verified. See [browser verification](HOUSEHOLD_BROWSER_VERIFICATION.md). |
-| Local AI quality | Initial 9B baseline failed (31/40, 77.5%). A stricter 27B evaluation is in progress. A correct person/date is part of task completion; a schema-valid response alone does not pass. |
+| Local AI quality | Initial 9B baseline failed (31/40, 77.5%). The first grounded 27B run also failed the gate due to unrelated actions and wrong existing-record references. Its artifacts are retained while a constrained output format is evaluated. A correct person/date is part of task completion; a schema-valid response alone does not pass. |
 | Protected hosted preview | Pending branch deployment and separate hosted development Supabase configuration. The Vercel CLI can access the existing project; its connector currently lacks this team scope. |
 | Linear roadmap | Publishing queue above is ready; connector reauthentication still required. No Linear issue IDs are fabricated. |
 | Real household cycle | Pending household participation. This cannot be replaced by fixture tests. |
