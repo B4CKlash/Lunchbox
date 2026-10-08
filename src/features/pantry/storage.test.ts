@@ -214,3 +214,30 @@ test("storage write failures reach the caller instead of claiming a successful s
     /Quota exceeded/,
   );
 });
+
+test("recovery preserves original bytes and stops if the copy cannot be written", async () => {
+  const { preserveHouseholdRecovery, HOUSEHOLD_RECOVERY_KEY } = await import("./storage");
+  const saved = new Map([[HOUSEHOLD_STORAGE_KEY, "{original-corrupt-data"]]);
+  const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
+  preserveHouseholdRecovery(storage, "Before migration", "2026-10-08T00:00:00.000Z");
+  preserveHouseholdRecovery(storage, "Repeated migration", "2026-10-08T00:00:01.000Z");
+  const copies = JSON.parse(saved.get(HOUSEHOLD_RECOVERY_KEY)!);
+  assert.equal(copies.length, 1);
+  assert.equal(copies[0].raw, "{original-corrupt-data");
+  assert.equal(saved.get(HOUSEHOLD_STORAGE_KEY), "{original-corrupt-data");
+  saved.set(HOUSEHOLD_STORAGE_KEY, "another original");
+  assert.throws(() => preserveHouseholdRecovery({ ...storage, setItem: () => { throw new Error("Quota exceeded"); } }, "Switch account"), /Quota exceeded/);
+  assert.equal(saved.get(HOUSEHOLD_STORAGE_KEY), "another original");
+});
+
+test("the one active storage key retains cache ownership and retry metadata", async () => {
+  const { readHouseholdCache } = await import("./storage");
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  const household = createSampleHousehold();
+  const cache = { ownerId: "owner-a", householdId: "shared-a", pending: { id: "purchase-retry" } };
+  saveHousehold(storage, household, cache);
+  assert.equal(values.size, 1);
+  assert.deepEqual(loadHousehold(storage), household);
+  assert.deepEqual(readHouseholdCache(storage), cache);
+});

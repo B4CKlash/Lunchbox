@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { buildShoppingList } from "@/features/planning/shopping";
+import { buildPilotShoppingList } from "@/features/planning/pilot";
 import type { Recipe, RecipeSource } from "@/lib/contracts";
 
 const amount = (quantity: number, unit: string) =>
@@ -88,7 +89,11 @@ export function RecipeCard({
   const planned = calendarMeals.filter(
     (meal) => meal.recipe.id === recipe.id,
   ).length;
-  const shortages = buildShoppingList(
+  const preview = state.pilot ? buildPilotShoppingList({ ...state, pilot: { ...state.pilot,
+    batches: [{ id: "recipe-preview", recipe, prepareDate: state.pilot.session.startDate, yield: servings, reservedExtra: 0, status: "planned" }],
+    shopThrough: state.pilot.session.startDate,
+  } }) : null;
+  const shortages = preview?.shortages ?? buildShoppingList(
     state.pantry,
     [{ id: "preview", recipe, servings }],
     { includeRestock: false },
@@ -96,7 +101,7 @@ export function RecipeCard({
   const ingredientCount = new Set(recipe.ingredients.map(
     (ingredient) => JSON.stringify([ingredient.ingredientId, ingredient.unit]),
   )).size;
-  const inStock = ingredientCount - shortages.length;
+  const inStock = ingredientCount - shortages.length - (preview?.checks.length ?? 0);
   const provenance = recipe.provenance ?? { source };
   const snapshot = { ...recipe, provenance };
   return (
@@ -129,6 +134,7 @@ export function RecipeCard({
           <span className="match-dot" />
           {inStock} of {ingredientCount} ingredients on hand
         </div>
+        {preview?.checks.length ? <p className="muted">Check stock: {preview.checks.map((item) => item.name).join(", ")}. Amounts are uncertain.</p> : null}
         {shortages.length ? (
           <details className="recipe-shortages">
             <summary>{shortages.length} {shortages.length === 1 ? "ingredient" : "ingredients"} to pick up</summary>
@@ -143,18 +149,19 @@ export function RecipeCard({
         <RecipeDetails recipe={snapshot} servings={servings} />
         <button
           className="button"
-          disabled={calendarMeals.length >= 50}
-          onClick={() => {
-            addMeal(snapshot, servings);
+          disabled={!state.pilot && calendarMeals.length >= 50}
+          onClick={async () => {
+            const result = await addMeal(snapshot, servings);
+            if (!result.ok) { onNotice(result.error ?? "The recipe could not be selected. Retry after resolving the household change."); return; }
             onNotice(
-              `${recipe.name} added to your calendar draft for ${servings} servings. Choose a day, then commit when you’re ready.`,
+              state.pilot ? `${recipe.name} selected for discussion. Open the planning conversation to place it.` : `${recipe.name} added to your calendar draft for ${servings} servings. Choose a day, then commit when you’re ready.`,
             );
           }}
         >
           <Plus size={16} aria-hidden="true" />
-          Add to calendar
+          {state.pilot ? "Discuss in planner" : "Add to calendar"}
         </button>
-        {planned > 0 ? (
+        {!state.pilot && planned > 0 ? (
           <>
             <p className="recipe-planned">
               <Check size={12} aria-hidden="true" />
@@ -174,9 +181,9 @@ export function RecipeCard({
             className="text-button"
             aria-pressed={saved}
             disabled={!saved && state.workspace.recipeBox.length >= 100}
-            onClick={() => {
-              if (saved) removeSavedRecipe(recipe.id);
-              else saveRecipe(snapshot, provenance.source);
+            onClick={async () => {
+              const result = saved ? await removeSavedRecipe(recipe.id) : await saveRecipe(snapshot, provenance.source);
+              if (!result.ok) { onNotice(result.error ?? "The recipe box change could not be saved."); return; }
               onNotice(
                 saved
                   ? `${recipe.name} removed from your recipe box.`
@@ -189,9 +196,10 @@ export function RecipeCard({
           </button>
           <button
             className="text-button"
-            onClick={() => {
-              discussRecipe(snapshot, servings);
-              if (!state.workspace.chatDraft)
+            onClick={async () => {
+              const result = await discussRecipe(snapshot, servings);
+              if (!result.ok) { onNotice(result.error ?? "The recipe could not be selected for discussion."); return; }
+              if (!state.pilot && !state.workspace.chatDraft)
                 setChatDraft("What do I need for this recipe?");
               requestAnimationFrame(() =>
                 document.getElementById("meal-message")?.focus(),

@@ -1,6 +1,5 @@
-import { MealsPanel } from "@/components/meals-panel";
-import { getAiMode } from "@/features/meals/ai-runtime";
+import { PlanningWorkspace } from "@/components/planning-workspace";
 
 export default function MealsPage() {
-  return <MealsPanel aiMode={getAiMode()} />;
+  return <PlanningWorkspace />;
 }

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { getAccountClient } from "@/features/accounts/client";
 import styles from "./account-panel.module.css";
+import { HouseholdSharing } from "./household-sharing";
 
 export function AccountPanel() {
   const [client] = useState(getAccountClient);
@@ -82,7 +83,7 @@ export function AccountPanel() {
         }}>Sign out</button>
       </> : <>
         <h2>{mode === "signin" ? "Welcome back" : "Make yourself at home"}</h2>
-        <p>Your current browser kitchen will stay as it is when you sign in.</p>
+        <p>Sign in to open your shared household. Your browser kitchen is kept in a recovery copy before switching.</p>
         <form key={mode} onSubmit={authenticate}>
           {mode === "signup" && <label className="field">Your name<input name="name" autoComplete="name" maxLength={80} required /></label>}
           <label className="field">Email<input name="email" type="email" autoComplete="email" required /></label>
@@ -96,5 +97,6 @@ export function AccountPanel() {
       {error && <p className="error-message" role="alert">{error}</p>}
       <p className="status-message" role="status">{message}</p>
     </section>
+    {user && <HouseholdSharing />}
   </>;
 }

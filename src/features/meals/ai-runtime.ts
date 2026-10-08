@@ -131,12 +131,16 @@ export type StructuredGenerationOptions<T> = {
 
 /** Server-only call boundary. No prompts, recipes, credentials, or raw errors are logged. */
 export async function generateStructured<T>(options: StructuredGenerationOptions<T>): Promise<T> {
+  // Hosted pilot requests run on the authenticated Mac worker. A model object
+  // is injected there; never silently spend Gateway credits from hosted routes.
+  if (!options.model && process.env.LUNCHBOX_AI_BACKEND !== "gateway")
+    throw new AiRuntimeError("configuration");
   // Gateway resolves API keys, local OIDC, and Vercel's per-request OIDC context.
   // An environment-only check would reject valid deployed Function requests.
   if (options.prompt.length + options.instructions.length > 100_000)
     throw new AiRuntimeError("context_too_large");
   const signal = AbortSignal.any([
-    AbortSignal.timeout(45_000),
+    AbortSignal.timeout(options.model && typeof options.model !== "string" && options.model.provider.startsWith("ollama-local") ? 180_000 : 45_000),
     ...(options.signal ? [options.signal] : []),
   ]);
   const started = Date.now();

@@ -110,7 +110,7 @@ export function OnboardingPanel() {
     setEditing(true);
   }
 
-  function resetPreferences() {
+  async function resetPreferences() {
     if (
       !window.confirm(
         "Clear all recommendation preferences and start the quiz again? Your pantry and meal plan will stay as they are.",
@@ -131,7 +131,8 @@ export function OnboardingPanel() {
       cookingStyles: [],
       customNotes: {},
     });
-    setPreferences(cleared);
+    const saved = await setPreferences(cleared);
+    if (!saved.ok) { setError(saved.error ?? "Preferences could not be cleared. Try again."); return; }
     setGoals([]);
     setDietaryNeeds([]);
     setDietaryNotice("");
@@ -168,7 +169,7 @@ export function OnboardingPanel() {
     setStep((current) => Math.min(current + 1, steps.length - 1));
   }
 
-  function finish() {
+  async function finish() {
     if (cookingStyles.length === 0) {
       setError("Choose at least one cooking preference.");
       return;
@@ -205,7 +206,8 @@ export function OnboardingPanel() {
       setError("Check your allergy list and try again.");
       return;
     }
-    setPreferences(result.data);
+    const saved = await setPreferences(result.data);
+    if (!saved.ok) { setError(saved.error ?? "Preferences could not be saved. Your answers are still here."); return; }
     setIsCooking(true);
     window.setTimeout(() => router.push("/meals"), 1800);
   }

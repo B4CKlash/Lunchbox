@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { mealFailureMessage, mealRequestFailure } from "@/features/meals/client-request";
 import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meals/meal-retry";
+import { requestWorkerRecipe } from "./local-recipe-request";
 import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
 import {
   suggestMealsResponseSchema,
@@ -17,6 +18,7 @@ type SuggestionResult = {
   error?: string;
 };
 type SuggestionOptions = {
+  aiMode?: "demo" | "ai";
   enabled: boolean;
   resetVersion: number;
   aiCooldownUntil: number;
@@ -28,7 +30,7 @@ type SuggestionOptions = {
 export function useMealSuggestions(
   request: string,
   kitchenKey: string,
-  { enabled, resetVersion, aiCooldownUntil, deferAiRequests, recentRecipeNames, recordSuggestions }: SuggestionOptions,
+  { enabled, resetVersion, aiCooldownUntil, deferAiRequests, recentRecipeNames, recordSuggestions, aiMode = "demo" }: SuggestionOptions,
 ) {
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState<SuggestionResult | null>(null);
@@ -60,7 +62,7 @@ export function useMealSuggestions(
             ...JSON.parse(latest.current.request),
             recentRecipeNames: latest.current.recentRecipeNames,
           };
-          const response = await fetch("/api/meals/suggest", {
+          const response = aiMode === "ai" ? await requestWorkerRecipe({ kind: "suggest", input }, AbortSignal.any([controller.signal, AbortSignal.timeout(240000)])) : await fetch("/api/meals/suggest", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(input),
@@ -108,7 +110,7 @@ export function useMealSuggestions(
         pendingTimer.current = null;
       }
     };
-  }, [requestKey, enabled, resetVersion]);
+  }, [requestKey, enabled, resetVersion, aiMode]);
 
   return {
     loading,

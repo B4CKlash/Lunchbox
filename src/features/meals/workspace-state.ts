@@ -16,7 +16,7 @@ import { pendingPantryIngredients, rememberRecipeNames } from "./suggestion-hist
 
 export type HouseholdAction =
   | { type: "replace"; state: HouseholdState }
-  | { type: "setPantry"; pantry: PantryItem[] }
+  | { type: "setPantry"; pantry: PantryItem[]; confirmedExactStock?: { ingredientId: string; unit: PantryItem["unit"] }[] }
   | { type: "setPreferences"; preferences: Preferences }
   | { type: "recordSuggestions"; input: SuggestMealsRequest; recipes: Recipe[] }
   | { type: "deferAiRequests"; until: number }
@@ -60,6 +60,19 @@ function nextHousehold(
   current: HouseholdState,
   action: HouseholdAction,
 ): HouseholdState {
+  if (current.pilot) {
+    const pilot = current.pilot;
+    if (action.type === "addMeal" || action.type === "discussRecipe") {
+      return { ...current, pilot: { ...pilot, session: {
+        ...pilot.session,
+        candidates: [...pilot.session.candidates.filter((recipe) => recipe.id !== action.recipe.id), action.recipe].slice(-30),
+        focusedRecipeId: action.recipe.id,
+      } } };
+    }
+    if (["removeMeal", "setMealServings", "setCalendarDraft", "commitCalendar", "discardCalendarDraft", "setCalendarSettings"].includes(action.type)) {
+      throw new Error("Use the live planning workspace to change the calendar.");
+    }
+  }
   const editableMeals = current.workspace.calendar.draft ?? current.meals;
   const withDraft = (draft: PlannedMeal[] | null): HouseholdState => ({
     ...current,
@@ -256,7 +269,24 @@ export function applyHouseholdAction(
 ): HouseholdState {
   // Zod parses nested objects into fresh data, so recipes held by callers, the
   // recipe box, conversation, and meal plan never share a mutable snapshot.
-  return householdStateSchema.parse(nextHousehold(current, action));
+  const next = nextHousehold(current, action);
+  if (current.pilot && next.pilot && action.type !== "replace") {
+    next.pilot = { ...next.pilot, revision: current.pilot.revision + 1,
+      // A later action must never undo an earlier pantry or preference update.
+      receipts: next.pilot.receipts.map((receipt) => { const copy = { ...receipt }; delete copy.inverse; return copy; }),
+    };
+    if (action.type === "setPantry") {
+      const confirmed = new Set((action.confirmedExactStock ?? []).map((item) => JSON.stringify([item.ingredientId, item.unit])));
+      next.pilot.stock = next.pilot.stock.filter((stock) => {
+        if (confirmed.has(JSON.stringify([stock.ingredientId, stock.unit]))) return false;
+        const before = current.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
+        const after = next.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
+        return JSON.stringify(before.map((item) => item.quantity)) === JSON.stringify(after.map((item) => item.quantity));
+      });
+      next.pilot.stockChecks = next.pilot.stockChecks.filter((stock) => !confirmed.has(JSON.stringify([stock.ingredientId, stock.unit])));
+    }
+  }
+  return householdStateSchema.parse(next);
 }
 
 export type HouseholdStore = {

@@ -485,3 +485,16 @@ test("calendar validation rejects invalid dates, duplicate slots and IDs, and un
   assert.equal(rejected.state, inbox);
   assert.match(rejected.updateError ?? "", /Place every recipe/);
 });
+
+test("measuring the historical amount again explicitly replaces uncertain stock", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const item = state.pantry[0];
+  state.pilot.stock = [{ ingredientId: item.id, name: item.name, unit: item.unit, status: "some" }];
+  const preserved = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry });
+  assert.equal(preserved.pilot?.stock[0]?.status, "some");
+  const confirmed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry, confirmedExactStock: [{ ingredientId: item.id, unit: item.unit }] });
+  assert.equal(confirmed.pilot?.stock.length, 0);
+  assert.equal(confirmed.pantry[0].quantity, item.quantity);
+  assert.equal(state.pilot.stock[0].status, "some");
+});

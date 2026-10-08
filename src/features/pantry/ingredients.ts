@@ -128,6 +128,9 @@ export function knownIngredientsFromHousehold(state: HouseholdState): KnownIngre
     ...state.workspace.recipeBox.map((saved) => saved.recipe),
     ...state.workspace.chatMessages.flatMap((message) => message.recipes),
     ...(state.workspace.focusedRecipe ? [state.workspace.focusedRecipe] : []),
+    ...(state.pilot?.session.candidates ?? []),
+    ...(state.pilot?.batches ?? []).map((batch) => batch.recipe),
+    ...(state.pilot?.session.messages ?? []).flatMap((message) => message.recipes),
   ];
   for (const recipe of recipes) refs.push(...recipe.ingredients);
   const unique = new Map<string, KnownIngredient>();

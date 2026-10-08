@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FileText, Link2, LoaderCircle, Plus, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
+import { requestWorkerRecipe } from "@/features/meals/local-recipe-request";
 import { mealFailureMessage, mealRequestError } from "@/features/meals/client-request";
 import { finalizeImportDraft } from "@/features/meals/import-draft";
 import { knownIngredientsFromHousehold, resolveIngredient } from "@/features/pantry/ingredients";
-import { importRecipeResponseSchema, type ImportRecipeResponse, type KnownIngredient, type RecipeDraftIngredient, type Unit } from "@/lib/contracts";
+import { importRecipeResponseSchema, type ImportRecipeResponse, type KnownIngredient, type RecipeDraftIngredient, type Recipe, type Unit } from "@/lib/contracts";
 
 const numberOrNull = (value: string) => value === "" ? null : Number(value);
 
@@ -24,6 +25,9 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
   const [result, setResult] = useState<ImportRecipeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingNow = useRef(false);
+  const reviewedRecipe = useRef<{ result: ImportRecipeResponse; recipe: Recipe } | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
   const known = knownIngredientsFromHousehold(state);
   const draft = result?.draft;
@@ -46,14 +50,10 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/meals/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(kind === "url"
-          ? { kind, url: url.trim(), knownIngredients: known }
-          : { kind, text, sourceUrl: /^https:\/\//i.test(url.trim()) ? url.trim() : undefined, knownIngredients: known }),
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(50000)]),
-      });
+      const response = await requestWorkerRecipe({ kind: "extract", input: kind === "url"
+        ? { kind, url: url.trim(), knownIngredients: known }
+        : { kind, text, sourceUrl: /^https:\/\//i.test(url.trim()) ? url.trim() : undefined, knownIngredients: known } },
+        AbortSignal.any([controller.signal, AbortSignal.timeout(240000)]));
       if (!response.ok) throw new Error(await mealRequestError(response));
       const parsed = importRecipeResponseSchema.safeParse(await response.json());
       if (!parsed.success) throw new Error("This recipe couldn’t be read. Your original input is still here; try pasting the recipe text.");
@@ -89,27 +89,36 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
     });
   }
 
-  function save(plan: boolean) {
-    if (!result) return;
+  async function save(plan: boolean) {
+    if (!result || savingNow.current) return;
+    savingNow.current = true; setSaving(true);
     setError(null);
     try {
-      const recipe = finalizeImportDraft(result.draft, result.provenance, known);
-      saveRecipe(recipe, "import");
-      if (plan) addMeal(recipe, recipe.servings);
+      const recipe = reviewedRecipe.current?.result === result ? reviewedRecipe.current.recipe : finalizeImportDraft(result.draft, result.provenance, known);
+      reviewedRecipe.current = { result, recipe };
+      const saved = await saveRecipe(recipe, "import");
+      if (!saved.ok) { setError(saved.error ?? "The recipe could not be saved. Your reviewed draft is still here."); return; }
+      if (plan) {
+        const selected = await addMeal(recipe, recipe.servings);
+        if (!selected.ok) { setError(`The recipe is saved, but could not be selected for planning. ${selected.error ?? "Retry when your connection returns."}`); return; }
+      }
       onNotice(plan
-        ? `${recipe.name} saved to your recipe box and added to your calendar draft. Choose a day, then commit the calendar to update shopping.`
+        ? `${recipe.name} saved to your recipe box and selected in the planner. Choose its meal placements there.`
         : `${recipe.name} saved to your recipe box.`);
       setResult(null);
       setText("");
       setUrl("");
+      reviewedRecipe.current = null;
       onSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Review every ingredient and complete the missing recipe details before saving.");
-    }
+    } finally { savingNow.current = false; setSaving(false); }
   }
 
   function matchLabel(candidate: KnownIngredient) {
     const stock = state.pantry.find((item) => item.id === candidate.ingredientId && item.unit === candidate.unit);
+    const flexible = state.pilot?.stock.find((item) => item.ingredientId === candidate.ingredientId && item.unit === candidate.unit);
+    if (flexible && flexible.status !== "exact") return `${candidate.name} · pantry: ${flexible.status}${flexible.status !== "out" ? " (amount unknown)" : ""}`;
     if (stock) return `${candidate.name} · pantry: ${stock.quantity} ${stock.unit}`;
     const saved = state.workspace.recipeBox.find((entry) => entry.recipe.ingredients.some((item) => item.ingredientId === candidate.ingredientId));
     return `${candidate.name} (${candidate.unit})${saved ? ` · ${saved.recipe.name}` : ""}`;
@@ -123,7 +132,7 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
           <h2 id="import-heading" tabIndex={-1}>{draft ? "Make it your recipe." : "Add a recipe."}</h2>
           <p className="muted">{draft ? "Check the original recipe, fill in missing details, then save it." : "Start with a public recipe link or paste the recipe text."}</p>
         </div>
-        <button type="button" className="icon-button" aria-label="Close recipe import" onClick={onClose}><X size={18} aria-hidden="true" /></button>
+        <button type="button" className="icon-button" aria-label="Close recipe import" disabled={saving} onClick={onClose}><X size={18} aria-hidden="true" /></button>
       </div>
 
       {!draft ? (
@@ -157,7 +166,7 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
           </div>
         </form>
       ) : (
-        <div className="import-review">
+        <fieldset className="import-review" disabled={saving} aria-label="Review imported recipe" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           {result.warnings.length ? <ul className="import-warnings">{result.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul> : null}
           {result.provenance.sourceUrl ? <p className="recipe-attribution"><a target="_blank" rel="noreferrer" href={result.provenance.sourceUrl}>{result.provenance.title || "Open original recipe"}</a>{result.provenance.author ? ` · ${result.provenance.author}` : ""}</p> : null}
           <div className="import-title-fields">
@@ -208,11 +217,11 @@ export function RecipeImportPanel({ initialUrl, aiMode, onClose, onNotice, onSav
           ))}</div>
           {draft.steps.length < 20 ? <button className="text-button" type="button" onClick={() => setResult({ ...result, draft: { ...draft, steps: [...draft.steps, ""] } })}>Add a step</button> : null}
           <div className="actions import-save-actions">
-            <button className="button" disabled={state.workspace.recipeBox.length >= 100} onClick={() => save(false)}>Save recipe</button>
-            <button className="button secondary" disabled={state.workspace.recipeBox.length >= 100 || calendarMeals.length >= 50} onClick={() => save(true)}>Save & add to calendar</button>
+            <button className="button" disabled={saving || state.workspace.recipeBox.length >= 100} onClick={() => save(false)}>Save recipe</button>
+            <button className="button secondary" disabled={saving || state.workspace.recipeBox.length >= 100 || (!state.pilot && calendarMeals.length >= 50)} onClick={() => save(true)}>Save & discuss in planner</button>
             <button className="text-button" onClick={() => { setResult(null); setError(null); }}>Back to original input</button>
           </div>
-        </div>
+        </fieldset>
       )}
       {error ? <p role="alert" className="error-message import-error">{error}</p> : null}
     </section>
