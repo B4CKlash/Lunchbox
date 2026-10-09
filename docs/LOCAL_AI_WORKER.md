@@ -19,6 +19,8 @@ LUNCHBOX_WORKER_TOKEN=<same household-scoped worker secret configured on the ser
 
 Protected Vercel previews additionally accept the short-lived `VERCEL_OIDC_TOKEN` injected by the authenticated Vercel CLI (`vercel env run`). The worker sends it as `x-vercel-trusted-oidc-idp-token` only to the configured HTTPS app origin, never to Ollama or loopback HTTP. Refresh it through the authenticated CLI when it expires. Do not save a long-lived deployment-protection bypass or disable preview protection. Credentials are never logged.
 
+For the protected hosted preview, follow [the verified launch sequence](HOUSEHOLD_DEVELOPMENT.md#bootstrap-the-protected-hosted-pilot). CLI 63.1.0 preserves local/process values ahead of downloaded preview settings, so explicitly configure the matching hosted app URL and worker token on the Mac. Resolve Node to its absolute executable path when invoking it through `vercel env run`.
+
 The server also requires `LUNCHBOX_WORKER_HOUSEHOLD_ID` and its normal server-authorized Supabase configuration. The server chooses the worker's household; the worker cannot select another household in a request. Use a separate development database for local work.
 
 ```sh

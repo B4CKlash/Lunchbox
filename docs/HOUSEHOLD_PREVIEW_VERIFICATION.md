@@ -1,5 +1,7 @@
 # Protected preview verification
 
+The separate hosted development database and authentication were configured on 2026-10-09, followed by synthetic shared-household and actual Mac worker checks. See [hosted development verification](HOUSEHOLD_HOSTED_VERIFICATION.md) for those results, the legacy-chat retry limitation, and remaining real-account onboarding. The earlier source-51f fixture evidence below remains historical; its unconfigured-endpoint results do not describe the current branch preview.
+
 Verified on 2026-10-08 for draft [PR #23](https://github.com/B4CKlash/Lunchbox/pull/23). These checks cover commit `51fbc42e008564a999ec4d7f7c8cccf61340b84b` and its [canonical project preview](https://lunchbox-h4dl7she7-no-name-4c11.vercel.app), deployment `dpl_CGMR1J9MDtBQ1XbxTEnprrHLVTxG`. Vercel deployment metadata identifies this exact Git SHA and branch `codex/household-pilot`. This source includes candidate grocery previews, purchase history, prepared-food corrections, recipe rejection, and the mobile candidate-panel fix. Later source changes require a new preview check.
 
 ## CI and deployment
@@ -24,7 +26,7 @@ Commit `8b24f48794d7b5423665cb8ec618433e28ae99e0` passed the same HTTP checks at
 
 ## Remaining acceptance
 
-Browser interaction evidence for this preview is recorded separately in [the browser verification report](HOUSEHOLD_BROWSER_VERIFICATION.md). HTTP route checks do not prove those interactions or hosted household authorization. The local integration suite separately proves real sign-in, membership, invitation, concurrent-edit and worker lease behavior. A separate hosted development Supabase project and authenticated worker must be configured before proving those flows on a protected preview. Production activation and the real household shopping/cooking cycle remain release gates.
+Browser interaction evidence for this preview is recorded separately in [the browser verification report](HOUSEHOLD_BROWSER_VERIFICATION.md). HTTP route checks do not prove those interactions or hosted household authorization. The local integration suite separately proves sign-in, membership, invitation, concurrent-edit and worker lease behavior. Subsequent hosted development results are in [the hosted verification report](HOUSEHOLD_HOSTED_VERIFICATION.md). Real-account onboarding, two-device household acceptance, production activation and the real shopping/cooking cycle remain release gates.
 
 ## Browser checks on source 51fbc42
 
