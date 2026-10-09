@@ -2,24 +2,34 @@
 
 The accepted objective is [HOUSEHOLD_PILOT_OBJECTIVE.md](HOUSEHOLD_PILOT_OBJECTIVE.md). Work starts from remote main `7c9c759`; continuous recipe-feed PR #22 remains separate. This is an integration-owned change coordinating contracts, storage, planning, AI and frontend. Existing recipe imports, canonical ingredient resolution and provenance remain part of the app.
 
-Linear project: **LunchBox — Household Pilot**. Publishing is pending Linear reauthentication (confirmed 2026-10-08). These issue definitions are the recoverable publishing queue; they are not evidence of completed release gates.
+Linear project: [**LunchBox — Household Pilot**](https://linear.app/b4cklash/project/lunchbox-household-pilot-08e05d634540) (`P-B4C-4`, B4cklash team). Published and read back on 2026-10-09 after reauthentication: all five milestones, ten issues, 19 dependency links, and PR #23 attachments were verified. The accepted objective remains the original snapshot; its Linear blocker is now historical.
+
+HP aliases map to Linear's B4C identifiers below. Eight implemented and locally verified slices are **In Review** while PR #23 remains draft. HP-04 and HP-10 are **In Progress** for hosted setup and real household acceptance. Role ownership is recorded in each issue; actual assignees remain unassigned until confirmed. Dependencies preserve implementation/release sequencing even where dependent work has already been proved locally.
+
+| Milestone | Linear issues |
+|---|---|
+| 1. Prove the planning interaction | HP-01 / B4C-76 |
+| 2. Build household and planning foundations | HP-02–HP-04 / B4C-77–B4C-79 |
+| 3. Connect local intelligence | HP-05–HP-06 / B4C-80–B4C-81 |
+| 4. Close the household loops | HP-07–HP-08 / B4C-82–B4C-83 |
+| 5. Run the real household pilot | HP-09–HP-10 / B4C-84–B4C-85 |
 
 | Issue | Milestone / owner | Dependencies | Acceptance examples |
 |---|---|---|---|
-| HP-01 Collaborative workspace | 1 / frontend | none | Conversation, focused recipe, person-specific calendar and groceries stay coordinated on desktop/mobile; leave and resume; fixtures clearly labeled. |
-| HP-02 Shared planning commands | 2 / integration + planning | HP-01 | One live calendar; coverage per person; one pasta batch covers three occasions, ingredients count once; reject pre-preparation or excess allocations; receipts and undo. |
-| HP-03 Recovery and migration | 2 / pantry | HP-02 | Back up original browser data; preserve pantry, preferences, provenance, conversation, undated meals and drafts; never merge batches by recipe name. |
-| HP-04 Authorized household sync | 2 / integration | HP-02, HP-03 | Separate development database; owner/partner membership and expiring invitation; deny nonmembers; CAS conflict surfaces current state; account switch cannot leak or overwrite data. |
-| HP-05 Local worker and model adapter | 3 / AI | HP-04 | Outbound authenticated worker; Ollama binds loopback and cloud is disabled; queued/running/canceled/stale/duplicate/expired jobs handled; no paid fallback. |
-| HP-06 Resident planning assistant | 3 / AI + frontend | HP-01, HP-02, HP-05 | Favorite retrieval, new vegetables recipe, candidate revision, reviewable multi-day proposal; only explicit single placement applies; stale result cannot claim completion. |
-| HP-07 Shopping and cooking loops | 4 / planning + pantry | HP-02, HP-04 | Unknown stock creates checks without invented amounts; horizon separate from visible calendar; purchases survive cancellation; cooking actual yield, freezer reservations, consumption and retries remain consistent. |
-| HP-08 Feedback and personal context | 4 / AI + frontend | HP-06, HP-07 | Individual/household preferences, equipment, favorite/rating/make-again/notes persist and inform suggestions; feedback never silently rearranges meals. |
-| HP-09 Reliability and model evaluation | 5 / integration + AI | HP-03–HP-08 | Check/build; authorization/concurrency/migration/uncertain stock/stale proposal/worker loss/duplicate operation tests; 20 scenarios twice, >=90% completion, zero unsupported action claims or invalid changes; measured latency and pinned digest. |
-| HP-10 Protected preview and real household pilot | 5 / integration + household | HP-09 | Protected preview verified; both devices share one household; complete objective's nine-step demo and real shopping/cooking cycle before production enablement. |
+| [HP-01 / B4C-76 Collaborative workspace](https://linear.app/b4cklash/issue/B4C-76/hp-01-collaborative-workspace) | 1 / frontend | none | Conversation, focused recipe, person-specific calendar and groceries stay coordinated on desktop/mobile; leave and resume; fixtures clearly labeled. |
+| [HP-02 / B4C-77 Shared planning commands](https://linear.app/b4cklash/issue/B4C-77/hp-02-shared-planning-commands) | 2 / integration + planning | HP-01 | One live calendar; coverage per person; one pasta batch covers three occasions, ingredients count once; reject pre-preparation or excess allocations; receipts and undo. |
+| [HP-03 / B4C-78 Recovery and migration](https://linear.app/b4cklash/issue/B4C-78/hp-03-recovery-and-migration) | 2 / pantry | HP-02 | Back up original browser data; preserve pantry, preferences, provenance, conversation, undated meals and drafts; never merge batches by recipe name. |
+| [HP-04 / B4C-79 Authorized household sync](https://linear.app/b4cklash/issue/B4C-79/hp-04-authorized-household-sync) | 2 / integration | HP-02, HP-03 | Separate development database; owner/partner membership and expiring invitation; deny nonmembers; CAS conflict surfaces current state; account switch cannot leak or overwrite data. |
+| [HP-05 / B4C-80 Local worker and model adapter](https://linear.app/b4cklash/issue/B4C-80/hp-05-local-worker-and-model-adapter) | 3 / AI | HP-04 | Outbound authenticated worker; Ollama binds loopback and cloud is disabled; queued/running/canceled/stale/duplicate/expired jobs handled; no paid fallback. |
+| [HP-06 / B4C-81 Resident planning assistant](https://linear.app/b4cklash/issue/B4C-81/hp-06-resident-planning-assistant) | 3 / AI + frontend | HP-01, HP-02, HP-05 | Favorite retrieval, new vegetables recipe, candidate revision, reviewable multi-day proposal; only explicit single placement applies; stale result cannot claim completion. |
+| [HP-07 / B4C-82 Shopping and cooking loops](https://linear.app/b4cklash/issue/B4C-82/hp-07-shopping-and-cooking-loops) | 4 / planning + pantry | HP-02, HP-04 | Unknown stock creates checks without invented amounts; horizon separate from visible calendar; purchases survive cancellation; cooking actual yield, freezer reservations, consumption and retries remain consistent. |
+| [HP-08 / B4C-83 Feedback and personal context](https://linear.app/b4cklash/issue/B4C-83/hp-08-feedback-and-personal-context) | 4 / AI + frontend | HP-06, HP-07 | Individual/household preferences, equipment, favorite/rating/make-again/notes persist and inform suggestions; feedback never silently rearranges meals. |
+| [HP-09 / B4C-84 Reliability and model evaluation](https://linear.app/b4cklash/issue/B4C-84/hp-09-reliability-and-model-evaluation) | 5 / integration + AI | HP-03–HP-08 | Check/build; authorization/concurrency/migration/uncertain stock/stale proposal/worker loss/duplicate operation tests; 20 scenarios twice, >=90% completion, zero unsupported action claims or invalid changes; measured latency and pinned digest. |
+| [HP-10 / B4C-85 Protected preview and real household pilot](https://linear.app/b4cklash/issue/B4C-85/hp-10-protected-preview-and-real-household-pilot) | 5 / integration + household | HP-09 | Protected preview verified; both devices share one household; complete objective's nine-step demo and real shopping/cooking cycle before production enablement. |
 
 ## Release status
 
-Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR #23](https://github.com/B4CKlash/Lunchbox/pull/23) coordinates the cross-owner integration. All HP issue definitions above link to this draft PR; individual Linear links will be added after reauthentication. No production database migration or pilot enablement has occurred.
+Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR #23](https://github.com/B4CKlash/Lunchbox/pull/23) coordinates the cross-owner integration. Every Linear issue above has this PR attached, role ownership, acceptance examples, evidence, and its dependencies. No production database migration or pilot enablement has occurred.
 
 | Gate | Evidence / status |
 |---|---|
@@ -29,7 +39,7 @@ Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR 
 | Browser interaction and household loops | Desktop/mobile fixtures, purchases surviving cancellation, cooking/freezer/feedback, account-separated sync, uncertain stock and draft resumption verified. Additional local evidence below covers candidate grocery previews, optional purchase history, prepared-food corrections and stale form protection. See [browser verification](HOUSEHOLD_BROWSER_VERIFICATION.md). |
 | Local AI quality | **Passed: current corrections/rejections evaluation, 40/40 (100%)**, across 20 scenarios twice on the pinned 27B thinking-off configuration. Zero accepted unsupported completion claims or invalid state changes; one intermediate claim attempt was rejected before acceptance. Median 9.366 s, p95 20.599 s; all 13 source hashes matched before/after. Independent review of all replies/effects found no material mismatch. Minor wording limits remain: clarification can ask for packages or cup details without clearly separating exact amounts from qualitative stock; one reply calls three two-person occasions “three allocations”; the quick recipe assumes pre-chopped vegetables and quick-cooking pasta. See [the current report](evaluations/local-ai-qwen35-27b-corrections-rejections.md) and [earlier evaluations](evaluations/README.md). |
 | Protected hosted preview | Source `51fbc42` passed protected HTTP, CI, and desktop/mobile browser fixture checks, including candidate groceries, rejected-recipe resumption, dated purchase history, and corrections after feedback. Shared endpoints fail closed while a separate hosted development Supabase project and worker credential remain unconfigured. See [preview verification](HOUSEHOLD_PREVIEW_VERIFICATION.md). |
-| Linear roadmap | Publishing queue above is ready; connector reauthentication still required. No Linear issue IDs are fabricated. |
+| Linear roadmap | Published and verified 2026-10-09: project P-B4C-4, five milestones, B4C-76–B4C-85, 19 dependency links and ten PR #23 attachments. Hosted setup and real-household acceptance remain open; publishing the roadmap does not complete those gates. |
 | Real household cycle | Pending household participation. Use [the pilot run guide](HOUSEHOLD_PILOT_RUN.md) after hosted development setup; this cannot be replaced by fixture tests. |
 
 Production stays gated until hosted verification and the requested real planning, shopping and cooking cycle are complete. The continuous recipe-feed PR remains independent.
