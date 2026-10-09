@@ -34,6 +34,10 @@ The suggestion endpoint contract is unchanged. The additive `/api/meals/chat` en
 
 Read [Calendar planning](CALENDAR_PLANNING.md) for the arrange → commit → groceries flow. Recipe actions add to a saved calendar draft; `state.meals` holds the committed plan used by Shopping. Legacy undated meals remain preserved in the unscheduled tray. Date/slot contracts and additive draft persistence are preserved by the AI integration.
 
+## Recipe journey design record
+
+Read [the living recipe journey brief](RECIPE_JOURNEY_DESIGN.md) for quick onboarding, brainstorming, shortlisting, pantry discovery inside recipes, total-serving allocation, and grocery previews before scheduling. It tracks agreed directions, open questions, recommended slices, and future acceptance examples separately from the inspected app baseline. These proposals are design work, not implemented feature claims; use the stable idea and decision IDs when refining them.
+
 ## Ownership and first tasks
 
 | Person | Owns | First task | Done when |
@@ -121,6 +125,6 @@ The canonical app is [LunchBox on Vercel](https://lunchbox-snowy.vercel.app). Th
 
 ## Demo scope and design reference
 
-This foundation intentionally provides a small working flow, sample data, local saved state, and clear feature entry points. It does not yet provide shared household sync, authentication, connected AI, purchase confirmation, cooking deductions, or allergen guarantees.
+This foundation intentionally provides a small working flow, sample data, local saved state, and clear feature entry points. It does not yet provide shared household sync, purchase confirmation, cooking deductions, or allergen guarantees. Live AI and reviewed imports are covered by the recipe workspace extension and its operations runbook above. Optional sign-in is documented in [Account setup](ACCOUNTS_SETUP.md); kitchen data remains local to the browser.
 
 [The original interactive concept](../LunchBox_Interactive_Concept.html) and the PDF/PowerPoint design portfolio remain available as design references. The concept includes broader simulated behavior—purchases, cooking, leftovers, undo—that is outside the scaffold. Extend the agreed demo first before bringing those workflows into the application.
