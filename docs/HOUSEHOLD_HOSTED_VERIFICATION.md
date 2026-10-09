@@ -56,6 +56,6 @@ Cleanup then removed the exact temporary household and its two accounts. Verific
 
 Supabase dashboard login establishes administrative access; it does not create a LunchBox household account. Each participant needs their own LunchBox account and access to the protected preview. The owner creates the household; the partner joins it using the email-bound invitation code.
 
-Supabase's [default email service](https://supabase.com/docs/guides/auth/auth-smtp) restricts delivery to project-team addresses. Confirmed signup for both real participants requires an appropriate email delivery configuration. No real signup, invitation message, or confirmation email was sent during infrastructure setup.
+The household pilot deliberately skips email delivery. The [manual invitation operator](MANUAL_ACCOUNT_INVITES.md) uses `auth.admin.generateLink({ type: "invite" })`, creating an individual one-time link without sending mail. Accepting it confirms that account; `/account` then lets the participant choose a password. Global email confirmation remains enabled. Account links and any preview-share credentials belong only in private handoff artifacts, never in this verification record.
 
-After email delivery and both accounts are ready, bind the Mac worker to the actual development household and run the two-device checks and [real planning/shopping/cooking cycle](HOUSEHOLD_PILOT_RUN.md). Synthetic checks do not complete those gates.
+After both participants accept their links and set passwords, bind the Mac worker to the actual development household and run the two-device checks and [real planning/shopping/cooking cycle](HOUSEHOLD_PILOT_RUN.md). Synthetic checks do not complete those gates.
