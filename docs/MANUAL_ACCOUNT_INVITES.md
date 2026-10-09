@@ -8,7 +8,7 @@ The script calls only `auth.admin.generateLink({ type: "invite" })`. It does not
 
 Use the repository's Node toolchain and installed lockfile dependencies. The ignored `.local/hosted-preview-values.json` must already contain `NEXT_PUBLIC_SUPABASE_URL` and server-only `SUPABASE_SERVICE_ROLE_KEY` for the selected development project. Keep it owner-only (`chmod 600`). The script reads this file only when explicitly invoked with `--run`; it does not load `.env.local` or accept environment variables that could select a different database.
 
-Before generating links, deploy the password-setup account screen, set the development Supabase site URL to the protected preview origin, and allow its exact `/account` redirect. Each person needs normal access to the protected Vercel preview in the browser where they will open their invitation. Sign out of any other LunchBox account first.
+Before generating links, deploy the password-setup account screen, set the development Supabase site URL to the protected preview origin, and allow its exact `/account` redirect. Each person needs access to the protected Vercel preview in the browser where they will open their invitation. A scoped, expiring branch share link can supply that access without a Vercel account or email invitation. Sign out of any other LunchBox account first.
 
 Create an owner-only JSON file under ignored `.local/`, for example `.local/manual-invites-input.json`:
 
@@ -50,7 +50,7 @@ Open the output privately and give each person only their own `completed[].invit
 
 The private output also retains Supabase's official `actionLink` for a reviewed fallback. Opening that link consumes the invitation before returning to the app, so use the app-local `inviteLink` when preview access must be completed first. Do not post either link or the output file in a pull request, issue, shared screenshot, or application log. The account metadata is `display_name` plus `needs_password_setup: true`; successful password setup clears the latter. This metadata controls the setup screen, not authorization.
 
-One person creates the household. The other joins using the separate email-bound household invitation code from the app. These account links do not join or merge households.
+One person creates the household. The other joins using the separate email-bound household invitation code from the app. These account links do not join or merge households. Alternatively, an authorized operator may preprovision one empty household against exact newly invited account IDs and stable roster IDs. Verify both mappings, never move existing memberships, and preserve local browser recovery data; this was used for the initial two participants.
 
 ## Expiry, reissue, and interrupted runs
 
@@ -84,4 +84,4 @@ After each person successfully signs in with their own password, remove their co
 node --conditions=react-server --import tsx --test src/features/accounts/manual-invites.test.ts
 ```
 
-These tests use fake administrative responses and temporary private files; they create no hosted accounts. They cover duplicate recipients, redirect validation, pagination, existing-account refusal, exact pending-invite reissue, partial failures, and output permissions. A separate operator-run synthetic browser test must prove invitation acceptance, password setup, sign-out, and subsequent password sign-in on the protected preview before real account invitations are generated.
+These tests use fake administrative responses and temporary private files; they create no hosted accounts. They cover duplicate recipients, redirect validation, pagination, existing-account refusal, exact pending-invite reissue, partial failures, and output permissions. Before real invitations are generated, separately verify synthetic invitation acceptance and the password setup screen in the protected browser, plus password update/sign-out/subsequent sign-in through the hosted authentication API. Each real participant enters and submits their own password. See [the executed proof](HOUSEHOLD_HOSTED_VERIFICATION.md#manual-account-invitation-verification--2026-10-09).

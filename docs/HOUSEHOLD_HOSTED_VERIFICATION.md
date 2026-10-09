@@ -54,8 +54,23 @@ Cleanup then removed the exact temporary household and its two accounts. Verific
 
 ## Remaining household onboarding
 
-Supabase dashboard login establishes administrative access; it does not create a LunchBox household account. Each participant needs their own LunchBox account and access to the protected preview. The owner creates the household; the partner joins it using the email-bound invitation code.
+Supabase dashboard login establishes administrative access; it does not create a LunchBox household account. Each participant needs their own LunchBox account and access to the protected preview. The normal self-service path lets the owner create the household and the partner join using an email-bound code. For the first two authorized participants, the operator preprovisioned one empty kitchen and bound their exact invited account IDs to distinct owner/member roster entries, so neither needs another join step. This does not confirm either account or set a password.
 
 The household pilot deliberately skips email delivery. The [manual invitation operator](MANUAL_ACCOUNT_INVITES.md) uses `auth.admin.generateLink({ type: "invite" })`, creating an individual one-time link without sending mail. Accepting it confirms that account; `/account` then lets the participant choose a password. Global email confirmation remains enabled. Account links and any preview-share credentials belong only in private handoff artifacts, never in this verification record.
 
-After both participants accept their links and set passwords, bind the Mac worker to the actual development household and run the two-device checks and [real planning/shopping/cooking cycle](HOUSEHOLD_PILOT_RUN.md). Synthetic checks do not complete those gates.
+The branch worker settings are now scoped to that real development household. After both participants accept their links and set passwords, verify the running Mac worker and run the two-device checks and [real planning/shopping/cooking cycle](HOUSEHOLD_PILOT_RUN.md). Synthetic checks do not complete those gates.
+
+
+## Manual account invitation verification — 2026-10-09
+
+Application source `bea3511` adds an explicit **Accept invitation** step, participant-chosen password and confirmation, fixed errors for used/expired links, and ordinary later password sign-in. Pilot mode hides self-signup that would depend on email delivery. The app-local link carries the invite credential in a fragment, removes it from browser history, and waits for a button press before calling Supabase `verifyOtp`; opening a new link on the same account page is supported. No parallel auth provider, custom JWT validation, dependency, or database migration was added.
+
+- `npm run check`: lint/type checking and **342 passing tests**, with the intentionally opt-in database suite skipped. This includes 14 new invite/operator/onboarding tests.
+- `npm run build`: **20 routes**. GitHub check and the canonical Vercel preview check passed.
+- Actual hosted API proof: generating an invite creates an unconfirmed named account without an email call; accepting its one-time link confirms that exact account; replay returns `otp_expired`; password update permits subsequent password sign-in; the wrong password is refused; a confirmed account cannot be silently replaced by another invite. Exact temporary API accounts were removed.
+- Actual protected browser proof: the combined preview-access and personal-invite link reached **Accept invitation**, then the intended test user's password setup screen. Setup survived reload. A same-page consumed-link attempt showed the fixed error and hid password/household actions while identifying the retained session. Signed-out pilot UI had no email-signup button. Desktop and 390px mobile layouts were inspected; mobile content fit its viewport. Password validation has focused unit coverage, and password update/sign-in was exercised through the hosted API; new passwords were not entered by browser automation.
+- The exact browser test account was signed out and removed. Screenshots and sanitized proofs remain ignored under `.local/manual-invite-*`; no real participant link was consumed by these tests.
+
+A single expiring Vercel share credential is scoped to the protected branch alias for private participant access. It sets a preview cookie without a Vercel-account invitation or email. Read-back verified its expiry; anonymous household access using only that preview cookie still returned `401 sign_in_required`. Project protection and production were unchanged. The private handoff combines this access query with separate one-time account fragments; neither credential appears in this repository.
+
+Both real account invitations were generated, and read-back verified the exact two account-to-person memberships in one schema-validated, revision-zero kitchen with no sample stock, meals or conversation. Neither participant has been signed in or assigned a password by the operator. Their own acceptance, two-device checks, and actual planning/shopping/cooking cycle remain open. Existing browser kitchens are archived before the shared kitchen is opened; they are not silently imported.
