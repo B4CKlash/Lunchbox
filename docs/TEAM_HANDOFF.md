@@ -106,6 +106,10 @@ The starter provider returns `source: 'demo'`. A live provider must keep this co
 
 Without shared configuration, household state is saved in this browser through the pantry adapter. Shared mode uses authorized Supabase persistence and a scoped local cache. Both modes use the same contracts and provider; never add a parallel household schema or silently reset old data.
 
+The profile/package follow-up keeps additive, default-empty `pilot.profileFacts`, `pilot.packageStock` and `pilot.packagePurchases` in that snapshot. Containers are observations, not new recipe units or implicit gram equivalents. Use `prepareNaturalStockEntry` and the reviewed domain commands for natural quantity input; exact container counts are whole numbers. `record_stock_entries` distinguishes current measured totals from additions, preserving uncertain balances.
+
+Use `buildRecommendationContext` for planning, suggestions and recipe chat. Direct recipe requests carry its bounded `recommendationContext`; authenticated workers rebuild it from their saved household and actor. Use `recommendationContextKey` for cancellation and stale display, while revision/job checks continue to authorize writes. Typed profile facts supersede older prose; only the current human message can authorize conversation learning. Accept recipe-chat jobs with `receive_recipe_chat_result` so the completed job identity, transcript, provenance and profile effects persist together. Keep recipe extraction faithful to source snapshots.
+
 ## Calculation rules
 
 1. Use canonical ingredient IDs, not display names, for matching. `PantryItem.id` is the ingredient identity used by a recipe's `ingredientId`, not a separate stock-lot ID.

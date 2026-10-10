@@ -4,10 +4,13 @@ import {
   type ChatMealsRequest,
   type ChatMealsResponse,
   type Recipe,
+  type PlannedMeal,
   type ShoppingItem,
 } from "@/lib/contracts";
 import { buildShoppingList } from "@/features/planning/shopping";
+import { buildPilotShoppingList, type PilotStockCheck } from "@/features/planning/pilot";
 import { suggestMeals } from "./demo-provider";
+import { householdFromRecommendationContext, recommendationContextForMessage, resolveRecommendationContext } from "./recommendation-context";
 
 const normalize = (text: string) =>
   text
@@ -26,6 +29,12 @@ function shortageSummary(items: ShoppingItem[]) {
   return `${list}${items.length > visible.length ? `; plus ${items.length - visible.length} more ingredients` : ""}`;
 }
 
+function stockCheckSummary(checks: PilotStockCheck[]) {
+  const unresolved = checks.filter((check) => !check.resolved);
+  const names = unresolved.slice(0, 8).map((check) => check.name).join(", ");
+  return unresolved.length ? ` Check the current amount of ${names}${unresolved.length > 8 ? ", and other ingredients" : ""} before buying or cooking; the available quantity is unknown.` : "";
+}
+
 const fallbackReply =
   "This is a demo recipe guide. I can suggest sample meals, find a quicker option, use your use-soon ingredients, review your calendar preview, or explain a selected recipe. Try “recipes with rice” to search the samples. I can’t apply cuisine, dietary, allergy, substitution, or custom serving instructions in chat yet; I haven’t applied those constraints. Set servings and time in the controls, or choose one of the prompts.";
 
@@ -34,9 +43,42 @@ export async function chatAboutMeals(
   input: ChatMealsRequest,
 ): Promise<ChatMealsResponse> {
   const request = chatMealsRequestSchema.parse(input);
-  const message = normalize(request.message).replace(/^please /, "");
-  const { pantry, preferences, focusedRecipe } = request;
+  const originalContext = resolveRecommendationContext(request);
+  const context = recommendationContextForMessage(originalContext, request.message);
+  let requestOnlyPreference = false;
+  const command = request.message.split(/(?<=[.!?])\s+|\n+|;\s*/).filter((clause) => {
+    if (!originalContext) return true;
+    const updated = recommendationContextForMessage(originalContext, clause);
+    const changed = JSON.stringify(updated?.profileFacts) !== JSON.stringify(originalContext.profileFacts);
+    if (changed) requestOnlyPreference = true;
+    return !changed;
+  }).join(" ");
+  const message = normalize(command || (requestOnlyPreference ? "suggest meals" : request.message)).replace(/^please /, "");
+  const { focusedRecipe } = request;
+  const preferences = context?.preferences ?? request.preferences;
+  const pantry = context?.pantry ?? request.pantry;
   const focusedServings = request.focusedServings ?? preferences.servings;
+  function stockPreview(meals: PlannedMeal[], includeRestock = true) {
+    if (!context) return { shortages: buildShoppingList(request.pantry, meals, { includeRestock }), checks: [] as PilotStockCheck[] };
+    const state = householdFromRecommendationContext(context);
+    state.pilot.batches = meals.map((meal, index) => ({
+      id: `demo-preview-${index}`, recipe: meal.recipe, yield: meal.servings,
+      prepareDate: state.pilot.shopThrough, reservedExtra: 0, status: "planned" as const,
+    }));
+    const preview = buildPilotShoppingList(state);
+    if (includeRestock) {
+      const restocks = buildShoppingList(pantry.map((item) => ({ ...item, quantity: item.quantity ?? 0 })), [], { includeRestock: true });
+      const uncertain = new Set(preview.checks.map((check) => JSON.stringify([check.ingredientId, check.unit])));
+      for (const restock of restocks) {
+        const key = JSON.stringify([restock.ingredientId, restock.unit]);
+        if (uncertain.has(key) || pantry.some((item) => item.id === restock.ingredientId && item.unit === restock.unit && item.quantity === undefined)) continue;
+        const existing = preview.shortages.find((item) => item.ingredientId === restock.ingredientId && item.unit === restock.unit);
+        if (existing) { existing.quantity = Math.max(existing.quantity, restock.quantity); existing.restock = true; }
+        else preview.shortages.push(restock);
+      }
+    }
+    return preview;
+  }
   function response(
     reply: string,
     recipes: Recipe[] = [],
@@ -55,13 +97,13 @@ export async function chatAboutMeals(
       return response(
         "Your calendar is empty. Ask what you can make tonight, then use Add to calendar on a recipe. Place your meals and commit your calendar to update the grocery list. Planning keeps your pantry quantities unchanged.",
       );
-    const shortages = buildShoppingList(pantry, request.meals);
+    const { shortages, checks } = stockPreview(request.meals);
     const names = request.meals
       .slice(0, 5)
       .map((meal) => `${meal.recipe.name} (${meal.servings} servings)`)
       .join("; ");
     return response(
-      `Your calendar preview has ${request.meals.length} ${request.meals.length === 1 ? "meal" : "meals"}: ${names}${request.meals.length > 5 ? "; and more" : ""}. ${shortages.length ? `After combining these meals and counting pantry stock once, this preview needs: ${shortageSummary(shortages)}.` : "Your pantry covers the combined ingredient amounts in this preview."} Commit your calendar to update the grocery list with all missing ingredient amounts for these meals. Planning has not changed your pantry quantities.`,
+      `Your calendar preview has ${request.meals.length} ${request.meals.length === 1 ? "meal" : "meals"}: ${names}${request.meals.length > 5 ? "; and more" : ""}. ${shortages.length ? `After combining these meals and counting pantry stock once, this preview needs: ${shortageSummary(shortages)}.` : checks.some((check) => !check.resolved) ? "The measured stock covers the other combined ingredients in this preview." : "Your pantry covers the combined ingredient amounts in this preview."}${stockCheckSummary(checks)} Commit your calendar to update the grocery list with all missing ingredient amounts for these meals. Planning has not changed your pantry quantities.`,
     );
   }
 
@@ -95,15 +137,15 @@ export async function chatAboutMeals(
         focusedServings,
       );
     }
-    const shortages = buildShoppingList(pantry, [
+    const { shortages, checks } = stockPreview([
       {
         id: "recipe-preview",
         recipe: focusedRecipe,
         servings: focusedServings,
       },
-    ], { includeRestock: false });
+    ], false);
     return response(
-      `${focusedRecipe.name} takes ${focusedRecipe.minutes} minutes. For ${focusedServings} servings, ${shortages.length ? `you need to pick up: ${shortageSummary(shortages)}.` : "your pantry covers all the ingredient amounts."} This checks this recipe on its own; your shopping list combines only committed meals plus low staple restocks. Commit calendar changes to update your grocery list. Open Ingredients & steps for the complete recipe.`,
+      `${focusedRecipe.name} takes ${focusedRecipe.minutes} minutes. For ${focusedServings} servings, ${shortages.length ? `you need to pick up: ${shortageSummary(shortages)}.` : checks.some((check) => !check.resolved) ? "the measured stock covers the other ingredients." : "your pantry covers all the ingredient amounts."}${stockCheckSummary(checks)} This checks this recipe on its own; your shopping list combines only committed meals plus low staple restocks. Commit calendar changes to update your grocery list. Open Ingredients & steps for the complete recipe.`,
       [focusedRecipe],
       focusedServings,
     );
@@ -132,9 +174,11 @@ export async function chatAboutMeals(
   let ingredientId: string | undefined;
   if (ingredientQuery && !wantsSoon) {
     const catalog = await suggestMeals({
-      pantry,
+      pantry: request.pantry,
       preferences: { ...preferences, maxMinutes: 120 },
+      recommendationContext: context ? { ...context, preferences: { ...preferences, maxMinutes: 120 } } : undefined,
     });
+    if (!catalog.recipes.length && context) return response("No sample recipes fit the current food preferences or kitchen equipment. Change the request or use Local AI to explore another recipe.");
     ingredientId = catalog.recipes
       .flatMap((recipe) => recipe.ingredients)
       .find((ingredient) =>
@@ -146,7 +190,8 @@ export async function chatAboutMeals(
   }
 
   const suggestions = await suggestMeals({
-    pantry,
+    pantry: request.pantry,
+    recommendationContext: context ? { ...context, preferences: { ...preferences, prioritizeUseSoon: wantsSoon || preferences.prioritizeUseSoon } } : undefined,
     preferences: {
       ...preferences,
       prioritizeUseSoon: wantsSoon || preferences.prioritizeUseSoon,
@@ -166,7 +211,7 @@ export async function chatAboutMeals(
           (item) =>
             item.id === ingredient.ingredientId &&
             item.unit === ingredient.unit &&
-            item.quantity > 0 &&
+            (item.quantity ?? 0) > 0 &&
             item.useSoon,
         ),
       ),
@@ -189,7 +234,7 @@ export async function chatAboutMeals(
     );
 
   return response(
-    `Here ${recipes.length === 1 ? "is a sample meal" : "are sample meals"} ${wantsSoon ? "using your available use-soon ingredients" : wantsQuicker ? "that take less time" : ingredientId ? `with ${ingredientQuery}` : "matched to your pantry"}, for ${preferences.servings} servings and up to ${preferences.maxMinutes} minutes. These are demo suggestions. Save a recipe, discuss it, or add it to your calendar draft. Arrange your meals, then commit your calendar to update the grocery list.`,
+    `${requestOnlyPreference ? "I applied your stated preference for this answer. " : ""}Here ${recipes.length === 1 ? "is a sample meal" : "are sample meals"} ${wantsSoon ? "using your available use-soon ingredients" : wantsQuicker ? "that take less time" : ingredientId ? `with ${ingredientQuery}` : "matched to your pantry"}, for ${preferences.servings} servings and up to ${preferences.maxMinutes} minutes. These are demo suggestions. Save a recipe, discuss it, or add it to your calendar draft. Arrange your meals, then commit your calendar to update the grocery list.`,
     recipes,
   );
 }

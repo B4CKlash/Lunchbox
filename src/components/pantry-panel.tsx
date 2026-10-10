@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
+import { NaturalStockEntry } from "@/components/natural-stock-entry";
 import {
   inferPantryCategory,
   pantryCategories,
@@ -237,6 +238,7 @@ function PantryContent() {
           {photoName ? <p className="small muted">Captured: {photoName}</p> : null}
         </div>
       </section>
+      <NaturalStockEntry />
       {reviewRows.length > 0 ? <section className="card import-review" aria-labelledby="review-import-heading">
         <div className="section-heading"><div><p className="eyebrow">CHECK BEFORE SAVING</p><h2 id="review-import-heading">Review pantry items</h2></div><button className="icon-button" aria-label="Close import review" onClick={() => setReviewRows([])}><X size={20} /></button></div>
         {reviewRows.map((row, index) => {

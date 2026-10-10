@@ -6,6 +6,7 @@ import { createSampleHousehold } from "@/features/pantry/seed";
 import { ensurePilot, applyPilotCommand } from "@/features/planning/pilot";
 import { householdCommand, householdCreate, householdGet, householdInvite, householdJoin } from "./server-household";
 import { aiWorkerRequest, cancelAiJob, enqueueAiJob, getAiJob } from "@/features/meals/jobs-server";
+import { extractExplicitProfileChanges } from "@/features/planning/profile";
 import { createPlanningRefreshMessage } from "@/features/meals/planning-refresh";
 
 // Explicitly opt in. These tests create/delete disposable users in LOCAL Supabase
@@ -13,6 +14,7 @@ import { createPlanningRefreshMessage } from "@/features/meals/planning-refresh"
 const enabled = process.env.LUNCHBOX_INTEGRATION_TESTS === "1";
 test("local Supabase proves household authorization, CAS, invitations and worker lifecycle", { skip: !enabled }, async (t) => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  assert.equal(new URL(url).protocol, "http:", "Local integration uses plain loopback HTTP only.");
   assert.ok(["localhost", "127.0.0.1"].includes(new URL(url).hostname), "Integration tests must never use hosted projects.");
   const admin = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -35,6 +37,9 @@ test("local Supabase proves household authorization, CAS, invitations and worker
       assert.equal(result.error, null);
     }
     for (const id of users) assert.equal((await admin.auth.admin.deleteUser(id)).error, null);
+    const remaining = await admin.from("households").select("id").in("id", householdIds);
+    assert.equal(remaining.error, null); assert.deepEqual(remaining.data, [], "disposable households are deleted after the suite");
+    for (const id of users) assert.equal((await admin.auth.admin.getUserById(id)).data.user, null, "disposable users are deleted after the suite");
   });
   const owner = await createUser("owner");
   const partner = await createUser("partner");
@@ -287,4 +292,131 @@ test("local Supabase proves household authorization, CAS, invitations and worker
     assert.deepEqual(reloaded.state.pilot.purchaseLots.filter((entry: { commandId: string }) => entry.commandId === purchase.commandId), [lot]);
     assert.deepEqual(reloaded.state.pantry, pantryBefore);
   });
+
+  const inputFor = (operation: unknown) => {
+    const id = randomUUID();
+    return { householdId, expectedRevision: revision, commandId: id, command: { kind: "pilot", command: { id, expectedRevision: revision, operation } } };
+  };
+  const sendOperation = async (token: string, operation: unknown) => {
+    const response = await householdCommand(request(token, inputFor(operation)));
+    assert.equal(response.status, 200);
+    const saved = await response.json(); await getLatest(); return saved;
+  };
+  const partnerReadback = async () => {
+    const response = await householdGet(request(partner.token)); assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  await t.test("completed recipe-chat profile jobs save one actor-bound receipt, survive partner readback and undo without transcript loss", async () => {
+    const latest = await getLatest();
+    const message = "I don't like mushrooms.";
+    const chatInput = { pantry: latest.state.pantry, preferences: latest.state.preferences, meals: [], recipeBox: [], messages: [], message };
+    const input = { id: randomUUID(), householdId, expectedRevision: revision, sessionId: latest.state.pilot.session.id,
+      request: { kind: "chat", input: chatInput }, actorMemberId: initial.currentMemberId };
+    assert.equal((await enqueueAiJob(request(partner.token, input))).status, 202);
+    const job = await claim(); assert.equal(job.id, input.id); assert.equal(job.actorMemberId, initial.state.pilot.members[1].id);
+    const changes = extractExplicitProfileChanges(job.context, message, job.actorMemberId);
+    assert.equal(changes.length, 1);
+    const data = { source: "ai", reply: "Your food preferences will guide future meal ideas.", recipes: [], servings: 2, profileChanges: changes };
+    const completion = { action: "complete", jobId: job.id, leaseToken: job.leaseToken, result: { kind: "chat", data } };
+    assert.equal((await worker({ ...completion, result: { kind: "chat", data: { ...data, profileChanges: [] } } })).status, 400, "worker cannot omit the deterministic explicit preference");
+    assert.equal((await worker({ ...completion, result: { kind: "chat", data: { ...data, profileChanges: extractExplicitProfileChanges(job.context, message, initial.currentMemberId) } } })).status, 400, "worker cannot learn the partner's words under the owner's scope");
+    assert.equal((await worker(completion)).status, 200);
+    assert.equal((await (await worker(completion)).json()).job.status, "completed", "identical completion retries remain one job result");
+    const resumed = await (await getAiJob(request(owner.token, undefined, `/api/household/jobs?householdId=${householdId}&id=${job.id}`))).json();
+    assert.equal(resumed.job.actorMemberId, job.actorMemberId); assert.deepEqual(resumed.job.result.data.profileChanges, changes);
+    const operation = { type: "receive_recipe_chat_result", baseRevision: revision, jobId: job.id, request: message, actorMemberId: job.actorMemberId, submittedDraft: message, result: data };
+    for (const forged of [{ ...operation, jobId: randomUUID() }, { ...operation, actorMemberId: initial.currentMemberId }, { ...operation, request: "I dislike carrots." }, { ...operation, result: { ...data, reply: "Forged transcript" } }]) {
+      assert.equal((await householdCommand(request(owner.token, inputFor(forged)))).status, 409);
+    }
+    assert.equal((await householdCommand(request(stranger.token, inputFor(operation)))).status, 403);
+    const command = inputFor(operation);
+    const savedResponse = await householdCommand(request(owner.token, command)); assert.equal(savedResponse.status, 200);
+    const saved = await savedResponse.json();
+    assert.equal(saved.revision, revision + 1); assert.ok(saved.receipt.inverse);
+    const fact = saved.state.pilot.profileFacts.find((entry: { source: { jobId?: string } }) => entry.source.jobId === job.id);
+    assert.deepEqual(fact.value, changes[0].type === "upsert_profile_fact" ? changes[0].value : null);
+    assert.equal(fact.source.actorMemberId, job.actorMemberId); assert.equal(fact.source.commandId, command.commandId);
+    assert.equal(fact.source.messageId, `job-${job.id}-user`); assert.equal(fact.source.sourceText, message);
+    const duplicate = await (await householdCommand(request(partner.token, command))).json();
+    assert.equal(duplicate.duplicate, true); assert.equal(duplicate.revision, saved.revision);
+    await getLatest();
+    assert.equal((await householdCommand(request(owner.token, inputFor({ ...operation, baseRevision: revision })))).status, 409, "fresh envelope cannot accept the same old source again");
+    const readback = await partnerReadback();
+    assert.deepEqual(readback.state.pilot.profileFacts, saved.state.pilot.profileFacts);
+    assert.equal(readback.state.workspace.chatMessages.filter((entry: { id: string }) => entry.id === `job-${job.id}-user`).length, 1);
+    assert.equal(readback.state.workspace.chatMessages.find((entry: { id: string }) => entry.id === `job-${job.id}-user`).authorMemberId, job.actorMemberId);
+    const undone = await sendOperation(partner.token, { type: "undo", receiptId: saved.receipt.id });
+    assert.deepEqual(undone.state.pilot.profileFacts, latest.state.pilot.profileFacts);
+    assert.deepEqual(undone.state.workspace.chatMessages, saved.state.workspace.chatMessages);
+    assert.deepEqual(undone.state.pantry, latest.state.pantry);
+    assert.equal((await (await householdCommand(request(owner.token, command))).json()).duplicate, true, "retry after Undo cannot relearn the fact");
+    assert.deepEqual((await partnerReadback()).state.pilot.profileFacts, latest.state.pilot.profileFacts);
+  });
+
+  await t.test("planning profile acceptance preserves the original speaker and stale completed jobs cannot overwrite later corrections", async () => {
+    const latest = await getLatest();
+    const message = "We don't have an oven.";
+    const queued = await enqueue(message); const job = await claim(); assert.equal(job.id, queued.input.id);
+    const changes = extractExplicitProfileChanges(job.context, message, job.actorMemberId);
+    const data = { reply: "Your equipment preferences will guide future meal ideas.", recipes: [], operations: [], profileChanges: changes };
+    const completion = { action: "complete", jobId: job.id, leaseToken: job.leaseToken, result: { kind: "planning", data } };
+    assert.equal((await worker(completion)).status, 200);
+    const messages = [...latest.state.pilot.session.messages,
+      { id: `job-${job.id}-user`, role: "user", text: message, authorMemberId: job.actorMemberId, recipes: [], servings: 2 },
+      { id: `job-${job.id}-assistant`, role: "assistant", text: data.reply, recipes: [], servings: 2 }];
+    const operation = { type: "receive_planning_result", baseRevision: revision, session: { ...latest.state.pilot.session, messages },
+      profileSource: { jobId: job.id, request: message, actorMemberId: job.actorMemberId, changes } };
+    const forged = { ...operation, session: { ...operation.session, messages: messages.map((entry) => entry.id === `job-${job.id}-user` ? { ...entry, authorMemberId: initial.state.pilot.members[1].id } : entry) } };
+    assert.equal((await householdCommand(request(partner.token, inputFor(forged)))).status, 409);
+    const command = inputFor(operation); const accepted = await householdCommand(request(partner.token, command)); assert.equal(accepted.status, 200);
+    const saved = await accepted.json(); await getLatest();
+    assert.deepEqual((await partnerReadback()).state.pilot.profileFacts, saved.state.pilot.profileFacts);
+    const fact = saved.state.pilot.profileFacts.find((entry: { value: { kind: string; equipment?: string } }) => entry.value.kind === "equipment" && entry.value.equipment === "oven");
+    assert.equal(fact.value.availability, "unavailable"); assert.equal(fact.source.actorMemberId, initial.currentMemberId);
+    assert.equal((await (await householdCommand(request(owner.token, command))).json()).duplicate, true);
+    const staleQueued = await enqueue("We have an oven."); const staleJob = await claim(); assert.equal(staleJob.id, staleQueued.input.id);
+    const staleChanges = extractExplicitProfileChanges(staleJob.context, staleQueued.input.request.message, staleJob.actorMemberId);
+    const staleData = { ...data, profileChanges: staleChanges };
+    assert.equal((await worker({ action: "complete", jobId: staleJob.id, leaseToken: staleJob.leaseToken, result: { kind: "planning", data: staleData } })).status, 200);
+    const staleOperation = { type: "receive_planning_result", baseRevision: revision, session: { ...saved.state.pilot.session, messages: [...saved.state.pilot.session.messages,
+      { id: `job-${staleJob.id}-user`, role: "user", text: staleQueued.input.request.message, authorMemberId: staleJob.actorMemberId, recipes: [], servings: 2 }] },
+      profileSource: { jobId: staleJob.id, request: staleQueued.input.request.message, actorMemberId: staleJob.actorMemberId, changes: staleChanges } };
+    await sendOperation(partner.token, { type: "upsert_profile_fact", value: { kind: "equipment", equipment: "oven", availability: "unknown" }, sourceText: "I don't know whether we have an oven" });
+    assert.equal((await householdCommand(request(owner.token, inputFor({ ...staleOperation, baseRevision: revision })))).status, 409, "current envelope cannot revive stale job evidence");
+    assert.equal((await partnerReadback()).state.pilot.profileFacts.find((entry: { value: { equipment?: string } }) => entry.value.equipment === "oven").value.availability, "unknown");
+  });
+
+  await t.test("package stock and purchase history persist for both members, retry once, preserve unknown counts and Undo precisely", async () => {
+    const latest = await getLatest();
+    const pantryBefore = structuredClone(latest.state.pantry);
+    const stock = { ingredientId: "beans", name: "Canned white beans", packageKind: "can", status: "exact", count: 10, sourceNote: "I have 10 cans of canned white beans" };
+    await sendOperation(owner.token, { type: "set_package_stock", stock });
+    const beforePurchase = await getLatest();
+    const purchase = inputFor({ type: "record_package_purchase", items: [{ ingredientId: "beans", name: "Canned white beans", packageKind: "can", count: 2, sourceNote: "I bought 2 cans of canned white beans" }] });
+    const purchasedResponse = await householdCommand(request(partner.token, purchase)); assert.equal(purchasedResponse.status, 200);
+    const purchased = await purchasedResponse.json(); await getLatest();
+    assert.equal(purchased.state.pilot.packageStock.find((entry: { ingredientId: string }) => entry.ingredientId === "beans").count, 12);
+    const lots = purchased.state.pilot.packagePurchases.filter((entry: { commandId: string }) => entry.commandId === purchase.commandId);
+    assert.equal(lots.length, 1); assert.equal(lots[0].count, 2); assert.ok(lots[0].recordedAt);
+    const duplicate = await (await householdCommand(request(owner.token, purchase))).json(); assert.equal(duplicate.duplicate, true); assert.equal(duplicate.revision, purchased.revision);
+    const readback = await partnerReadback();
+    assert.deepEqual(readback.state.pilot.packageStock, purchased.state.pilot.packageStock);
+    assert.deepEqual(readback.state.pilot.packagePurchases, purchased.state.pilot.packagePurchases);
+    assert.deepEqual(readback.state.pantry, pantryBefore, "container counts never become measured grams or individual ingredients");
+    const undone = await sendOperation(owner.token, { type: "undo", receiptId: purchased.receipt.id });
+    assert.deepEqual(undone.state.pilot.packageStock, beforePurchase.state.pilot.packageStock);
+    assert.deepEqual(undone.state.pilot.packagePurchases, beforePurchase.state.pilot.packagePurchases);
+    assert.deepEqual(undone.state.pantry, pantryBefore);
+    assert.equal((await (await householdCommand(request(partner.token, purchase))).json()).duplicate, true);
+    assert.deepEqual((await partnerReadback()).state.pilot.packageStock, beforePurchase.state.pilot.packageStock);
+    await sendOperation(partner.token, { type: "set_package_stock", stock: { ingredientId: "tomato-sauce", name: "Tomato sauce", packageKind: "jar", status: "some", sourceNote: "I have half a jar of tomato sauce" } });
+    const uncertain = await sendOperation(owner.token, { type: "record_package_purchase", items: [{ ingredientId: "tomato-sauce", name: "Tomato sauce", packageKind: "jar", count: 1, sourceNote: "I bought one jar of tomato sauce" }] });
+    const current = uncertain.state.pilot.packageStock.find((entry: { ingredientId: string }) => entry.ingredientId === "tomato-sauce");
+    assert.equal(current.status, "some"); assert.equal(current.count, undefined);
+    assert.equal(uncertain.state.pilot.packagePurchases.at(-1).count, 1);
+    const fromPartner = await partnerReadback(); assert.deepEqual(fromPartner.state.pilot.packageStock, uncertain.state.pilot.packageStock);
+    assert.deepEqual(fromPartner.state.pantry, pantryBefore);
+  });
+
 });

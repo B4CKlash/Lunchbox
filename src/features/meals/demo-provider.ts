@@ -10,6 +10,8 @@ import {
   type MealGoal,
   type NutritionFocus,
 } from "@/lib/contracts";
+import { resolveRecommendationContext } from "./recommendation-context";
+import { recipeFitsRecommendationContext } from "./recommendation-constraints";
 
 const RECIPES: Recipe[] = [
   {
@@ -164,7 +166,10 @@ const RECIPE_PROFILES: Record<string, RecipeProfile> = {
 export async function suggestMeals(
   input: SuggestMealsRequest,
 ): Promise<SuggestMealsResponse> {
-  const { pantry, preferences } = suggestMealsRequestSchema.parse(input);
+  const request = suggestMealsRequestSchema.parse(input);
+  const context = resolveRecommendationContext(request);
+  const preferences = context?.preferences ?? request.preferences;
+  const pantry = context?.pantry ?? request.pantry;
   const dietaryNeeds = preferences.dietaryNeeds ?? [];
   const allergies = (preferences.allergies ?? []).map((item) =>
     item.toLowerCase(),
@@ -196,7 +201,7 @@ export async function suggestMeals(
             .includes(allergy),
         ),
       );
-      const containsDislike = dislikedIngredients.some((dislike) =>
+      const containsDislike = !context && dislikedIngredients.some((dislike) =>
         recipe.ingredients.some((ingredient) =>
           `${ingredient.ingredientId} ${ingredient.name}`
             .toLowerCase()
@@ -207,7 +212,8 @@ export async function suggestMeals(
         recipe.minutes <= preferences.maxMinutes &&
         matchesDiet &&
         !containsAllergy &&
-        !containsDislike
+        !containsDislike &&
+        recipeFitsRecommendationContext(recipe, context)
       );
     },
   ).map((recipe) => {
@@ -219,13 +225,13 @@ export async function suggestMeals(
           item.id === ingredient.ingredientId && item.unit === ingredient.unit,
       );
       const available = matching.reduce(
-        (total, item) => total + item.quantity,
+        (total, item) => total + (item.quantity ?? 0),
         0,
       );
       const required =
         (ingredient.quantity * preferences.servings) / recipe.servings;
       coverage += Math.min(1, available / required);
-      if (matching.some((item) => item.useSoon && item.quantity > 0))
+      if (matching.some((item) => item.useSoon && (item.quantity ?? 0) > 0))
         useSoon += 1;
     }
     return {

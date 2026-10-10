@@ -321,6 +321,29 @@ export const stockCheckSchema = z.object({
   unit: unitSchema,
   fingerprint: z.string().min(1).max(100000),
 });
+// Containers describe observed stock only. Their contents are unresolved, so
+// they are never recipe units or automatic gram/ml/individual equivalents.
+export const packageKindSchema = z.enum(["can", "bag", "jar", "box", "bottle"]);
+export const packageStockSchema = z.object({
+  ingredientId: pilotIdSchema,
+  name: z.string().trim().min(1).max(80),
+  packageKind: packageKindSchema,
+  status: z.enum(["exact", "some", "low", "out"]),
+  count: z.number().int().nonnegative().max(100000).optional(),
+  sourceNote: z.string().max(1000).optional(),
+}).refine((stock) => stock.status === "exact" ? stock.count !== undefined : stock.count === undefined, {
+  message: "Exact package stock needs a whole container count; qualitative stock has no numeric count.",
+});
+export const packagePurchaseItemSchema = z.object({
+  ingredientId: pilotIdSchema,
+  name: z.string().trim().min(1).max(80),
+  packageKind: packageKindSchema,
+  count: z.number().int().positive().max(100000),
+  sourceNote: z.string().max(1000).optional(),
+});
+export const packagePurchaseSchema = packagePurchaseItemSchema.extend({
+  id: z.string().min(1).max(200), commandId: pilotIdSchema, recordedAt: z.iso.datetime(),
+});
 export const purchaseItemSchema = recipeIngredientSchema.extend({
   purchasedOn: calendarDateSchema.optional(),
   bestBefore: calendarDateSchema.optional(),
@@ -385,6 +408,8 @@ export const pilotChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("confirm_stock"), ...stockCheckSchema.shape }),
   z.object({ type: z.literal("record_purchase"), items: z.array(purchaseItemSchema).min(1).max(200) }),
   z.object({ type: z.literal("record_stock_entries"), entries: z.array(stockEntrySchema).min(1).max(200) }),
+  z.object({ type: z.literal("set_package_stock"), stock: packageStockSchema }),
+  z.object({ type: z.literal("record_package_purchase"), items: z.array(packagePurchaseItemSchema).min(1).max(200) }),
   z.object({ type: z.literal("cook_batch"), batchId: pilotIdSchema, actualPortions: portionsSchema, freezerPortions: z.number().finite().nonnegative().max(1000) }),
   z.object({ type: z.literal("correct_prepared"), batchId: pilotIdSchema,
     produced: z.number().finite().nonnegative().max(1000), freezerPortions: z.number().finite().nonnegative().max(1000),
@@ -444,6 +469,8 @@ const pilotDataSchema = z.object({
   stockChecks: z.array(stockCheckSchema).max(200),
   prepared: z.array(preparedPortionsSchema).max(1000),
   purchaseLots: z.array(purchaseLotSchema).max(10000).default([]),
+  packageStock: z.array(packageStockSchema).max(1000).default([]),
+  packagePurchases: z.array(packagePurchaseSchema).max(10000).default([]),
   feedback: z.array(recipeFeedbackSchema).max(1000),
   proposals: z.array(planningProposalSchema).max(100),
   unplacedMeals: plannedMealsSchema,
@@ -478,9 +505,34 @@ export const householdStateSchema = z.object({
   // Additive migration: existing v1 saves retain their kitchen and plan.
   workspace: recipeWorkspaceSchema.prefault({}),
 });
+// Food context crosses provider boundaries without household commands, source
+// provenance, receipts, purchase history, or conversation transcripts.
+export const recommendationPantryItemSchema = pantryItemSchema.omit({ quantity: true }).extend({
+  quantity: pantryItemSchema.shape.quantity.optional(),
+  status: z.enum(["exact", "some", "low", "out"]).optional(),
+  quantityKnown: z.literal(false).optional(),
+}).refine((item) => item.status === "some" || item.status === "low" ? item.quantity === undefined && item.quantityKnown === false
+  : item.status === "out" ? item.quantity === 0 : item.quantity !== undefined, { message: "Projected pantry quantities must preserve their current certainty." });
+export const recommendationContextSchema = z.object({
+  actorMemberId: pilotIdSchema.optional(),
+  audienceIds: z.array(pilotIdSchema).max(12),
+  members: z.array(householdMemberSchema).max(12),
+  preferences: preferencesSchema,
+  profileFacts: z.array(profileFactValueSchema).max(200),
+  equipment: z.array(z.string().trim().min(1).max(80)).max(30),
+  sessionConstraints: z.string().max(2000),
+  pantry: z.array(recommendationPantryItemSchema).max(400),
+  stock: z.array(flexibleStockSchema).max(200),
+  stockChecks: z.array(stockCheckSchema).max(200),
+  packageStock: z.array(packageStockSchema).max(1000),
+  feedback: z.array(recipeFeedbackSchema).max(1000),
+  favorites: z.array(recipeSchema).max(20),
+  rejectedRecipeIds: z.array(pilotIdSchema).max(1000),
+});
 export const suggestMealsRequestSchema = z.object({
   recommendationKey: z.string().max(200000).optional(),
   recommendationActorId: z.string().max(160).optional(),
+  recommendationContext: recommendationContextSchema.optional(),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   direction: directionSchema.optional(),
@@ -495,6 +547,7 @@ export const suggestMealsResponseSchema = z.object({
   explanation: z.string().min(1).max(2000).optional(),
 });
 export const chatMealsRequestSchema = z.object({
+  recommendationContext: recommendationContextSchema.optional(),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   meals: z.array(plannedMealSchema).max(50),
@@ -583,6 +636,7 @@ export type ShoppingItem = {
 };
 
 export type HouseholdMember = z.infer<typeof householdMemberSchema>;
+export type RecommendationContext = z.infer<typeof recommendationContextSchema>;
 export type ProfileScope = z.infer<typeof profileScopeSchema>;
 export type ProfileFoodTarget = z.infer<typeof profileFoodTargetSchema>;
 export type ProfileFactValue = z.infer<typeof profileFactValueSchema>;
@@ -596,6 +650,10 @@ export type StockCheck = z.infer<typeof stockCheckSchema>;
 export type PreparedPortions = z.infer<typeof preparedPortionsSchema>;
 export type PurchaseItem = z.infer<typeof purchaseItemSchema>;
 export type PurchaseLot = z.infer<typeof purchaseLotSchema>;
+export type PackageKind = z.infer<typeof packageKindSchema>;
+export type PackageStock = z.infer<typeof packageStockSchema>;
+export type PackagePurchaseItem = z.infer<typeof packagePurchaseItemSchema>;
+export type PackagePurchase = z.infer<typeof packagePurchaseSchema>;
 export type RecipeFeedback = z.infer<typeof recipeFeedbackSchema>;
 export type PlanningSession = z.infer<typeof planningSessionSchema>;
 export type PlanningProposal = z.infer<typeof planningProposalSchema>;

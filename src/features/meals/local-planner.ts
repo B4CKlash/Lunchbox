@@ -5,14 +5,16 @@ import { z } from "zod";
 import { calendarDateSchema, mealSlotSchema, recipeSchema, unitSchema, type HouseholdState, type KnownIngredient, type PilotOperation, type Recipe } from "@/lib/contracts";
 import { resolveIngredient } from "@/features/pantry/ingredients";
 import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
+import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
+import { naturalStockEntryOperation, prepareNaturalStockEntry } from "@/features/pantry/natural-stock-entry";
 import { applyPilotCommand, buildPilotShoppingList, ensurePilot } from "@/features/planning/pilot";
 import { addDays } from "@/features/planning/calendar";
 import { createLocalModel, verifyLocalModel } from "./local-model";
 import { planningResultSchema } from "./jobs";
-import { findPlanningFavorites } from "./planning-fixtures";
 import { pantryForModel } from "./live-provider";
 import { claimsCompletedAction, favoriteClaimFacts } from "./planning-claims";
-import { buildRecommendationContext, recommendationContextInstructions } from "./recommendation-context";
+import { buildRecommendationContext, recommendationContextForMessage, recommendationContextInstructions } from "./recommendation-context";
+import { recipeFitsRecommendationContext } from "./recommendation-constraints";
 export { claimsCompletedAction } from "./planning-claims";
 
 const draftIngredient = z.object({ name: z.string(), quantity: z.number(), unit: unitSchema });
@@ -38,6 +40,32 @@ export const localPlanningDraftSchema = z.object({
 export type LocalPlanningDraft = z.infer<typeof localPlanningDraftSchema>;
 export type LocalPlanningResult = z.infer<typeof planningResultSchema>;
 
+/** Package commands come only from the current statement's deterministic
+ * interpretation. The model cannot invent a package weight or purchase count. */
+export function reviewNaturalStockRequest(state: HouseholdState, request: string, idFactory: () => string = randomUUID): LocalPlanningResult | null {
+  if (/[,;\n]|\b(?:please|plan|recipe|cook|then|but)\b/i.test(request)) return null;
+  // Bare avoidance such as “No mushrooms tonight” is a meal constraint,
+  // not an inventory assertion. Qualitative stock needs an explicit speaker.
+  if (!/\b(?:cans?|bags?|jars?|box(?:es)?|bottles?)\b/i.test(request)
+    && !/^(?:(?:i|we)\s+(?:have|bought|purchased)|bought|purchased|\d)/i.test(request.trim())) return null;
+  if (!/^(?:(?:i|we)\s+(?:have|bought|purchased)|bought|purchased|\d|some\b|half\b|an?\b|opened\b|low\b|out\b|no\b)/i.test(request.trim())) return null;
+  let draft;
+  try { draft = prepareNaturalStockEntry(request, knownIngredientsFromHousehold(state)); }
+  catch { return null; }
+  if (!draft.operation) return planningResultSchema.parse({ reply: "Should this replace your current stock total, or record a purchase to add?", recipes: [], operations: [] });
+  if (!draft.ingredientId) return planningResultSchema.parse({ reply: `Which ingredient do you mean by ${draft.name}? Please give its specific form or name.`, recipes: [], operations: [] });
+  if (draft.operation === "add_purchase" && draft.status !== "exact") return planningResultSchema.parse({ reply: "What exact amount did you buy? Opened or partial containers can instead be recorded as a current stock observation.", recipes: [], operations: [] });
+  let operation: PilotOperation;
+  try { operation = naturalStockEntryOperation(draft); }
+  catch (error) { return planningResultSchema.parse({ reply: error instanceof Error ? error.message : "Please check the whole container count.", recipes: [], operations: [] }); }
+  const current = ensurePilot(state);
+  applyPilotCommand(current, { id: `review-${idFactory()}`, expectedRevision: current.pilot.revision, operation });
+  return planningResultSchema.parse({ reply: `Review this ${draft.operation === "add_purchase" ? "purchase addition" : "current stock total"} for ${draft.name}.${draft.packageKind ? " Container contents remain unresolved." : ""}`, recipes: [], operations: [operation] });
+}
+
+// Retain the existing helper name for package-only callers and evaluation evidence.
+export const reviewNaturalPackageRequest = reviewNaturalStockRequest;
+
 /** Give each response intent only its relevant fields. A clarification has no
  * action field at all, and existing entities are a closed set of references. */
 export function localPlanningWireSchema(state: HouseholdState, actorMemberId: string, request?: string) {
@@ -49,7 +77,7 @@ export function localPlanningWireSchema(state: HouseholdState, actorMemberId: st
   const person = enumeration(["requester", ...others.map((_, index) => others.length === 1 ? "other" : `member_${index + 2}`)]);
   const batchId = enumeration(current.pilot.batches.map((batch) => batch.id));
   const allocationId = enumeration(current.pilot.allocations.map((allocation) => allocation.id));
-  const favorites = findPlanningFavorites(current);
+  const favorites = buildRecommendationContext(current, actorMemberId).favorites;
   const favoriteId = enumeration(favorites.map((recipe) => recipe.id));
   const cookable = current.pilot.batches.filter((batch) => batch.status === "planned");
   const consumable = current.pilot.allocations.filter((allocation) => !allocation.consumedAt && current.pilot.prepared.some((prepared) => prepared.batchId === allocation.batchId));
@@ -92,7 +120,7 @@ export function reviewLocalPlanningWire(state: HouseholdState, input: unknown, a
     removeAllocationIds: [], purchases: [], stock: [], cooking: [], consumption: [], feedback: [], shopThrough: null,
     ...wire,
   });
-  return reviewLocalPlanningDraft(state, groundLocalPlanningDraft(state, draft, actorMemberId), randomUUID, actorMemberId);
+  return reviewLocalPlanningDraft(state, groundLocalPlanningDraft(state, draft, actorMemberId), randomUUID, actorMemberId, request);
 }
 
 
@@ -109,6 +137,7 @@ Use the calculated shopping preview for grocery explanations. checks are uncerta
 function knownIngredients(state: HouseholdState): KnownIngredient[] {
   const pilot = state.pilot!;
   const values = [
+    ...pilot.packageStock.map(({ ingredientId, name }) => ({ ingredientId, name, unit: "each" as const })),
     ...pilot.stock.map(({ ingredientId, name, unit }) => ({ ingredientId, name, unit })),
     ...state.pantry.map((item) => ({ ingredientId: item.id, name: item.name, unit: item.unit })),
     ...state.workspace.recipeBox.flatMap((entry) => entry.recipe.ingredients),
@@ -119,8 +148,9 @@ function knownIngredients(state: HouseholdState): KnownIngredient[] {
 }
 
 /** Convert model drafts to canonical recipe snapshots and validated proposals. */
-export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, idFactory: () => string = randomUUID, actorMemberId?: string): LocalPlanningResult {
+export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, idFactory: () => string = randomUUID, actorMemberId?: string, request = ""): LocalPlanningResult {
   const current = ensurePilot(state);
+  const recommendation = recommendationContextForMessage(buildRecommendationContext(current, actorMemberId), request);
   const draft = localPlanningDraftSchema.parse(input);
   const rejected = new Set(current.pilot.session.rejectedRecipeIds);
   const known = knownIngredients(current);
@@ -134,6 +164,7 @@ export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, 
     if (candidate.minutes > current.preferences.maxMinutes) throw new Error("A candidate exceeded your maximum preparation time.");
     const ingredients = candidate.ingredients.map((item) => ({ ...resolve(item), quantity: item.quantity }));
     const recipe = recipeSchema.parse({ ...candidate, id: `local-${idFactory()}`, ingredients, provenance: { source: "ai" } });
+    if (!recipeFitsRecommendationContext(recipe, recommendation)) throw new Error("A candidate conflicts with the current audience's food or equipment preferences.");
     known.push(...ingredients);
     // Copying or only scaling a known recipe does not create new authorship.
     // Exact canonical amounts per serving, steps, and duration must all match.
@@ -141,10 +172,11 @@ export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, 
     if (matching.some((existing) => rejected.has(existing.id))) throw new Error("This recipe was ruled out for the current planning session. Suggest a different recipe.");
     return matching[0] ?? recipe;
   });
-  const saved = new Map(findPlanningFavorites(current).map((recipe) => [recipe.id, recipe]));
+  const saved = new Map(buildRecommendationContext(current, actorMemberId).favorites.map((recipe) => [recipe.id, recipe]));
   const favorites = draft.favoriteRecipeIds.map((id) => {
     const recipe = saved.get(id);
     if (!recipe) throw new Error("The assistant referenced a favorite that is not available in current household feedback or the recipe box.");
+    if (!recipeFitsRecommendationContext(recipe, recommendation)) throw new Error("The favorite conflicts with the current audience's food or equipment preferences.");
     return recipe;
   });
   const recipeRefs = new Map([
@@ -261,8 +293,8 @@ export function groundLocalPlanningDraft(state: HouseholdState, input: unknown, 
   };
 }
 
-function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMemberId: string) {
-  const kitchen = buildRecommendationContext(state, actorMemberId);
+function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMemberId: string, message: string) {
+  const kitchen = recommendationContextForMessage(buildRecommendationContext(state, actorMemberId), message)!;
   const others = state.pilot.members.filter((member) => member.id !== actorMemberId);
   const focusedRecipeId = state.pilot.session.rejectedRecipeIds.includes(state.pilot.session.focusedRecipeId ?? "") ? null : state.pilot.session.focusedRecipeId;
   const refs = new Map<string, string>([[actorMemberId, "requester"], ...others.map((member, index): [string, string] => [member.id, others.length === 1 ? "other" : `member_${index + 2}`])]);
@@ -274,13 +306,13 @@ function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMember
   return {
     actorMemberId: "requester",
     kitchen: map({ ...kitchen, actorMemberId: "requester", audienceIds: kitchen.audienceIds.map((id) => refs.get(id)), members: undefined }),
-    members: [state.pilot.members.find((member) => member.id === actorMemberId)!, ...others].map((member) => ({ id: refs.get(member.id), role: member.id === actorMemberId ? "person making this request (I/me/my)" : "the requesting person's partner", preferences: member.preferences, displayName: /^(you|partner)$/i.test(member.name) ? undefined : member.name })),
+    members: [state.pilot.members.find((member) => member.id === actorMemberId)!, ...others].map((member) => ({ id: refs.get(member.id), role: member.id === actorMemberId ? "person making this request (I/me/my)" : "the requesting person's partner", preferences: kitchen.members.find((entry) => entry.id === member.id)?.preferences, displayName: /^(you|partner)$/i.test(member.name) ? undefined : member.name })),
     planningDates: Array.from({ length: Math.max(14, state.pilot.session.days) }, (_, index) => {
       const date = addDays(state.pilot.session.startDate, index);
       return { date, weekday: weekdays[new Date(`${date}T12:00:00Z`).getUTCDay()] };
     }),
     session: map({ ...state.pilot.session, focusedRecipeId, messages: state.pilot.session.messages.slice(-8).map(({ role, text, authorMemberId }) => ({ role, text, ...(authorMemberId && refs.has(authorMemberId) ? { author: refs.get(authorMemberId) } : {}) })), candidates: undefined }),
-    allocations: map(state.pilot.allocations), coverage: map(state.pilot.coverage), feedback: map(state.pilot.feedback.slice(-20)),
+    allocations: map(state.pilot.allocations), coverage: map(state.pilot.coverage),
   };
 }
 
@@ -291,20 +323,25 @@ export async function runLocalPlanning(
 ): Promise<LocalPlanningResult> {
   const current = ensurePilot(state);
   if (!message.trim() || message.length > 2000) throw new Error("Use a planning message between 1 and 2000 characters.");
-  if (options.verify !== false) await verifyLocalModel(process.env, options.signal);
+  options.signal?.throwIfAborted();
   const actorMemberId = options.actorMemberId ?? current.pilot.members[0].id;
   if (!current.pilot.members.some((member) => member.id === actorMemberId)) throw new Error("The requesting person is not in this household.");
   const profileChanges = extractExplicitProfileChanges(current, message, actorMemberId);
   const profileReply = explicitProfileReply(current, message, actorMemberId);
   if (profileReply) return { reply: profileReply, recipes: [], operations: [], ...(profileChanges.length ? { profileChanges } : {}) };
+  const stockEntry = reviewNaturalStockRequest(current, message);
+  if (stockEntry) return stockEntry;
+  if (options.verify !== false) await verifyLocalModel(process.env, options.signal);
   const prompt = JSON.stringify({
     currentRequest: message,
-    ...modelPlanningContext(current, actorMemberId),
+    ...modelPlanningContext(current, actorMemberId, message),
     preferences: current.preferences,
     pantry: pantryForModel(current.pantry, current),
     stock: current.pilot.stock,
+    packageStock: current.pilot.packageStock,
+    packagePurchases: current.pilot.packagePurchases.slice(-20),
     candidates: current.pilot.session.candidates.filter((recipe) => !current.pilot.session.rejectedRecipeIds.includes(recipe.id)),
-    savedRecipes: findPlanningFavorites(current).slice(0, 15),
+    savedRecipes: buildRecommendationContext(current, actorMemberId).favorites.slice(0, 15),
     batches: current.pilot.batches,
     prepared: current.pilot.prepared,
     shopping: buildPilotShoppingList(current),

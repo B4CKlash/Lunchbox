@@ -4,8 +4,12 @@ import {
   chatMealsResponseSchema,
   type ChatMealsRequest,
   type Recipe,
+  type ProfileFactValue,
 } from "@/lib/contracts";
 import { createSampleHousehold } from "@/features/pantry/seed";
+import { ensurePilot } from "@/features/planning/pilot";
+import { profileFactId } from "@/features/planning/profile";
+import { buildRecommendationContext } from "./recommendation-context";
 import { chatAboutMeals } from "./chat-provider";
 import { suggestMeals } from "./demo-provider";
 
@@ -254,4 +258,68 @@ test("empty plans, empty results, and invalid empty messages have explicit outco
   assert.deepEqual(result.recipes, []);
   assert.match(result.reply, /No sample recipes/);
   await assert.rejects(() => chatAboutMeals(input("  ")));
+});
+
+test("demo chat uses current explicit corrections for this answer without saving them", async () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  const actor = state.pilot.members[0].id;
+  state.pilot.session.memberIds = [actor];
+  const value: ProfileFactValue = { kind: "food-dislike", scope: { kind: "member", memberId: actor },
+    target: { kind: "ingredient", ingredientId: "tomatoes", name: "Tomatoes" }, disliked: true };
+  state.pilot.profileFacts = [{ id: profileFactId(value), value,
+    source: { kind: "manual", sourceText: "I dislike tomatoes", recordedAt: "2026-10-12T00:00:00.000Z", commandId: "setup" } }];
+  const request = { ...input("What can I make tonight?"), recommendationContext: buildRecommendationContext(state, actor) };
+  assert.ok(!(await chatAboutMeals(request)).recipes.some((recipe) => recipe.id === "r1"));
+  request.message = "I no longer dislike tomatoes. What can I make tonight?";
+  const before = structuredClone(request);
+  const result = await chatAboutMeals(request);
+  assert.ok(result.recipes.some((recipe) => recipe.id === "r1"));
+  assert.match(result.reply, /for this answer/);
+  assert.deepEqual(request, before);
+  request.message = "What can I make tonight?";
+  assert.ok(!(await chatAboutMeals(request)).recipes.some((recipe) => recipe.id === "r1"));
+  request.message = "No tomatoes tonight. What can I make tonight?";
+  assert.deepEqual((await chatAboutMeals(request)).recipes, []);
+  assert.match((await chatAboutMeals(request)).reply, /haven’t applied those constraints/);
+});
+
+test("demo chat reports qualitative stock checks without reusing historical quantities", async () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  state.pilot.stock = [{ ingredientId: "rice", name: "Rice", unit: "g", status: "low" }];
+  const request = { ...input("What do I need for this recipe?"), focusedRecipe: riceRecipe(), recommendationContext: buildRecommendationContext(state) };
+  const before = structuredClone(request);
+  const result = await chatAboutMeals(request);
+  assert.match(result.reply, /Check the current amount of Rice/);
+  assert.match(result.reply, /quantity is unknown/);
+  assert.doesNotMatch(result.reply, /pantry covers all|150 g Rice/);
+  request.message = "Review my plan";
+  request.meals = [{ id: "one", recipe: riceRecipe(), servings: 2 }];
+  assert.match((await chatAboutMeals(request)).reply, /Check the current amount of Rice/);
+  assert.deepEqual({ ...request, message: before.message, meals: before.meals }, before);
+});
+
+test("demo chat keeps package counts as unresolved contents", async () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  state.pantry = state.pantry.filter((item) => item.id !== "beans");
+  state.pilot.packageStock = [{ ingredientId: "beans", name: "Canned white beans", packageKind: "can", status: "exact", count: 10 }];
+  const request = { ...input("What do I need for this recipe?"),
+    focusedRecipe: { ...riceRecipe(), ingredients: [{ ingredientId: "beans", name: "Beans", quantity: 200, unit: "g" as const }] },
+    recommendationContext: buildRecommendationContext(state) };
+  const result = await chatAboutMeals(request);
+  assert.match(result.reply, /Check the current amount of Beans/);
+  assert.doesNotMatch(result.reply, /200 g Beans|10 g|pantry covers all/);
+});
+
+test("ingredient search explains when the saved profile excludes every authored example", async () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  const value: ProfileFactValue = { kind: "food-dislike", scope: { kind: "household" }, target: { kind: "category", category: "vegetables" }, disliked: true };
+  state.pilot.profileFacts = [{ id: profileFactId(value), value,
+    source: { kind: "manual", sourceText: "We dislike vegetables", recordedAt: "2026-10-12T00:00:00.000Z", commandId: "setup" } }];
+  const request = { ...input("Recipes with rice"), recommendationContext: buildRecommendationContext(state) };
+  const before = structuredClone(request);
+  const result = await chatAboutMeals(request);
+  assert.deepEqual(result.recipes, []);
+  assert.match(result.reply, /No sample recipes fit the current food preferences/);
+  assert.doesNotMatch(result.reply, /haven’t applied those constraints/);
+  assert.deepEqual(request, before);
 });

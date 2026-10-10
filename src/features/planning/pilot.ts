@@ -14,6 +14,7 @@ import {
   type ProfileFactChange,
   type ShoppingItem,
   type Unit,
+  type PackageStock,
 } from "@/lib/contracts";
 import { addDays, localDate } from "./calendar";
 import { directPlacementForRequest } from "./direct-placement";
@@ -94,6 +95,7 @@ export function getMealCoverage(state: HouseholdState, date: string, slot: strin
 export type PilotStockCheck = {
   ingredientId: string; name: string; unit: Unit; required: number;
   fingerprint: string; resolved: boolean;
+  knownAvailable: number; knownRemainder: number; packageStock: PackageStock[];
 };
 export type PilotShoppingList = {
   shortages: ShoppingItem[]; checks: PilotStockCheck[]; batches: CookingBatch[];
@@ -121,6 +123,22 @@ function knownStock(state: PilotHousehold, ingredientId: string, unit: Unit) {
   return { uncertain: false, available, override };
 }
 
+/** Packages can justify a check, never an invented base-unit balance. */
+export function ingredientSufficiency(state: HouseholdState, requirement: { ingredientId: string; unit: Unit; required: number; sources?: string[] }) {
+  const current = state.pilot ? state as PilotHousehold : ensurePilot(state);
+  const stock = knownStock(current, requirement.ingredientId, requirement.unit);
+  const packages = current.pilot.packageStock.filter((entry) => entry.ingredientId === requirement.ingredientId
+    && (entry.status === "some" || entry.status === "low" || (entry.status === "exact" && entry.count! > 0)))
+    .sort((a, b) => a.packageKind.localeCompare(b.packageKind));
+  const knownRemainder = round(Math.max(0, requirement.required - stock.available));
+  const needsCheck = stock.uncertain || (knownRemainder > 0 && packages.length > 0);
+  const fingerprint = JSON.stringify([requirement.ingredientId, requirement.unit, requirement.required,
+    [...(requirement.sources ?? [])].sort(), stock.available, stock.override ?? null, packages]);
+  return { ...stock, knownRemainder, packages, needsCheck, fingerprint,
+    resolved: needsCheck && current.pilot.stockChecks.some((check) => check.ingredientId === requirement.ingredientId
+      && check.unit === requirement.unit && check.fingerprint === fingerprint) };
+}
+
 /** One ingredient demand per uncooked batch, independent of calendar browsing. */
 export function buildPilotShoppingList(state: HouseholdState): PilotShoppingList {
   const current = state.pilot ? state as PilotHousehold : ensurePilot(state);
@@ -128,13 +146,13 @@ export function buildPilotShoppingList(state: HouseholdState): PilotShoppingList
   const shortages: ShoppingItem[] = [];
   const checks: PilotStockCheck[] = [];
   for (const required of batchRequirements(batches)) {
-    const stock = knownStock(current, required.ingredientId, required.unit);
-    if (stock.uncertain) {
-      const fingerprint = JSON.stringify([required.ingredientId, required.unit, required.required, required.sources.sort(), stock.override]);
+    const stock = ingredientSufficiency(current, required);
+    if (stock.needsCheck) {
+      const fingerprint = stock.fingerprint;
       checks.push({
         ingredientId: required.ingredientId, name: required.name, unit: required.unit,
         required: required.required, fingerprint,
-        resolved: current.pilot.stockChecks.some((check) => check.ingredientId === required.ingredientId && check.unit === required.unit && check.fingerprint === fingerprint),
+        resolved: stock.resolved, knownAvailable: stock.available, knownRemainder: stock.knownRemainder, packageStock: stock.packages,
       });
     } else {
       const quantity = round(Math.max(0, required.required - stock.available));
@@ -157,6 +175,8 @@ function validatePilot(pilot: PilotState) {
   unique(pilot.receipts, "Receipts");
   unique(pilot.purchaseLots, "Purchase lots");
   unique(pilot.profileFacts, "Profile facts");
+  unique(pilot.packagePurchases, "Package purchases");
+  if (new Set(pilot.packageStock.map((entry) => JSON.stringify([entry.ingredientId, entry.packageKind]))).size !== pilot.packageStock.length) fail("Package stock must have unique ingredient and container pairs.");
   if (new Set(pilot.prepared.map((entry) => entry.batchId)).size !== pilot.prepared.length) fail("A batch has only one prepared balance.");
   if (new Set(pilot.stock.map((entry) => keyFor(entry.ingredientId, entry.unit))).size !== pilot.stock.length) fail("Stock entries must have unique ingredient and unit pairs.");
   if (new Set(pilot.stockChecks.map((entry) => keyFor(entry.ingredientId, entry.unit))).size !== pilot.stockChecks.length) fail("Stock checks must have unique ingredient and unit pairs.");
@@ -336,6 +356,24 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string, co
         pilot.purchaseLots.push({ ...item, id: `${commandId}:purchase:${changeIndex}:${itemIndex}`, commandId, recordedAt: now });
       }
       break;
+    case "set_package_stock":
+      pilot.packageStock = pilot.packageStock.filter((entry) => !(entry.ingredientId === change.stock.ingredientId && entry.packageKind === change.stock.packageKind));
+      pilot.packageStock.push(change.stock);
+      pilot.stockChecks = pilot.stockChecks.filter((entry) => entry.ingredientId !== change.stock.ingredientId);
+      break;
+    case "record_package_purchase":
+      if (pilot.packagePurchases.length + change.items.length > 10000) fail("The package purchase history is full. Export and archive it before recording more purchases.");
+      for (const [itemIndex, item] of change.items.entries()) {
+        const existing = pilot.packageStock.find((entry) => entry.ingredientId === item.ingredientId && entry.packageKind === item.packageKind);
+        if (!existing) pilot.packageStock.push({ ingredientId: item.ingredientId, name: item.name, packageKind: item.packageKind, status: "exact", count: item.count, ...(item.sourceNote ? { sourceNote: item.sourceNote } : {}) });
+        else if (existing.status === "exact" || existing.status === "out") {
+          existing.count = (existing.status === "out" ? 0 : existing.count!) + item.count;
+          existing.status = "exact";
+        }
+        pilot.stockChecks = pilot.stockChecks.filter((entry) => entry.ingredientId !== item.ingredientId);
+        pilot.packagePurchases.push({ ...item, id: `${commandId}:package:${changeIndex}:${itemIndex}`, commandId, recordedAt: now });
+      }
+      break;
     case "cook_batch": {
       const batch = pilot.batches.find((entry) => entry.id === change.batchId);
       if (!batch) throw new PilotCommandError("not-found", "That cooking batch is no longer available.");
@@ -343,12 +381,30 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string, co
       const pending = pilot.allocations.filter((entry) => entry.batchId === batch.id).reduce((sum, entry) => sum + entry.portions, 0);
       if (change.actualPortions < pending) fail("Actual portions cannot be fewer than allocated meals. Adjust allocations first.");
       if (change.freezerPortions > change.actualPortions) fail("Freezer portions cannot exceed the portions produced.");
-      for (const ingredient of batchRequirements([batch])) {
-        const stock = knownStock(state, ingredient.ingredientId, ingredient.unit);
-        if (!stock.uncertain && stock.available + 0.000001 < ingredient.required) fail(`Confirm or purchase enough ${ingredient.name} before cooking.`);
-        if (!stock.uncertain) setPantryBalance(state, ingredient.ingredientId, ingredient.name, ingredient.unit, Math.max(0, stock.available - ingredient.required));
+      const cookingChecks = buildPilotShoppingList(state).checks;
+      const uses = batchRequirements([batch]).map((ingredient) => ({ ingredient, stock: ingredientSufficiency(state, ingredient) }));
+      // Validate the whole cooking event before changing any stock certainty.
+      for (const { ingredient, stock } of uses) {
+        if (!stock.uncertain && stock.available + 0.000001 < ingredient.required) {
+          const check = cookingChecks.find((entry) => entry.ingredientId === ingredient.ingredientId && entry.unit === ingredient.unit);
+          if (!stock.packages.length || !check?.resolved || check.required + 0.000001 < ingredient.required) fail(`Confirm or purchase enough ${ingredient.name} before cooking.`);
+        }
+      }
+      for (const { ingredient, stock } of uses) {
+        if (!stock.uncertain && stock.available + 0.000001 < ingredient.required) {
+          const { quantity: _quantity, ...metadata } = stock.override ?? {};
+          void _quantity;
+          pilot.stock = pilot.stock.filter((entry) => keyFor(entry.ingredientId, entry.unit) !== keyFor(ingredient.ingredientId, ingredient.unit));
+          pilot.stock.push({ ...metadata, ingredientId: ingredient.ingredientId, name: ingredient.name, unit: ingredient.unit, status: "some", sourceNote: stock.override?.sourceNote ?? "Remaining amount unknown after cooking with unresolved package contents." });
+        } else if (!stock.uncertain) setPantryBalance(state, ingredient.ingredientId, ingredient.name, ingredient.unit, Math.max(0, stock.available - ingredient.required));
+        // No package equivalents were measured. Cooking cannot guess which
+        // containers were opened or how many remain.
+        for (const entry of stock.packages) {
+          entry.status = "some";
+          delete entry.count;
+        }
         // Unknown inventory stays qualitative after confirmed ingredient use.
-        pilot.stockChecks = pilot.stockChecks.filter((entry) => keyFor(entry.ingredientId, entry.unit) !== keyFor(ingredient.ingredientId, ingredient.unit));
+        pilot.stockChecks = pilot.stockChecks.filter((entry) => entry.ingredientId !== ingredient.ingredientId);
       }
       batch.status = "cooked";
       pilot.prepared.push({ batchId: batch.id, produced: change.actualPortions, consumed: 0, freezerPortions: change.freezerPortions, cookedAt: now, ingredientUses: batchRequirements([batch]).map((entry) => ({ ingredientId: entry.ingredientId, name: entry.name, unit: entry.unit, quantity: entry.required })) });
@@ -422,6 +478,8 @@ function summaryFor(operation: PilotOperation) {
       const purchases = operation.entries.length - totals;
       return `Saved ${totals} measured total${totals === 1 ? "" : "s"} and ${purchases} purchase${purchases === 1 ? "" : "s"}.`;
     }
+    case "set_package_stock": return `Updated ${operation.stock.name} container stock.`;
+    case "record_package_purchase": return `Recorded ${operation.items.length} package purchase${operation.items.length === 1 ? "" : "s"}.`;
     case "cook_batch": return `Recorded cooking: ${operation.actualPortions} portions, including ${operation.freezerPortions} for the freezer.`;
     case "correct_prepared": return `Corrected prepared food: ${operation.produced} total portions, ${operation.freezerPortions} remaining in the freezer${operation.reopenAllocationIds.length ? `; reopened ${operation.reopenAllocationIds.length} meal${operation.reopenAllocationIds.length === 1 ? "" : "s"}` : ""}.`;
     case "record_feedback": return "Saved recipe feedback for future planning.";

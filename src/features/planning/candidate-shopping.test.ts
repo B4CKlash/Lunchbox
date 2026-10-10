@@ -51,6 +51,41 @@ test("uncertain candidate stock stays a combined check even after the old plan w
   assert.deepEqual(state, before, "the hypothetical batch cannot reuse or overwrite a real batch identity");
 });
 
+test("package checks include a candidate covered alone when the combined plan exceeds measured stock", () => {
+  const state = stateWith(500);
+  state.pantry = [{ ...state.pantry[0], id: "beans", name: "Canned white beans" }];
+  const candidate = { ...recipe, id: "beans", name: "Beans", ingredients: [{ ingredientId: "beans", name: "Canned white beans", unit: "g" as const, quantity: 300 }] };
+  state.pilot.packageStock.push({ ingredientId: "beans", name: "Canned white beans", packageKind: "can", status: "exact", count: 10 });
+  state.pilot.batches.push(planned("existing", 2, "2026-10-12", { ...candidate, ingredients: [{ ...candidate.ingredients[0], quantity: 400 }] }));
+  const before = structuredClone(state);
+  const preview = previewCandidateShopping(state, candidate, 2, "2026-10-13");
+  assert.deepEqual(buildPilotShoppingList(state).checks, [], "the existing400g plan fits the measured500g");
+  assert.deepEqual(preview.shortages, [], "unknown container contents cannot create a definite purchase amount");
+  assert.deepEqual(preview.checks, [{ ingredientId: "beans", name: "Canned white beans", unit: "g", required: 700, candidateRequired: 300,
+    packageAvailability: { knownAvailable: 500, knownRemainder: 200, packageStock: state.pilot.packageStock } }]);
+  assert.deepEqual(state, before);
+});
+
+test("candidate package checks sum scaled duplicate contributions while keeping canonical units separate", () => {
+  const state = stateWith(500);
+  state.pilot.packageStock.push({ ingredientId: "pasta", name: "Dry pasta", packageKind: "bag", status: "exact", count: 2 });
+  state.pilot.batches.push(planned("existing", 4));
+  const duplicate = { ...recipe, servings: 4, ingredients: [
+    { ingredientId: "pasta", name: "Dry pasta", unit: "g" as const, quantity: 150 },
+    { ingredientId: "pasta", name: "Dry pasta", unit: "g" as const, quantity: 50 },
+    { ingredientId: "pasta", name: "Pasta liquid", unit: "ml" as const, quantity: 20 },
+    { ingredientId: "other-pasta", name: "Dry pasta", unit: "g" as const, quantity: 10 },
+  ] };
+  const before = structuredClone(state);
+  const preview = previewCandidateShopping(state, duplicate, 6, "2026-10-13");
+  assert.deepEqual(preview.checks.map(({ ingredientId, unit, required, candidateRequired }) => ({ ingredientId, unit, required, candidateRequired })), [
+    { ingredientId: "pasta", unit: "g", required: 700, candidateRequired: 300 },
+    { ingredientId: "pasta", unit: "ml", required: 30, candidateRequired: 30 },
+  ]);
+  assert.deepEqual(preview.shortages, [{ ingredientId: "other-pasta", name: "Dry pasta", unit: "g", quantity: 15 }]);
+  assert.deepEqual(state, before);
+});
+
 test("canonical IDs and units remain distinct while duplicate ingredient rows combine", () => {
   const state = stateWith(50);
   state.pantry.push({ ...state.pantry[0], unit: "ml", quantity: 25 });

@@ -1,5 +1,6 @@
 import "server-only";
-import { buildRecommendationContext, recommendationContextInstructions } from "./recommendation-context";
+import { householdFromRecommendationContext, recommendationContextForMessage, recommendationContextInstructions, resolveRecommendationContext } from "./recommendation-context";
+import { recipeFitsRecommendationContext } from "./recommendation-constraints";
 import { randomUUID } from "node:crypto";
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
@@ -67,7 +68,7 @@ function usesPreferredIngredient(recipe: Recipe, preferred: MealContext["pantry"
 function ingredientReferences(context: MealContext): KnownIngredient[] {
   const recipes = [
     ...context.meals.map((meal) => meal.recipe),
-    ...context.recipeBox.map((entry) => entry.recipe),
+    ...(context.recommendationContext?.favorites ?? context.recipeBox.map((entry) => entry.recipe)),
     ...context.messages.flatMap((message) => message.recipes),
     ...(context.focusedRecipe ? [context.focusedRecipe] : []),
   ];
@@ -80,18 +81,22 @@ function ingredientReferences(context: MealContext): KnownIngredient[] {
 }
 
 /** Read-only request-scoped tools. Only normalized snapshots can become response cards. */
-export function createMealTools(context: MealContext, household?: HouseholdState) {
+export function createMealTools(context: MealContext, household?: HouseholdState, actorMemberId?: string) {
+  const kitchen = recommendationContextForMessage(resolveRecommendationContext(context, household, actorMemberId), context.message);
+  if (kitchen) context = { ...context, recommendationContext: kitchen, preferences: kitchen.preferences,
+    pantry: kitchen.pantry.map((item) => ({ ...item, quantity: item.quantity ?? 0 })) };
+  const stockHousehold = household ?? (kitchen ? householdFromRecommendationContext(kitchen) : undefined);
   function recipeShopping(recipe: Recipe, servings: number) {
-    if (!household?.pilot) return { shortages: buildShoppingList(context.pantry, [{ id: "preview", recipe, servings }], { includeRestock: false }) };
-    const date = household.pilot.session.startDate;
-    const preview = buildPilotShoppingList({ ...household, pilot: { ...household.pilot,
+    if (!stockHousehold?.pilot) return { shortages: buildShoppingList(context.pantry, [{ id: "preview", recipe, servings }], { includeRestock: false }) };
+    const date = stockHousehold.pilot.session.startDate;
+    const preview = buildPilotShoppingList({ ...stockHousehold, pilot: { ...stockHousehold.pilot,
       batches: [{ id: "recipe-preview", recipe, prepareDate: date, yield: servings, reservedExtra: 0, status: "planned" }], shopThrough: date,
     } });
     return { shortages: preview.shortages, stockChecks: preview.checks };
   }
   const known = ingredientReferences(context);
   const preferred = preferredPantryItems(context).filter((item) => {
-    const override = household?.pilot?.stock.find((entry) => entry.ingredientId === item.id && entry.unit === item.unit);
+    const override = stockHousehold?.pilot?.stock.find((entry) => entry.ingredientId === item.id && entry.unit === item.unit);
     return !override || override.status === "exact";
   });
   const proposals = new Map<string, { recipe: Recipe; servings: number }>();
@@ -103,13 +108,13 @@ export function createMealTools(context: MealContext, household?: HouseholdState
 
   function findSavedRecipes({ query, servings = context.preferences.servings }: { query: string; servings?: number }) {
     const words = query.toLocaleLowerCase("en-US").split(/\s+/).filter(Boolean);
-    const matches = context.recipeBox.map((entry, index) => ({ entry, index })).filter(({ entry }) => {
-      const text = `${entry.recipe.name} ${entry.recipe.description} ${entry.recipe.ingredients.map((ingredient) => ingredient.name).join(" ")}`.toLocaleLowerCase("en-US");
-      return !words.length || words.some((word) => text.includes(word));
+    const favorites = kitchen?.favorites ?? context.recipeBox.map((entry) => recipeSchema.parse({ ...entry.recipe, provenance: entry.recipe.provenance ?? { source: entry.source } }));
+    const matches = favorites.map((recipe, index) => ({ recipe, index })).filter(({ recipe }) => {
+      const text = `${recipe.name} ${recipe.description} ${recipe.ingredients.map((ingredient) => ingredient.name).join(" ")}`.toLocaleLowerCase("en-US");
+      return recipeFitsRecommendationContext(recipe, kitchen) && (!words.length || words.some((word) => text.includes(word)));
     }).slice(0, 6);
-    return matches.map(({ entry, index }) => {
+    return matches.map(({ recipe, index }) => {
       const ref = `saved:${index}`;
-      const recipe = recipeSchema.parse({ ...entry.recipe, provenance: entry.recipe.provenance ?? { source: entry.source } });
       proposals.set(ref, { recipe, servings });
       return { ref, recipe, servings, ...recipeShopping(recipe, servings) };
     });
@@ -145,6 +150,10 @@ export function createMealTools(context: MealContext, household?: HouseholdState
         ingredients.push({ ...match.ingredient, quantity: ingredient.quantity, unit: ingredient.unit });
       }
       const recipe = recipeSchema.parse({ ...candidate, id: `ai-${randomUUID()}`, ingredients, provenance: { source: "ai" } });
+      if (!recipeFitsRecommendationContext(recipe, kitchen)) {
+        errors.push(`${candidate.name}: conflicts with the current audience's food or equipment preferences.`);
+        return [];
+      }
       const ref = `proposal:${proposals.size + 1}`;
       proposals.set(ref, { recipe, servings: parsed.servings });
       generated = true;
@@ -172,12 +181,18 @@ export function createMealTools(context: MealContext, household?: HouseholdState
       return { planStatus: "live", scope: "upcoming uncooked batches through the shopping date", shopThrough: household.pilot.shopThrough, shortages: shopping.shortages, stockChecks: shopping.checks, meals: household.pilot.batches.map((batch) => ({ id: batch.id, name: batch.recipe.name, servings: batch.yield, date: batch.prepareDate, slot: undefined })), nextStep: undefined, pantryUnchanged: true };
     }
     const planStatus = context.planStatus ?? "unspecified";
+    const projectedDate = stockHousehold?.pilot?.session.startDate ?? "2000-01-01";
+    const projectedPlan = kitchen && stockHousehold?.pilot ? buildPilotShoppingList({ ...stockHousehold,
+      pilot: { ...stockHousehold.pilot, batches: context.meals.map((meal, index) => ({ id: `supplied-preview-${index}`,
+        recipe: meal.recipe, prepareDate: projectedDate, yield: meal.servings, reservedExtra: 0, status: "planned" as const })),
+      shopThrough: projectedDate } }) : undefined;
     return {
       planStatus,
       scope: planStatus === "committed" ? "committed calendar and current grocery requirements" : "calendar preview only; open Shopping for the committed grocery list",
       ...(planStatus === "draft" ? { nextStep: "Place every meal, then Commit plan to update the grocery list." } : {}),
       meals: context.meals.map((meal) => ({ id: meal.id, name: meal.recipe.name, servings: meal.servings, date: meal.date, slot: meal.slot })),
-      shortages: buildShoppingList(context.pantry, context.meals),
+      shortages: projectedPlan?.shortages ?? buildShoppingList(context.pantry, context.meals),
+      ...(projectedPlan ? { stockChecks: projectedPlan.checks } : {}),
       pantryUnchanged: true,
     };
   }
@@ -211,14 +226,15 @@ You have no purchasing, cooking deduction, inventory mutation, account, browsing
 Be concise. Return at most three recipe refs. An explanation or clarification can have no recipe refs. When revising a recipe, evaluate a new snapshot. Recipe steps should refer to the ingredient list rather than repeat quantities that would become wrong when servings change. Finish with the required structured result within the tool budget.`;
 
 async function runChat(context: ChatMealsRequest, options: LiveProviderOptions) {
-  const toolkit = createMealTools(context, options.householdContext);
+  const kitchen = recommendationContextForMessage(resolveRecommendationContext(context, options.householdContext, options.actorMemberId), context.message);
+  const toolkit = createMealTools(context, options.householdContext, options.actorMemberId);
   const prompt = JSON.stringify({
-    kitchen: options.householdContext ? buildRecommendationContext(options.householdContext, options.actorMemberId) : undefined,
-    pantry: pantryForModel(context.pantry, options.householdContext),
-    preferences: context.preferences,
+    kitchen,
+    pantry: kitchen?.pantry ?? pantryForModel(context.pantry, options.householdContext),
+    preferences: kitchen?.preferences ?? context.preferences,
     recentRecipeNames: [],
     knownIngredients: toolkit.known,
-    savedRecipes: context.recipeBox.map((entry) => ({ name: entry.recipe.name, minutes: entry.recipe.minutes })),
+    savedRecipes: (kitchen?.favorites ?? context.recipeBox.map((entry) => entry.recipe)).map((recipe) => ({ name: recipe.name, minutes: recipe.minutes })),
     planStatus: context.planStatus ?? "unspecified",
     plan: context.meals.map((meal) => ({ name: meal.recipe.name, servings: meal.servings, date: meal.date, slot: meal.slot })),
     focusedRecipe: context.focusedRecipe,
@@ -261,10 +277,11 @@ You cannot change pantry stock, save recipes, or commit a plan. Return recipes a
 
 export async function liveSuggestMeals(input: SuggestMealsRequest, options: LiveProviderOptions = {}) {
   const requested = suggestMealsRequestSchema.parse(input);
-  const parsed = options.householdContext ? { ...requested, pantry: options.householdContext.pantry, preferences: options.householdContext.preferences } : requested;
+  const kitchen = resolveRecommendationContext(requested, options.householdContext, options.actorMemberId);
+  const parsed = kitchen ? { ...requested, recommendationContext: kitchen, pantry: kitchen.pantry.map((item) => ({ ...item, quantity: item.quantity ?? 0 })), preferences: kitchen.preferences } : requested;
   const localModel = options.model && typeof options.model !== "string" && options.model.provider.startsWith("ollama-local");
   const signal = AbortSignal.any([AbortSignal.timeout(localModel ? 180_000 : 45_000), ...(options.signal ? [options.signal] : [])]);
-  const toolkit = createMealTools({ ...parsed, meals: [], recipeBox: [], messages: [], message: "Generate new meal ideas." }, options.householdContext);
+  const toolkit = createMealTools({ ...parsed, meals: [], recipeBox: [], messages: [], message: "Generate new meal ideas." }, options.householdContext, options.actorMemberId);
   const accepted = new Map<string, Recipe>();
   const nameKey = (name: string) => name.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ");
   let explanation = "";
@@ -279,9 +296,9 @@ export async function liveSuggestMeals(input: SuggestMealsRequest, options: Live
         schema: suggestionDraftSchema,
         instructions: suggestionInstructions + "\n" + recommendationContextInstructions,
         prompt: JSON.stringify({
-          kitchen: options.householdContext ? buildRecommendationContext(options.householdContext, options.actorMemberId) : undefined,
-          pantry: pantryForModel(parsed.pantry, options.householdContext),
-          preferences: parsed.preferences,
+          kitchen,
+          pantry: kitchen?.pantry ?? pantryForModel(parsed.pantry, options.householdContext),
+          preferences: kitchen?.preferences ?? parsed.preferences,
           direction: parsed.direction ?? "",
           knownIngredients: toolkit.known,
           recentRecipeNames: parsed.recentRecipeNames ?? [],

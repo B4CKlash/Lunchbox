@@ -4,6 +4,8 @@ import { createSampleHousehold } from "@/features/pantry/seed";
 import { householdStateSchema, type ProfileFactChange } from "@/lib/contracts";
 import { applyPilotCommand, ensurePilot } from "./pilot";
 import { explicitProfileReply, extractExplicitProfileChanges, profileFactId } from "./profile";
+import { buildRecommendationContext } from "@/features/meals/recommendation-context";
+import { recipeFitsRecommendationContext } from "@/features/meals/recommendation-constraints";
 
 const state = () => ensurePilot(createSampleHousehold(), "2026-10-12");
 const extract = (message: string) => extractExplicitProfileChanges(state(), message, "you");
@@ -69,12 +71,15 @@ test("a newly known ingredient keeps an earlier unresolved dislike correctable a
   const known = householdStateSchema.parse({ ...saved, pantry: [...saved.pantry,
     { id: "new-saffron", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
   ] });
+  const recipe = { id: "saffron-rice", name: "Saffron rice", description: "An authored example", servings: 2, minutes: 20,
+    ingredients: [{ ingredientId: "new-saffron", name: "Saffron", quantity: 1, unit: "g" as const }], steps: ["Cook the rice with saffron."] };
+  assert.equal(recipeFitsRecommendationContext(recipe, buildRecommendationContext(known, "you")), false);
   const correction = extractExplicitProfileChanges(known, "I no longer dislike saffron.", "you")[0];
   assert.equal(correction.type, "upsert_profile_fact");
   if (correction.type === "upsert_profile_fact") assert.equal(profileFactId(correction.value), saved.pilot.profileFacts[0].id);
   const corrected = applyPilotCommand(known, { id: "correct-saffron", expectedRevision: 1, operation: correction }).state;
   assert.equal(corrected.pilot.profileFacts.length, 1);
-  assert.equal(corrected.pilot.profileFacts[0].value.kind === "food-dislike" && corrected.pilot.profileFacts[0].value.disliked, false);
+  assert.equal(recipeFitsRecommendationContext(recipe, buildRecommendationContext(corrected, "you")), true);
   for (const current of [known, corrected]) {
     const forget = extractExplicitProfileChanges(current, "Forget that I dislike saffron.", "you");
     assert.deepEqual(forget, [{ type: "remove_profile_fact", factId: saved.pilot.profileFacts[0].id, sourceText: "Forget that I dislike saffron." }]);

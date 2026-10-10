@@ -27,7 +27,7 @@ export function createMealHandlers(
   async function handle(request: Request, kind: "chat" | "suggest") {
     try {
       return await withRequestDeadline(request.signal, async (signal) => {
-        const body = await readJsonBody(request, { signal, maxBytes: kind === "chat" ? 1_000_000 : 100_000 });
+        const body = await readJsonBody(request, { signal, maxBytes: 1_000_000 });
         if (kind === "chat") {
           const parsed = chatMealsRequestSchema.safeParse(body);
           if (!parsed.success) return Response.json({ code: "invalid_request", error: "Check your message, pantry quantities, and meal preferences." }, { status: 400, headers });

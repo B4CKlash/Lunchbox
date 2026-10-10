@@ -1,5 +1,18 @@
 import { recipeSchema, type HouseholdState, type Recipe, type Unit } from "@/lib/contracts";
 import { knownIngredientsFromHousehold, resolveIngredient } from "@/features/pantry/ingredients";
+import { recipeFitsRecommendationContext, type RecommendationConstraintContext } from "./recommendation-constraints";
+
+function fixtureContext(state: HouseholdState, audienceIds = state.pilot?.session.memberIds ?? []): RecommendationConstraintContext {
+  return {
+    audienceIds: audienceIds.length ? audienceIds : state.pilot?.members.slice(0, 1).map((member) => member.id) ?? [],
+    members: state.pilot?.members ?? [],
+    preferences: state.preferences,
+    profileFacts: (state.pilot?.profileFacts ?? []).map((fact) => fact.value),
+    equipment: state.pilot?.session.equipment ?? [],
+    pantry: state.pantry,
+    rejectedRecipeIds: state.pilot?.session.rejectedRecipeIds ?? [],
+  };
+}
 
 /** Authored examples for proving the interaction. No model or paid service is called. */
 export function planningFixtureRecipe(state: HouseholdState, variation: "pasta" | "vegetables" | "quick" | "cuisine" = "pasta"): Recipe {
@@ -60,15 +73,18 @@ export function findPlanningFavorites(state: HouseholdState, audienceIds = state
     .sort((left, right) => score(right.id) - score(left.id));
 }
 
-export function fixtureRecipeForRequest(state: HouseholdState, request: string): { reply: string; recipes: Recipe[] } {
+export function fixtureRecipeForRequest(state: HouseholdState, request: string, context = fixtureContext(state)): { reply: string; recipes: Recipe[] } {
   if (/favou?rite|recipe box|saved recipe/i.test(request)) {
-    const recipes = findPlanningFavorites(state);
+    const recipes = findPlanningFavorites(state, context.audienceIds).filter((recipe) => recipeFitsRecommendationContext(recipe, context));
     return { reply: recipes.length ? "Here are your saved recipes and meals marked ‘make again,’ ordered by your latest ratings. Select one to discuss it or place a batch on the calendar." : "No favorites fit this session: your recipe box may be empty, marked not to make again, or ruled out while planning. Save another recipe or explicitly reconsider an earlier card. You can also explore the clearly labeled examples here.", recipes: recipes.slice(0, 8) };
   }
   const variation = /quick|quicker|effort|20.minute/i.test(request) ? "quick" : /cuisine|mediterranean|lemon/i.test(request) ? "cuisine" : /vegetable|garden|farm/i.test(request) ? "vegetables" : "pasta";
   const recipe = planningFixtureRecipe(state, variation);
   if (state.pilot?.session.rejectedRecipeIds.includes(recipe.id)) return {
     reply: "You ruled out this authored example for this session. Choose another example, explicitly reconsider its earlier card, or use Local AI to explore a different recipe.", recipes: [],
+  };
+  if (!recipeFitsRecommendationContext(recipe, context)) return {
+    reply: "This authored example does not fit the current food preferences or kitchen equipment. No fitting demo recipe is available for this request. Change the request or use Local AI to explore another recipe.", recipes: [],
   };
   return { reply: `Here is an authored ${variation === "quick" ? "quicker" : variation === "cuisine" ? "Mediterranean" : variation === "vegetables" ? "vegetable-focused" : "batch-cooking"} example. This is a fixture, not a generated recipe. Discussing it leaves your calendar unchanged; choose a placement when it fits.`, recipes: [recipe] };
 }

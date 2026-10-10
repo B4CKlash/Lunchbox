@@ -42,6 +42,8 @@ export function planningRefreshFingerprint(state: HouseholdState) {
   return JSON.stringify({
     pantry: sort(state.pantry, (entry) => `${entry.id}:${entry.unit}`).map(({ id, name, unit, quantity, useSoon }) => ({ id, name, unit, quantity, useSoon })),
     stock: sort(pilot?.stock ?? [], (entry) => `${entry.ingredientId}:${entry.unit}`),
+    packageStock: sort(pilot?.packageStock ?? [], (entry) => `${entry.ingredientId}:${entry.packageKind}`),
+    packagePurchases: pilot?.packagePurchases.slice(-20),
     stockChecks: sort(pilot?.stockChecks ?? [], (entry) => `${entry.ingredientId}:${entry.unit}`),
     prepared: sort(pilot?.prepared ?? [], (entry) => entry.batchId).map(({ batchId, produced, consumed, freezerPortions }) => ({ batchId, produced, consumed, freezerPortions })),
     recommendation: recommendationContextKey(state),

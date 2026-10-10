@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSampleHousehold } from "@/features/pantry/seed";
-import { recipeSchema } from "@/lib/contracts";
+import { recipeSchema, type ProfileFactValue } from "@/lib/contracts";
 import { ensurePilot } from "@/features/planning/pilot";
+import { profileFactId } from "@/features/planning/profile";
 import { findPlanningFavorites, fixtureRecipeForRequest, planningFixtureRecipe } from "./planning-fixtures";
 
 test("fixture variants remain validated demo recipes with canonical identities", () => {
@@ -60,4 +61,21 @@ test("session rejections exclude saved and make-again recipes without losing the
   assert.deepEqual(fixtureRecipeForRequest(state, "pasta").recipes, []);
   assert.match(fixtureRecipeForRequest(state, "pasta").reply, /ruled out/);
   assert.deepEqual(state, before);
+});
+
+test("fixtures honor typed food and equipment facts while retaining original saved snapshots", () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  const original = planningFixtureRecipe(state);
+  state.workspace.recipeBox = [{ recipe: original, source: "demo" }];
+  const fact = (value: ProfileFactValue) => ({ id: profileFactId(value), value,
+    source: { kind: "manual" as const, sourceText: "Current preference", recordedAt: "2026-10-12T00:00:00.000Z", commandId: "setup" } });
+  state.pilot.profileFacts = [fact({ kind: "equipment", equipment: "oven", availability: "unavailable" })];
+  assert.deepEqual(fixtureRecipeForRequest(state, "pasta").recipes, []);
+  assert.match(fixtureRecipeForRequest(state, "pasta").reply, /does not fit/);
+  assert.equal(fixtureRecipeForRequest(state, "make it quicker").recipes.length, 1);
+  assert.deepEqual(findPlanningFavorites(state), [original]);
+  assert.deepEqual(fixtureRecipeForRequest(state, "find a favorite").recipes, []);
+  state.pilot.profileFacts = [fact({ kind: "food-dislike", scope: { kind: "household" }, target: { kind: "category", category: "vegetables" }, disliked: true })];
+  assert.deepEqual(fixtureRecipeForRequest(state, "make it quicker").recipes, []);
+  assert.deepEqual(state.workspace.recipeBox[0].recipe, original);
 });
