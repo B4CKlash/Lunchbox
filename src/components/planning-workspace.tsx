@@ -179,11 +179,13 @@ export function PlanningWorkspace() {
       const actor = householdId ? currentMemberId : pilot.members[0]?.id;
       const memoryReply = actor ? explicitProfileReply(state, clean, actor) : null;
       const profileChanges = actor ? extractExplicitProfileChanges(state, clean, actor) : [];
+      const fixtureContext = recommendationContextForMessage(buildRecommendationContext(state, actor ?? undefined), clean);
       if (memoryReply || profileChanges.length) {
         if (householdId) { setNotice("Use Local AI to save preferences from this conversation with an authenticated response. Your draft is kept."); return; }
         const jobId = id();
+        const result = memoryReply ? { reply: memoryReply, recipes: [] as Recipe[] } : fixtureRecipeForRequest(state, clean, fixtureContext);
         const saved = await run({ type: "receive_planning_result", baseRevision: pilot.revision,
-          session: { ...session, messages: [...session.messages, { id: `job-${jobId}-user`, role: "user", authorMemberId: actor!, text: clean, recipes: [], servings: state.preferences.servings }, { id: `job-${jobId}-assistant`, role: "assistant", source: "demo", text: memoryReply ?? "Your explicit preference can guide future meal ideas. Send your recipe request next.", recipes: [], servings: state.preferences.servings }].slice(-100) as PlanningSession["messages"] },
+          session: { ...session, candidates: planningResponseCandidates(session, result.recipes, false), focusedRecipeId: result.recipes[0]?.id ?? session.focusedRecipeId, messages: [...session.messages, { id: `job-${jobId}-user`, role: "user", authorMemberId: actor!, text: clean, recipes: [], servings: state.preferences.servings }, { id: `job-${jobId}-assistant`, role: "assistant", source: "demo", text: result.reply, recipes: result.recipes, servings: state.preferences.servings }].slice(-100) as PlanningSession["messages"] },
           ...(profileChanges.length ? { profileSource: { jobId, request: clean, actorMemberId: actor!, changes: profileChanges } } : {}),
         });
         if (saved) clearSubmittedDraft(text);
@@ -192,7 +194,6 @@ export function PlanningWorkspace() {
       let recipes: Recipe[] = [];
       let reply: string;
       let action: PilotOperation | undefined;
-      const fixtureContext = recommendationContextForMessage(buildRecommendationContext(state, actor ?? undefined), clean);
       const weekday = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(clean)?.[1]?.toLowerCase();
       const requestedDate = weekday ? dates.find((date) => dateLabel(date, { weekday: "long" }).toLowerCase() === weekday) : focusDate;
       const requestedSlot: MealSlot = /dinner/i.test(clean) ? "dinner" : /breakfast/i.test(clean) ? "breakfast" : /snack/i.test(clean) ? "snack" : focusSlot;
