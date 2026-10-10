@@ -41,24 +41,27 @@ function foodTarget(state: HouseholdState, wording: string): ProfileFoodTarget |
   return { kind: "text", text };
 }
 
-/** A growing ingredient catalog must not change the identity of an existing fact. */
+/** Ingredient references can come and go without silently retargeting a remembered fact. */
 function rememberedFoodTarget(state: HouseholdState, scope: ProfileScope, target: ProfileFoodTarget, wording: string): ProfileFoodTarget | null {
   const text = normalizeIngredientName(wording.replace(/^(?:the|all) /i, ""));
   const id = profileFactId({ kind: "food-dislike", scope, target, disliked: true });
   const identities = target.kind === "text" ? matchingIngredients(state, text) : undefined;
-  let ambiguousKnownFact = false;
+  let conflictingIdentity = false;
   const matches = state.pilot?.profileFacts.flatMap((fact) => {
     const value = fact.value;
     if (value.kind !== "food-dislike" || value.scope.kind !== scope.kind
       || (scope.kind === "member" && (value.scope.kind !== "member" || value.scope.memberId !== scope.memberId))) return [];
-    if (identities && identities.size > 1 && value.target.kind === "ingredient" && identities.has(value.target.ingredientId))
-      ambiguousKnownFact = true;
-    // Only literal prior wording can connect an unresolved fact to a newly
-    // known ingredient. Never choose a physical form from a name similarity.
-    return fact.id === id || (value.target.kind === "text" && normalizeIngredientName(value.target.text) === text)
+    const prior = value.target;
+    const literalIngredient = target.kind !== "category" && prior.kind === "ingredient" && normalizeIngredientName(prior.name) === text;
+    if (prior.kind === "ingredient" && ((identities && identities.size > 1 && (identities.has(prior.ingredientId) || literalIngredient))
+      || (target.kind === "ingredient" && literalIngredient && prior.ingredientId !== target.ingredientId))) conflictingIdentity = true;
+    // Only exact wording can bridge a missing or previously unresolved
+    // reference. A different current ID or multiple matches need clarification.
+    const lostIngredient = identities?.size === 0 && literalIngredient;
+    return fact.id === id || lostIngredient || (prior.kind === "text" && normalizeIngredientName(prior.text) === text)
       ? [value.target] : [];
   }) ?? [];
-  return ambiguousKnownFact || matches.length > 1 ? null : matches[0] ?? target;
+  return conflictingIdentity || matches.length > 1 ? null : matches[0] ?? target;
 }
 
 function parseExplicitProfile(state: HouseholdState, message: string, actorMemberId: string) {
