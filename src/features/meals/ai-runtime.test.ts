@@ -3,7 +3,15 @@ import test from "node:test";
 import { APICallError, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { AiRuntimeError, generateStructured, publicAiError } from "./ai-runtime";
+import { AiRuntimeError, generateStructured, getAiBackend, publicAiError } from "./ai-runtime";
+
+test("backend selection preserves existing Gateway deployments and keeps shared workers local", () => {
+  assert.equal(getAiBackend({ LUNCHBOX_AI_MODE: "ai" }), "gateway");
+  assert.equal(getAiBackend({ LUNCHBOX_HOUSEHOLD_ENABLED: "true" }), "local-worker");
+  assert.equal(getAiBackend({ LUNCHBOX_AI_BACKEND: "local-worker" }), "local-worker");
+  assert.equal(getAiBackend({ LUNCHBOX_AI_BACKEND: "gateway", LUNCHBOX_HOUSEHOLD_ENABLED: "true" }), "gateway");
+  assert.equal(getAiBackend({ LUNCHBOX_AI_BACKEND: "invalid" }), "local-worker");
+});
 
 test("direct structured generation reserves Gemini output budget without demanding tool references", async (t) => {
   const logged: [string, Record<string, unknown>][] = [];

@@ -187,6 +187,7 @@ export const savedRecipeSchema = z.object({
   source: recipeContentSourceSchema,
 });
 export const chatMessageSchema = z.object({
+  authorMemberId: z.string().trim().min(1).max(160).optional(),
   id: z.string().min(1).max(120),
   role: z.enum(["user", "assistant"]),
   text: z.string().min(1).max(2000),
@@ -195,9 +196,23 @@ export const chatMessageSchema = z.object({
   servings: z.number().int().min(1).max(12),
 });
 export const workspaceModeSchema = z.enum(["suggestions", "chat", "plan"]);
+export const directionSchema = z.string().trim().max(1000);
+export const suggestionBlockSchema = z.object({
+  id: z.string().min(1).max(120),
+  sequence: z.number().int().positive(),
+  contextKey: z.string().max(100000),
+  direction: directionSchema,
+  servings: z.number().int().min(1).max(12),
+  source: recipeSourceSchema,
+  recipes: z.array(recipeSchema).min(1).max(6),
+  explanation: z.string().min(1).max(2000).optional(),
+});
 export const suggestionMemorySchema = z.object({
   recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
   pendingIngredients: z.array(knownIngredientSchema).max(200).default([]),
+  direction: directionSchema.default(""),
+  streamEnabled: z.boolean().default(true),
+  blocks: z.array(suggestionBlockSchema).max(20).default([]),
 });
 export const recipeWorkspaceSchema = z.object({
   mode: workspaceModeSchema.default("suggestions"),
@@ -211,8 +226,198 @@ export const recipeWorkspaceSchema = z.object({
   calendar: calendarWorkspaceSchema.prefault({}),
   suggestions: suggestionMemorySchema.prefault({}),
 });
+// The pilot is an additive part of the existing household snapshot. Old saves
+// remain readable; ensurePilot performs the explicit, recoverable migration.
+const pilotIdSchema = z.string().trim().min(1).max(160);
+const portionsSchema = z.number().finite().positive().max(1000);
+export const householdMemberSchema = z.object({
+  id: pilotIdSchema,
+  name: z.string().trim().min(1).max(80),
+  preferences: z.string().max(2000).optional(),
+});
+export const mealCoverageSchema = z.object({
+  id: pilotIdSchema,
+  memberId: pilotIdSchema,
+  date: calendarDateSchema,
+  slot: mealSlotSchema,
+  reason: z.enum(["work", "eating-out", "other"]),
+  note: z.string().max(500).optional(),
+});
+export const cookingBatchInputSchema = z.object({
+  id: pilotIdSchema,
+  recipe: recipeSchema,
+  prepareDate: calendarDateSchema,
+  yield: portionsSchema,
+  reservedExtra: z.number().finite().nonnegative().max(1000),
+});
+export const cookingBatchSchema = cookingBatchInputSchema.extend({
+  status: z.enum(["planned", "cooked"]),
+});
+export const mealAllocationInputSchema = z.object({
+  id: pilotIdSchema,
+  batchId: pilotIdSchema,
+  memberId: pilotIdSchema,
+  date: calendarDateSchema,
+  slot: mealSlotSchema,
+  portions: portionsSchema,
+});
+export const mealAllocationSchema = mealAllocationInputSchema.extend({
+  consumedAt: z.iso.datetime().optional(),
+});
+export const flexibleStockSchema = z.object({
+  ingredientId: pilotIdSchema,
+  name: z.string().min(1).max(80),
+  unit: unitSchema,
+  status: z.enum(["exact", "some", "low", "out"]),
+  quantity: z.number().finite().nonnegative().max(100000).optional(),
+  useSoon: z.boolean().optional(),
+  sourceNote: z.string().max(1000).optional(),
+  purchasedOn: calendarDateSchema.optional(),
+  bestBefore: calendarDateSchema.optional(),
+}).refine((stock) => stock.status === "exact" ? stock.quantity !== undefined : stock.quantity === undefined, {
+  message: "Exact stock requires a quantity; uncertain stock must not invent one.",
+});
+export const stockCheckSchema = z.object({
+  ingredientId: pilotIdSchema,
+  unit: unitSchema,
+  fingerprint: z.string().min(1).max(100000),
+});
+export const purchaseItemSchema = recipeIngredientSchema.extend({
+  purchasedOn: calendarDateSchema.optional(),
+  bestBefore: calendarDateSchema.optional(),
+  sourceNote: z.string().max(1000).optional(),
+  lotCode: z.string().trim().max(120).optional(),
+});
+// Historical amounts brought home, never a remaining balance or a stock-lot
+// identity for ingredient matching. Unknown purchase dates stay absent.
+export const purchaseLotSchema = purchaseItemSchema.extend({
+  id: z.string().min(1).max(200),
+  commandId: pilotIdSchema,
+  recordedAt: z.iso.datetime(),
+});
+export const preparedPortionsSchema = z.object({
+  batchId: pilotIdSchema,
+  produced: z.number().finite().nonnegative().max(1000),
+  consumed: z.number().finite().nonnegative().max(1000),
+  freezerPortions: z.number().finite().nonnegative().max(1000),
+  ingredientUses: z.array(recipeIngredientSchema).max(200).default([]),
+  cookedAt: z.iso.datetime().optional(),
+});
+export const recipeFeedbackSchema = z.object({
+  id: pilotIdSchema,
+  recipeId: pilotIdSchema,
+  memberId: pilotIdSchema.optional(),
+  rating: z.number().int().min(1).max(5),
+  makeAgain: z.boolean(),
+  notes: z.string().max(2000),
+});
+export const planningSessionSchema = z.object({
+  id: pilotIdSchema,
+  startDate: calendarDateSchema,
+  days: z.number().int().min(1).max(28),
+  slots: z.array(mealSlotSchema).min(1).max(4),
+  memberIds: z.array(pilotIdSchema).min(1).max(12),
+  messages: z.array(chatMessageSchema).max(100),
+  candidates: z.array(recipeSchema).max(30),
+  focusedRecipeId: pilotIdSchema.nullable(),
+  focusDate: calendarDateSchema.nullable().default(null),
+  focusSlot: mealSlotSchema.nullable().default(null),
+  rejectedRecipeIds: z.array(pilotIdSchema).max(200),
+  constraints: z.string().max(2000),
+  draft: z.string().max(2000).default(""),
+  equipment: z.array(z.string().trim().min(1).max(80)).max(30),
+});
+export const pilotChangeSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("set_coverage"), coverage: mealCoverageSchema }),
+  z.object({ type: z.literal("clear_coverage"), coverageId: pilotIdSchema }),
+  z.object({ type: z.literal("create_batch"), batch: cookingBatchInputSchema, allocations: z.array(mealAllocationInputSchema).max(200) }),
+  z.object({ type: z.literal("allocate"), allocation: mealAllocationInputSchema }),
+  z.object({ type: z.literal("remove_allocation"), allocationId: pilotIdSchema }),
+  z.object({ type: z.literal("remove_batch"), batchId: pilotIdSchema }),
+  z.object({ type: z.literal("set_shop_through"), date: calendarDateSchema }),
+  z.object({ type: z.literal("set_stock"), stock: flexibleStockSchema }),
+  z.object({ type: z.literal("confirm_stock"), ...stockCheckSchema.shape }),
+  z.object({ type: z.literal("record_purchase"), items: z.array(purchaseItemSchema).min(1).max(200) }),
+  z.object({ type: z.literal("cook_batch"), batchId: pilotIdSchema, actualPortions: portionsSchema, freezerPortions: z.number().finite().nonnegative().max(1000) }),
+  z.object({ type: z.literal("correct_prepared"), batchId: pilotIdSchema,
+    produced: z.number().finite().nonnegative().max(1000), freezerPortions: z.number().finite().nonnegative().max(1000),
+    reopenAllocationIds: z.array(pilotIdSchema).max(5000).default([]), reason: z.string().trim().min(1).max(1000),
+  }),
+  z.object({ type: z.literal("consume"), allocationId: pilotIdSchema, fromFreezer: z.boolean().optional() }),
+  z.object({ type: z.literal("record_feedback"), feedback: recipeFeedbackSchema }),
+  z.object({ type: z.literal("set_members"), members: z.array(householdMemberSchema).min(1).max(12) }),
+]);
+export const planningProposalSchema = z.object({
+  id: pilotIdSchema,
+  title: z.string().min(1).max(200),
+  baseRevision: z.number().int().nonnegative(),
+  changes: z.array(pilotChangeSchema).max(300),
+  status: z.enum(["pending", "applied", "stale"]),
+  legacyMeals: plannedMealsSchema.optional(),
+});
+export const pilotOperationSchema = z.discriminatedUnion("type", [
+  ...pilotChangeSchema.options,
+  z.object({ type: z.literal("set_session"), session: planningSessionSchema }),
+  z.object({ type: z.literal("receive_planning_result"), baseRevision: z.number().int().nonnegative(), session: planningSessionSchema,
+    proposal: z.object({ id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }).optional(),
+    directPlacement: z.object({ jobId: z.uuid(), request: z.string().min(1).max(2000), actorMemberId: pilotIdSchema,
+      change: z.object({ type: z.literal("create_batch"), batch: cookingBatchInputSchema, allocations: z.array(mealAllocationInputSchema).min(1).max(12) }),
+    }).optional(),
+  }).refine((operation) => !(operation.proposal && operation.directPlacement), { message: "A response must either apply its explicit placement or offer a proposal." }),
+  z.object({ type: z.literal("propose"), id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }),
+  z.object({ type: z.literal("apply_proposal"), proposalId: pilotIdSchema,
+    selectedAllocationIds: z.array(pilotIdSchema).max(5000).optional(), includeOtherChanges: z.boolean().optional(),
+  }).superRefine((operation, context) => {
+    if ((operation.selectedAllocationIds === undefined) !== (operation.includeOtherChanges === undefined)) {
+      context.addIssue({ code: "custom", message: "Choose explicitly whether to include other changes when selecting meal placements." });
+    }
+  }),
+  z.object({ type: z.literal("dismiss_proposal"), proposalId: pilotIdSchema }),
+  z.object({ type: z.literal("undo"), receiptId: pilotIdSchema }),
+]);
+export const pilotCommandSchema = z.object({
+  id: pilotIdSchema,
+  expectedRevision: z.number().int().nonnegative(),
+  operation: pilotOperationSchema,
+});
+const pilotDataSchema = z.object({
+  schemaVersion: z.literal(1),
+  members: z.array(householdMemberSchema).min(1).max(12),
+  coverage: z.array(mealCoverageSchema).max(2000),
+  batches: z.array(cookingBatchSchema).max(1000),
+  allocations: z.array(mealAllocationSchema).max(5000),
+  stock: z.array(flexibleStockSchema).max(200),
+  stockChecks: z.array(stockCheckSchema).max(200),
+  prepared: z.array(preparedPortionsSchema).max(1000),
+  purchaseLots: z.array(purchaseLotSchema).max(10000).default([]),
+  feedback: z.array(recipeFeedbackSchema).max(1000),
+  proposals: z.array(planningProposalSchema).max(100),
+  unplacedMeals: plannedMealsSchema,
+  session: planningSessionSchema,
+  shopThrough: calendarDateSchema,
+});
+export const actionReceiptSchema = z.object({
+  id: pilotIdSchema,
+  commandId: pilotIdSchema,
+  operationType: z.string().min(1).max(80),
+  fingerprint: z.string().min(1).max(2000000),
+  summary: z.string().min(1).max(500),
+  revision: z.number().int().positive(),
+  createdAt: z.iso.datetime(),
+  undoneBy: pilotIdSchema.optional(),
+  undoRevision: z.number().int().positive().optional(),
+  // Only the latest reversible action retains its recovery data. Command IDs
+  // remain in history so retries cannot repeat purchases or cooking.
+  inverse: z.object({ pantry: z.array(pantryItemSchema).max(200), data: pilotDataSchema }).optional(),
+});
+export const pilotStateSchema = pilotDataSchema.extend({
+  revision: z.number().int().nonnegative(),
+  receipts: z.array(actionReceiptSchema).max(10000),
+});
+
 export const householdStateSchema = z.object({
   version: z.literal(1),
+  pilot: pilotStateSchema.optional(),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   meals: plannedMealsSchema,
@@ -222,6 +427,7 @@ export const householdStateSchema = z.object({
 export const suggestMealsRequestSchema = z.object({
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
+  direction: directionSchema.optional(),
   knownIngredients: z.array(knownIngredientSchema).max(2000).optional(),
   // Bounded context from the existing household workspace.
   recentRecipeNames: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
@@ -313,6 +519,7 @@ export type RecipeWorkspace = z.infer<typeof recipeWorkspaceSchema>;
 export type HouseholdState = z.infer<typeof householdStateSchema>;
 export type SuggestMealsRequest = z.infer<typeof suggestMealsRequestSchema>;
 export type SuggestMealsResponse = z.infer<typeof suggestMealsResponseSchema>;
+export type SuggestionBlock = z.infer<typeof suggestionBlockSchema>;
 export type ChatMealsRequest = z.infer<typeof chatMealsRequestSchema>;
 export type ChatMealsResponse = z.infer<typeof chatMealsResponseSchema>;
 export type ShoppingItem = {
@@ -324,3 +531,49 @@ export type ShoppingItem = {
   quantity: number;
   restock?: boolean;
 };
+
+export type HouseholdMember = z.infer<typeof householdMemberSchema>;
+export type MealCoverage = z.infer<typeof mealCoverageSchema>;
+export type CookingBatch = z.infer<typeof cookingBatchSchema>;
+export type MealAllocation = z.infer<typeof mealAllocationSchema>;
+export type FlexibleStock = z.infer<typeof flexibleStockSchema>;
+export type StockCheck = z.infer<typeof stockCheckSchema>;
+export type PreparedPortions = z.infer<typeof preparedPortionsSchema>;
+export type PurchaseItem = z.infer<typeof purchaseItemSchema>;
+export type PurchaseLot = z.infer<typeof purchaseLotSchema>;
+export type RecipeFeedback = z.infer<typeof recipeFeedbackSchema>;
+export type PlanningSession = z.infer<typeof planningSessionSchema>;
+export type PlanningProposal = z.infer<typeof planningProposalSchema>;
+export type PilotChange = z.infer<typeof pilotChangeSchema>;
+export type PilotOperation = z.infer<typeof pilotOperationSchema>;
+export type PilotCommand = z.infer<typeof pilotCommandSchema>;
+export type ActionReceipt = z.infer<typeof actionReceiptSchema>;
+export type PilotState = z.infer<typeof pilotStateSchema>;
+
+// Server-authorized legacy actions share the same boundary validation. Replacing
+// an entire snapshot is deliberately excluded from remotely writable actions.
+export const householdActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("setPantry"), pantry: z.array(pantryItemSchema).max(200), confirmedExactStock: z.array(z.object({ ingredientId: pilotIdSchema, unit: unitSchema })).max(200).optional() }),
+  z.object({ type: z.literal("setPreferences"), preferences: preferencesSchema }),
+  z.object({ type: z.literal("recordSuggestions"), input: suggestMealsRequestSchema, recipes: z.array(recipeSchema).max(10) }),
+  z.object({ type: z.literal("setSuggestionDirection"), direction: directionSchema }),
+  z.object({ type: z.literal("setSuggestionStreamEnabled"), enabled: z.boolean() }),
+  z.object({ type: z.literal("appendSuggestionBlock"), input: suggestMealsRequestSchema, block: suggestionBlockSchema }),
+  z.object({ type: z.literal("deferAiRequests"), until: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }),
+  z.object({ type: z.literal("addMeal"), id: pilotIdSchema, recipe: recipeSchema, servings: z.number().int().min(1).max(12), calendarStartDate: calendarDateSchema.optional() }),
+  z.object({ type: z.literal("removeMeal"), id: pilotIdSchema, calendarStartDate: calendarDateSchema.optional() }),
+  z.object({ type: z.literal("setMealServings"), id: pilotIdSchema, servings: z.number().int().min(1).max(12), calendarStartDate: calendarDateSchema.optional() }),
+  z.object({ type: z.literal("setCalendarSettings"), patch: calendarWorkspaceSchema.omit({ draft: true }).partial() }),
+  z.object({ type: z.literal("setCalendarDraft"), meals: plannedMealsSchema, calendarStartDate: calendarDateSchema.optional() }),
+  z.object({ type: z.literal("commitCalendar") }),
+  z.object({ type: z.literal("discardCalendarDraft") }),
+  z.object({ type: z.literal("setWorkspaceMode"), mode: workspaceModeSchema }),
+  z.object({ type: z.literal("saveRecipe"), recipe: recipeSchema, source: recipeContentSourceSchema }),
+  z.object({ type: z.literal("removeSavedRecipe"), recipeId: pilotIdSchema }),
+  z.object({ type: z.literal("setChatDraft"), text: z.string().max(1000) }),
+  z.object({ type: z.literal("discussRecipe"), recipe: recipeSchema, servings: z.number().int().min(1).max(12) }),
+  z.object({ type: z.literal("clearRecipeFocus") }),
+  z.object({ type: z.literal("appendChatMessages"), messages: z.array(chatMessageSchema).max(20) }),
+  z.object({ type: z.literal("completeChatTurn"), messages: z.array(chatMessageSchema).max(20), submittedDraft: z.string().max(1000) }),
+  z.object({ type: z.literal("clearChat") }),
+]);

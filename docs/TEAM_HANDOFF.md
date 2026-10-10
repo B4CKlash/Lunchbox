@@ -24,15 +24,23 @@ npm run build
 
 `check` runs lint, type checking, and tests. `build` verifies the production app separately. Use `npm run start` after a build to run that production build locally.
 
-## Recipe workspace extension
+## Household pilot extension
 
-The `/meals` screen offers Suggestions, Chat, and Calendar, with a saved recipe box and reviewed text/link imports inside Suggestions. Read [the AI demo runbook](AI_DEMO_RUNBOOK.md) for provider configuration, credits, release verification, and rollback. All views use shared recipe cards and household actions. The provider mode selects live AI or a clearly labeled deterministic demo.
+The integrated application follows [the household pilot objective](HOUSEHOLD_PILOT_OBJECTIVE.md). `/meals` is a persistent conversation, live calendar, focused recipe cards, and grocery preview. `/recipes` preserves the continuous recipe feed, favorites, and reviewed imports. Earlier calendar drafts are recoverable proposals; there is no second committed-week calendar in the pilot.
 
-The suggestion endpoint contract is unchanged. The additive `/api/meals/chat` endpoint accepts kitchen/conversation context and returns `{ source, reply, recipes, servings }`; both providers live behind `src/features/meals/providers.ts`. Existing version-1 saves gain default workspace state without losing pantry/preferences/planned meals. Saved recipes, focused portions, the last 20 chat messages, and drafts use the same storage adapter and key. Shared contract and route changes in this release are coordinated as one integration PR.
+Read [delivery status](HOUSEHOLD_PILOT_DELIVERY.md), [development setup](HOUSEHOLD_DEVELOPMENT.md), [shared household verification](HOUSEHOLD_SERVER_VERIFICATION.md), and [the local worker runbook](LOCAL_AI_WORKER.md). Earlier calendar runbooks describe the previous arrange/commit workflow. Recipe-library suggestions, chat, and imports preserve existing Gateway deployments; selecting `LUNCHBOX_AI_BACKEND=local-worker` routes them through the authenticated worker. Shared households default to the worker, and the new-development example selects it explicitly. The pilot planning conversation uses its own clearly labeled fixture or local-worker mode.
 
-## Calendar planning extension
+Recipe blocks retain their direction and original serving quantities through reload and pantry/preference changes. Shared-mode generation saves each half-block before requesting the next one. Feed controls and history use the same validated household commands, preserving current planning proposals and Undo.
 
-Read [Calendar planning](CALENDAR_PLANNING.md) for the arrange → commit → groceries flow. Recipe actions add to a saved calendar draft; `state.meals` holds the committed plan used by Shopping. Legacy undated meals remain preserved in the unscheduled tray. Date/slot contracts and additive draft persistence are preserved by the AI integration.
+The household provider and storage adapter remain the single state boundary. `HouseholdState.version: 1` gains an additive, versioned `pilot` object. `ensurePilot` migrates earlier data without discarding originals; `applyPilotCommand` is shared by manual UI, server commands, and validation of local AI proposals. `buildPilotShoppingList` uses upcoming uncooked batches through the explicit shopping horizon. Planning never consumes inventory.
+
+Shared mode uses authenticated Supabase membership, stable account-to-person IDs, a revision-checked household snapshot, and command history. Local storage is an account-scoped cache with pending commands; the separate recovery archive is backup-only. Before import, join, account transitions, and resets, preserve the original browser data. Pending edits cannot be silently rebased over another person's full pantry or session.
+
+Ollama stays on the Mac. An authenticated outbound worker receives jobs, generates candidates and proposed actions, and returns them for validation and review. The fixture helper remains clearly labeled. Production household enablement, the hosted development database, protected preview verification, and the actual household pilot are release gates, not consequences of a passing local test.
+
+## Recipe journey design record
+
+Read [the living recipe journey brief](RECIPE_JOURNEY_DESIGN.md) for quick onboarding, brainstorming, shortlisting, pantry discovery inside recipes, total-serving allocation, and grocery previews before scheduling. It tracks agreed directions, open questions, recommended slices, and future acceptance examples separately from the inspected app baseline. These proposals are design work, not implemented feature claims; use the stable idea and decision IDs when refining them.
 
 ## Ownership and first tasks
 
@@ -55,9 +63,9 @@ These are ownership boundaries, not separate apps. Ask the integration lead for 
 | `src/app/api/meals/suggest/route.ts` | Server endpoint for validated meal suggestions |
 | `src/components/household-provider.tsx` | One client household state provider and feature coordination |
 | `src/components/**` | Screen panels and reusable UI |
-| `src/features/pantry/**` | Sample household and versioned local storage adapter; future server sync belongs here |
-| `src/features/meals/**` | Suggestion provider; initially deterministic demo recipes |
-| `src/features/planning/**` | Pure ingredient scaling and shopping calculations |
+| `src/features/pantry/**` | Sample household, versioned storage, scoped cache/recovery, and remote persistence adapter |
+| `src/features/meals/**` | Recipe providers, canonical imports, local model adapter, and authenticated jobs |
+| `src/features/planning/**` | Validated pilot commands, per-person coverage, batches, inventory/cooking, and shopping calculations |
 | `.github/` | Shared checks and contribution workflow |
 
 The stack is Next.js 16 App Router, React 19, TypeScript, Zod 4, and npm. Keep the route wrappers small so interface work and domain work can progress independently.
@@ -96,7 +104,7 @@ The response is:
 
 The starter provider returns `source: 'demo'`. A live provider must keep this contract, validate generated output, and keep credentials on the server. Selecting a suggestion saves a recipe snapshot in household state so later provider changes do not rewrite the plan.
 
-Household state is saved in versioned browser local storage through the pantry adapter. It belongs to that browser and is not shared among teammates or devices. Future persistence work should replace the adapter while preserving the provider and contracts; schema changes need an explicit migration or a deliberate reset behavior.
+Without shared configuration, household state is saved in this browser through the pantry adapter. Shared mode uses authorized Supabase persistence and a scoped local cache. Both modes use the same contracts and provider; never add a parallel household schema or silently reset old data.
 
 ## Calculation rules
 
@@ -121,6 +129,6 @@ The canonical app is [LunchBox on Vercel](https://lunchbox-snowy.vercel.app). Th
 
 ## Demo scope and design reference
 
-This foundation intentionally provides a small working flow, sample data, local saved state, and clear feature entry points. It does not yet provide shared household sync, authentication, connected AI, purchase confirmation, cooking deductions, or allergen guarantees.
+This pilot adds household sync, local AI transport, purchases, cooking, prepared portions, and feedback. Their deployment and real-household acceptance remain gated in the delivery tracker. Allergen guarantees, nutrition tracking, retailer purchases, autonomous replanning, and public SaaS onboarding remain outside scope.
 
-[The original interactive concept](../LunchBox_Interactive_Concept.html) and the PDF/PowerPoint design portfolio remain available as design references. The concept includes broader simulated behavior—purchases, cooking, leftovers, undo—that is outside the scaffold. Extend the agreed demo first before bringing those workflows into the application.
+[The original interactive concept](../LunchBox_Interactive_Concept.html) and the PDF/PowerPoint design portfolio remain available as design references. The concept contains simulated behavior; use tested application commands and the delivery tracker to determine what is actually implemented and verified.

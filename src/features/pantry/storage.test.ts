@@ -82,7 +82,7 @@ test("legacy v1 saves gain a blank workspace without losing pantry, preferences,
     chatDraft: "",
     focusedRecipe: null,
     focusedServings: null,
-    suggestions: { recentRecipeNames: [], pendingIngredients: [] },
+    suggestions: { recentRecipeNames: [], pendingIngredients: [], direction: "", streamEnabled: true, blocks: [] },
     calendar: {
       startDate: null,
       days: 7,
@@ -97,6 +97,7 @@ test("legacy v1 saves gain a blank workspace without losing pantry, preferences,
 test("recipe variety and pending pantry additions survive reload without changing the household key", () => {
   const state = createSampleHousehold();
   state.workspace.suggestions = {
+    ...state.workspace.suggestions,
     recentRecipeNames: ["Apple and lentil salad", "Pepper rice"],
     pendingIngredients: [{ ingredientId: "apples", name: "Apple", unit: "each" }],
   };
@@ -109,9 +110,43 @@ test("recipe variety and pending pantry additions survive reload without changin
   const legacy = { ...state, workspace: { ...state.workspace, suggestions: undefined } };
   const upgraded = loadHousehold({ getItem: () => JSON.stringify(legacy) });
   assert.ok(upgraded);
-  assert.deepEqual(upgraded.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [] });
+  assert.deepEqual(upgraded.workspace.suggestions, { recentRecipeNames: [], pendingIngredients: [], direction: "", streamEnabled: true, blocks: [] });
   assert.deepEqual(upgraded.pantry, state.pantry);
   assert.deepEqual(upgraded.workspace.recipeBox, state.workspace.recipeBox);
+});
+
+test("recipe feed direction, pause state, blocks, and original servings survive reload in the existing household save", () => {
+  const state = createSampleHousehold();
+  const originalPreferences = { ...state.preferences, servings: 2 };
+  state.preferences.servings = 4;
+  state.workspace.suggestions.direction = "Something warming";
+  state.workspace.suggestions.streamEnabled = false;
+  state.workspace.suggestions.blocks = [{
+    id: "feed-1",
+    sequence: 1,
+    contextKey: JSON.stringify({ pantry: state.pantry, preferences: originalPreferences, direction: "Use rice" }),
+    direction: "Use rice",
+    servings: 2,
+    source: "ai",
+    recipes: [{
+      id: "rice-soup", name: "Rice soup", description: "A warming soup.", servings: 2, minutes: 20,
+      ingredients: [{ ingredientId: "rice", name: "Jasmine rice", quantity: 100, unit: "g" }],
+      steps: ["Simmer the rice."],
+    }],
+    explanation: "An earlier idea.",
+  }];
+  let stored = "";
+  saveHousehold({ setItem: (key, value) => { assert.equal(key, HOUSEHOLD_STORAGE_KEY); stored = value; } }, state);
+  assert.deepEqual(loadHousehold({ getItem: () => stored }), state);
+
+  const olderMemory = { recentRecipeNames: ["Rice soup"], pendingIngredients: [{ ingredientId: "rice", name: "Jasmine rice", unit: "g" }] };
+  const legacy = { ...state, workspace: { ...state.workspace, suggestions: olderMemory } };
+  const upgraded = loadHousehold({ getItem: () => JSON.stringify(legacy) });
+  assert.ok(upgraded);
+  assert.deepEqual(upgraded.workspace.suggestions, { ...olderMemory, direction: "", streamEnabled: true, blocks: [] });
+  assert.deepEqual(upgraded.pantry, state.pantry);
+  assert.deepEqual(upgraded.preferences, state.preferences);
+  assert.deepEqual(upgraded.meals, state.meals);
 });
 
 test("AI cooldown survives reload and older saves start without a cooldown", () => {
@@ -213,4 +248,31 @@ test("storage write failures reach the caller instead of claiming a successful s
       ),
     /Quota exceeded/,
   );
+});
+
+test("recovery preserves original bytes and stops if the copy cannot be written", async () => {
+  const { preserveHouseholdRecovery, HOUSEHOLD_RECOVERY_KEY } = await import("./storage");
+  const saved = new Map([[HOUSEHOLD_STORAGE_KEY, "{original-corrupt-data"]]);
+  const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
+  preserveHouseholdRecovery(storage, "Before migration", "2026-10-08T00:00:00.000Z");
+  preserveHouseholdRecovery(storage, "Repeated migration", "2026-10-08T00:00:01.000Z");
+  const copies = JSON.parse(saved.get(HOUSEHOLD_RECOVERY_KEY)!);
+  assert.equal(copies.length, 1);
+  assert.equal(copies[0].raw, "{original-corrupt-data");
+  assert.equal(saved.get(HOUSEHOLD_STORAGE_KEY), "{original-corrupt-data");
+  saved.set(HOUSEHOLD_STORAGE_KEY, "another original");
+  assert.throws(() => preserveHouseholdRecovery({ ...storage, setItem: () => { throw new Error("Quota exceeded"); } }, "Switch account"), /Quota exceeded/);
+  assert.equal(saved.get(HOUSEHOLD_STORAGE_KEY), "another original");
+});
+
+test("the one active storage key retains cache ownership and retry metadata", async () => {
+  const { readHouseholdCache } = await import("./storage");
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  const household = createSampleHousehold();
+  const cache = { ownerId: "owner-a", householdId: "shared-a", pending: { id: "purchase-retry" } };
+  saveHousehold(storage, household, cache);
+  assert.equal(values.size, 1);
+  assert.deepEqual(loadHousehold(storage), household);
+  assert.deepEqual(readHouseholdCache(storage), cache);
 });

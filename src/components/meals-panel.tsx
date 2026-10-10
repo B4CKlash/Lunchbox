@@ -5,7 +5,6 @@ import { useState, type FormEvent } from "react";
 import {
   ArrowRight,
   Bookmark,
-  Clock3,
   LayoutGrid,
   CalendarDays,
   LoaderCircle,
@@ -21,7 +20,7 @@ import { selectedPreferenceLabels } from "@/features/meals/recommendation-option
 import { RecipeImportPanel } from "@/components/recipe-import-panel";
 import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
 import { useMealSuggestions } from "@/features/meals/use-meal-suggestions";
-import { formatMealRetryTime } from "@/features/meals/client-request";
+import { RecipeFeed } from "@/components/recipe-feed";
 import { buildShoppingList } from "@/features/planning/shopping";
 import { preferencesSchema, type Preferences } from "@/lib/contracts";
 
@@ -31,8 +30,8 @@ const modes = [
   { id: "plan", label: "Calendar", icon: CalendarDays },
 ] as const;
 
-export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
-  const { state, setPreferences, setWorkspaceMode, householdResetVersion, recordSuggestions, deferAiRequests } = useHousehold();
+export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" | "ai"; aiBackend?: "gateway" | "local-worker" }) {
+  const { state, setPreferences, setWorkspaceMode, householdResetVersion, appendSuggestionBlock, setSuggestionDirection, setSuggestionStreamEnabled, deferAiRequests } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
   );
@@ -41,25 +40,32 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
   const [importOpen, setImportOpen] = useState(false);
   const [importSeed, setImportSeed] = useState({ url: "", resetVersion: householdResetVersion, request: 0 });
   const importUrl = importSeed.resetVersion === householdResetVersion ? importSeed.url : "";
-  const kitchen = { pantry: state.pantry, preferences: state.preferences };
-  const { loading, current, previous, waiting, cooldownActive, refresh, cancel } = useMealSuggestions(
+  const kitchen = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+  const contextKey = JSON.stringify(kitchen);
+  const { blocks, direction, streamEnabled } = state.workspace.suggestions;
+  const { loading, error, explanation, waiting, cooldownActive, generateNext, pause, resume } = useMealSuggestions(
     JSON.stringify({
       ...kitchen,
       knownIngredients: knownIngredientsFromHousehold(state),
       preferredIngredients: state.workspace.suggestions.pendingIngredients,
     }),
-    JSON.stringify({ ...kitchen, householdResetVersion }),
+    contextKey,
     {
-      enabled: state.workspace.mode !== "chat" && !(state.workspace.mode === "suggestions" && collection === "saved") && !importOpen,
+      enabled: (Boolean(state.pilot) || state.workspace.mode === "suggestions") && collection === "suggested" && !importOpen,
+      aiMode,
+      aiBackend,
+      blocks,
+      streamEnabled,
+      appendSuggestionBlock,
+      setSuggestionStreamEnabled,
       resetVersion: householdResetVersion,
       aiCooldownUntil: state.workspace.aiCooldownUntil,
       deferAiRequests,
       recentRecipeNames: state.workspace.suggestions.recentRecipeNames,
-      recordSuggestions,
     },
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
-  const mode = state.workspace.mode;
+  const mode = state.pilot ? "suggestions" : state.workspace.mode;
   const draftMeals = state.workspace.calendar.draft ?? state.meals;
   const profileLabels = selectedPreferenceLabels([
     ...(state.preferences.goals ?? []),
@@ -70,7 +76,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     ...(state.preferences.cookingStyles ?? []),
   ]);
 
-  function updatePreferences(patch: Partial<Preferences>) {
+  async function updatePreferences(patch: Partial<Preferences>) {
     const parsed = preferencesSchema.safeParse({
       ...state.preferences,
       ...patch,
@@ -83,13 +89,14 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     }
     setPreferenceError(null);
     setCollection("suggested");
-    setPreferences(parsed.data);
+    const saved = await setPreferences(parsed.data);
+    if (!saved.ok) setPreferenceError(saved.error ?? "Preferences could not be saved.");
   }
 
   function generateMore(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCollection("suggested");
-    refresh();
+    generateNext();
   }
 
   return (
@@ -148,7 +155,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
         role="group"
         aria-label="Recipe workspace views"
       >
-        {modes.map(({ id, label, icon: Icon }) => (
+        {(state.pilot ? modes.filter((entry) => entry.id === "suggestions") : modes).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             aria-pressed={mode === id}
@@ -162,12 +169,12 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
             ) : null}
           </button>
         ))}
-        <span className="workspace-hint">Follow your appetite.</span>
+        <Link className="text-link" href="/meals">Open planning conversation <ArrowRight size={16} /></Link>
       </div>
       <p className="status-message" role="status">
         {message}
       </p>
-      {draftMeals.length >= 50 ? (
+      {!state.pilot && draftMeals.length >= 50 ? (
         <p className="error-message" role="status">
           Your plan holds up to 50 meals. Remove one to add another.
         </p>
@@ -182,6 +189,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
           key={`${householdResetVersion}:${importSeed.request}`}
           initialUrl={importUrl}
           aiMode={aiMode}
+          aiBackend={aiBackend}
           onClose={() => setImportOpen(false)}
           onNotice={setMessage}
           onSaved={() => { setCollection("saved"); setWorkspaceMode("suggestions"); setImportOpen(false); }}
@@ -196,7 +204,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
             <h2 id="preferences-heading">Make it fit your day.</h2>
             <p>
               {aiMode === "ai"
-                ? "Recipes update when you change these controls, save preferences, or edit your pantry. Generate more for new dishes."
+                ? "Your pantry and preferences guide each new block. Earlier recipes stay here as you explore."
                 : "Choose what works for you. Demo ideas come from the same sample recipes."}
             </p>
           </div>
@@ -267,8 +275,8 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
                 <RefreshCw size={16} aria-hidden="true" />
               )}
               {waiting ? "Waiting for AI…" : loading
-                ? aiMode === "ai" ? "Generating recipes…" : "Finding ideas…"
-                : aiMode === "ai" ? "Generate more" : "Refresh sample ideas"}
+                ? aiMode === "ai" ? "Building a block…" : "Finding ideas…"
+                : aiMode === "ai" ? "Generate next block" : "Refresh sample ideas"}
             </button>
           </form>
           {preferenceError ? (
@@ -283,13 +291,13 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
             <h2>
               {collection === "saved"
                 ? "Your recipe box"
-                : "A few things you could make"}
+                : "Your recipe stream"}
             </h2>
             <p className="muted">
               {collection === "saved"
                 ? "Keep the good ideas close. Plan them whenever you like."
                 : aiMode === "ai"
-                  ? "New recipes based on your current kitchen and preferences."
+                  ? "Fresh ideas in blocks of six. Save the ones you love."
                   : "Sample recipes, matched to your pantry and time."}
             </p>
           </div>
@@ -357,94 +365,37 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
                 </button>
               </div>
             )
-          ) : loading ? (
-            <div className="card empty-state">
-              <LoaderCircle className="spinning" size={28} aria-hidden="true" />
-              <h3>{waiting ? "Giving the kitchen a moment…" : "Looking in your kitchen…"}</h3>
-              <p role="status">
-                {waiting
-                  ? waiting.retrying
-                    ? `AI is busy. We’ll retry once at ${formatMealRetryTime(waiting.until)}.`
-                    : `AI is busy. Your latest preferences will be sent at ${formatMealRetryTime(waiting.until)}.`
-                  : aiMode === "ai"
-                  ? "Generating recipes from your current pantry and preferences."
-                  : "Finding sample meals that fit your preferences."}
-              </p>
-              <button className="button secondary" onClick={cancel}>Stop search</button>
-            </div>
-          ) : current?.error ? (
-            <div className="card empty-state">
-              <h3>Let’s give that another try.</h3>
-              <p className="error-message" role="alert">
-                {current.error}
-              </p>
-              {cooldownActive ? (
-                <p role="status">Try again after {formatMealRetryTime(state.workspace.aiCooldownUntil)}.</p>
-              ) : null}
-              <button className="button" onClick={refresh} disabled={cooldownActive}>
-                {cooldownActive ? "Please wait before retrying" : "Try again"}
-              </button>
-            </div>
-          ) : current?.response?.recipes.length ? (
-            <>
-              {current.response.explanation ? (
-                <p className="status-message" role="status">{current.response.explanation}</p>
-              ) : null}
-              <div className="recipe-grid">
-                {current.response.recipes.map((recipe, index) => (
-                  <RecipeCard
-                    key={recipe.id}
-                    recipe={recipe}
-                    source={current.response!.source}
-                    servings={state.preferences.servings}
-                    index={index}
-                    onNotice={setMessage}
-                  />
-                ))}
-              </div>
-            </>
           ) : (
-            <div className="card empty-state">
-              <Clock3 size={28} aria-hidden="true" />
-              <h3>{aiMode === "ai" ? "No recipes matched this request." : "A little more time opens things up."}</h3>
-              <p>
-                {aiMode === "ai"
-                  ? current?.response?.explanation ?? "Adjust your preferences or ask the assistant for a dish you’d like."
-                  : "No recipes fit this time limit. Try 25 minutes or more for the sample recipes."}
-              </p>
-              {aiMode === "ai" ? (
-                <button className="button secondary" onClick={() => setWorkspaceMode("chat")}>
-                  Ask in Chat
-                </button>
-              ) : null}
-            </div>
+            <RecipeFeed
+              key={householdResetVersion}
+              aiMode={aiMode}
+              blocks={blocks}
+              contextKey={contextKey}
+              direction={direction}
+              streamEnabled={streamEnabled}
+              loading={loading}
+              error={error}
+              explanation={explanation}
+              waiting={waiting}
+              cooldownActive={cooldownActive}
+              cooldownUntil={state.workspace.aiCooldownUntil}
+              onDirection={async (value) => {
+                setCollection("suggested");
+                if (value === direction) { generateNext(); return; }
+                const saved = await setSuggestionDirection(value);
+                if (!saved.ok) { setMessage(saved.error ?? "The recipe direction could not be saved."); return; }
+                if (!streamEnabled) await setSuggestionStreamEnabled(true);
+              }}
+              onNext={generateNext}
+              onPause={pause}
+              onResume={resume}
+              onNotice={setMessage}
+            />
           )}
-          {collection === "suggested" && previous && (loading || current?.error) ? (
-            <div>
-              <div className="section-heading">
-                <div>
-                  <h3>Previous ideas</h3>
-                  <p className="muted">These recipes were generated earlier and may not match your latest preferences.</p>
-                </div>
-              </div>
-              <div className="recipe-grid">
-                {previous.response.recipes.map((recipe, index) => (
-                  <RecipeCard
-                    key={recipe.id}
-                    recipe={recipe}
-                    source={previous.response.source}
-                    servings={previous.servings}
-                    index={index}
-                    onNotice={setMessage}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : null}
         </section>
       </div>
-      <div hidden={mode !== "chat"}>
-        <MealChatPanel aiMode={aiMode} onNotice={setMessage} onImportUrl={(url) => {
+      {!state.pilot && <><div hidden={mode !== "chat"}>
+        <MealChatPanel active={mode === "chat" && !importOpen} aiMode={aiMode} aiBackend={aiBackend} onNotice={setMessage} onImportUrl={(url) => {
           setImportSeed((previous) => ({ url, resetVersion: householdResetVersion, request: previous.request + 1 }));
           setImportOpen(true);
           requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
@@ -453,13 +404,14 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
       <div hidden={mode !== "plan"}>
         <MealPlanPanel
           onNotice={setMessage}
-          suggestions={current?.response}
-          loading={loading}
-          error={current?.error}
-          onRefresh={refresh}
+          suggestions={blocks.flatMap((block) => block.recipes.map((recipe) => ({ recipe, source: block.source, servings: block.servings })))}
+          suggestionSource={aiMode}
+          loading={false}
+          onRefresh={() => { setCollection("suggested"); setWorkspaceMode("suggestions"); generateNext(); }}
         />
       </div>
-      {mode !== "plan" ? (
+      </>}
+      {state.pilot ? <aside className="workspace-plan-strip"><div><h2>Bring a recipe into the conversation.</h2><p>Choose a recipe to discuss, then place it on your live calendar.</p></div><Link className="button" href="/meals">Open planner <ArrowRight size={16} /></Link></aside> : mode !== "plan" ? (
         <aside className="workspace-plan-strip" aria-label="Plan overview">
           <div>
             <span className="eyebrow">IT ALL COMES TOGETHER</span>

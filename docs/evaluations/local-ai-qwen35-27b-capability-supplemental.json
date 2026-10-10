@@ -1,0 +1,789 @@
+{
+  "model": "qwen3.5:27b",
+  "digest": "2d2e4b8fc7c0479b70f8cba9fc8bdb49a3c9a43a8a6da3873b724c9fca4672ef",
+  "configuration": {
+    "thinking": "off",
+    "temperature": 0.2,
+    "maxOutputTokens": 4000,
+    "timeoutMs": 120000
+  },
+  "purpose": "Supplemental generalization and unknown-stock checks; not the release gate.",
+  "results": [
+    {
+      "name": "qualitative some update",
+      "pass": 1,
+      "latencyMs": 7211,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest updating your spinach stock to 'some' since the exact amount is unknown. This records that you have it available without inventing a specific weight.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_stock",
+            "stock": {
+              "ingredientId": "spinach",
+              "name": "Spinach",
+              "unit": "g",
+              "status": "some"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "undated multi-occasion batch",
+      "pass": 1,
+      "latencyMs": 21674,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest cooking your favorite Tomato spinach pasta once to yield six portions. This would cover dinner on Monday plus two lunches each for you and your partner on Tuesday and Wednesday. Please review this plan.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              }
+            ],
+            "steps": [
+              "Cook pasta and vegetables; combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "486b2f49-4fc7-455b-a97a-077f945539df",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta and vegetables; combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-12",
+              "yield": 6,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "567036af-f936-4195-9cde-01bcb9436865",
+                "batchId": "486b2f49-4fc7-455b-a97a-077f945539df",
+                "memberId": "you",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "730eb0e7-7fc3-4737-9353-4b85fb4330a5",
+                "batchId": "486b2f49-4fc7-455b-a97a-077f945539df",
+                "memberId": "partner",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "d421c7bf-217e-43fe-8330-f06f8e327481",
+                "batchId": "486b2f49-4fc7-455b-a97a-077f945539df",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "813ce330-2f80-40d4-a779-463b42f97819",
+                "batchId": "486b2f49-4fc7-455b-a97a-077f945539df",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "28c90fe9-5175-4db8-bb9d-06c30f9bfe7c",
+                "batchId": "486b2f49-4fc7-455b-a97a-077f945539df",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "72a352c3-9d69-457d-9a70-c79fe4aa7a07",
+                "batchId": "486b2f49-4fc7-455b-a97a-077f945539df",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "fill visible week",
+      "pass": 1,
+      "latencyMs": 31050,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest planning one cooking batch of Tomato spinach pasta to cover lunches for you and your partner from Monday through Sunday. This creates 14 portions total (2 per day), with each person receiving one portion daily.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              }
+            ],
+            "steps": [
+              "Cook pasta and vegetables; combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "85417be6-12f6-4925-a2f3-3f956595febd",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta and vegetables; combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-12",
+              "yield": 14,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "d09800cd-6fb8-4c19-aa01-9fdc628a8f5a",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-12",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "0ed51280-faa2-424c-9b85-3197013d94bb",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-12",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "cbe84dcf-9e06-40b7-a116-46c2818f389a",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "97179748-f10d-47d9-bed9-5bb1556e14ab",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "4318efff-7a4f-400d-81b4-664936a7f7a7",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "003bcf55-279e-4ad1-a368-166950b15dd9",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "fd1ba6ec-8aac-4fde-af60-25b85a79ca93",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-15",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "4c43eb9b-ab95-43e1-bff1-7c4c8c32c1a7",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-15",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "69889a12-5454-46d9-a21d-293ca94d6c8a",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-16",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "ade58cb3-28bf-4179-8f7f-b45caef0b7be",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-16",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "93414a48-93bb-477a-bd15-e8286fb67563",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-17",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "1b5ccc1d-fc12-462f-a61f-3ca0a24ef915",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-17",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "f02af150-6369-42b2-80a1-61135efa09cd",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "you",
+                "date": "2026-10-18",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "fda8d3dd-884c-4f0c-ad30-b8c225629a86",
+                "batchId": "85417be6-12f6-4925-a2f3-3f956595febd",
+                "memberId": "partner",
+                "date": "2026-10-18",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "uncertain existing stock explanation",
+      "pass": 1,
+      "latencyMs": 8852,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "Your pantry shows you have 'some' spinach, but no exact amount is recorded. The planned pasta batch needs 100 g of spinach. To confirm coverage, please check your fridge and tell me the specific weight in grams. Once you provide that number, I can verify if it meets the requirement without changing any plans.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "name": "qualitative some update",
+      "pass": 2,
+      "latencyMs": 3815,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest updating your spinach stock to 'some' since the exact amount is unknown. This records that you have it available without inventing a specific weight.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_stock",
+            "stock": {
+              "ingredientId": "spinach",
+              "name": "Spinach",
+              "unit": "g",
+              "status": "some"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "undated multi-occasion batch",
+      "pass": 2,
+      "latencyMs": 18699,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest one cooking batch of Tomato spinach pasta yielding six portions to cover dinner on Monday and two lunches (Tuesday and Wednesday) for both you and your partner. This uses your favorite recipe and fits within the current planning week.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              }
+            ],
+            "steps": [
+              "Cook pasta and vegetables; combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta and vegetables; combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-12",
+              "yield": 6,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "ab036b65-7755-44df-b820-822862c33ff6",
+                "batchId": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+                "memberId": "you",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "a52c4712-cf76-4b38-bd03-a44e797bae94",
+                "batchId": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+                "memberId": "partner",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "5e5f8d94-3667-49ea-ae1e-33f6c8af3566",
+                "batchId": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "dc5a2509-34f3-4231-a58f-96f7ab8d4c37",
+                "batchId": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "91c6f175-5c73-4594-bc76-fd8afdf895f0",
+                "batchId": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "7482594a-7334-4e9a-aaaf-4d23a9061352",
+                "batchId": "01fcfc17-a783-4d05-a41a-0a27d73b35d3",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "fill visible week",
+      "pass": 2,
+      "latencyMs": 27988,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest cooking one large batch of your favorite Tomato spinach pasta to cover lunches for both you and your partner from Monday through Sunday. This plan allocates one portion per person each day, totaling 14 portions from a single cooking event.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              }
+            ],
+            "steps": [
+              "Cook pasta and vegetables; combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta and vegetables; combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-12",
+              "yield": 14,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "9e12b73e-2642-4b28-84e7-ec956ec33e4e",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-12",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "358b98ac-1cc6-46dc-9b65-2e74eac1012f",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-12",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "408c11ac-c4d5-4e6b-a2bc-fda3ab2e69d7",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "adeecc4c-ecbd-49c8-b5d2-bedd5e3e9c84",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "2d05fc43-aff4-4a76-8489-1d47d6c5ae74",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "76778cab-0eaf-41eb-aa25-14e08e06f57a",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "8a39ad65-0da7-4ce1-86b8-919afe510ec8",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-15",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "b8b2fdca-6fba-4029-9437-b239627adebf",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-15",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "8e4263fb-8887-462d-be74-3e08652a86db",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-16",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "266f7475-697c-4fd2-8ca5-0cb94a03fa75",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-16",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "52e0837d-7ebc-4fb1-888a-461d2b12b125",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-17",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "df658633-b1b8-4acc-a649-3dc1040e2a49",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-17",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "e1f90aef-f868-4c80-b63d-9ba884460662",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "you",
+                "date": "2026-10-18",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "0709be62-c4f3-4280-9c37-73caca762dbd",
+                "batchId": "e006afba-deb7-4ced-91a2-d1b5cd93799a",
+                "memberId": "partner",
+                "date": "2026-10-18",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "uncertain existing stock explanation",
+      "pass": 2,
+      "latencyMs": 13251,
+      "completed": true,
+      "acceptedUnsupportedClaim": false,
+      "invalidStateMutation": false,
+      "rejectedClaimAttempts": 1,
+      "output": {
+        "reply": "I cannot confirm that your spinach definitely covers the planned pasta batch because your stock is listed as 'some' without a specific weight in grams. The recipe requires 100g of spinach for the batch. To be sure, you need to check the actual amount of spinach you have in the fridge and compare it to the 100g needed. I suggest weighing it or estimating if it meets that requirement before cooking.",
+        "recipes": [],
+        "operations": []
+      }
+    }
+  ]
+}

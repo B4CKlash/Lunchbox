@@ -1,0 +1,1228 @@
+{
+  "evaluatedAt": "2026-10-08T20:29:57.886Z",
+  "acceptanceVersion": "exact-effects-v2",
+  "model": "qwen3.5:27b",
+  "digest": "2d2e4b8fc7c0479b70f8cba9fc8bdb49a3c9a43a8a6da3873b724c9fca4672ef",
+  "results": [
+    {
+      "scenario": "individual work lunch",
+      "pass": 1,
+      "latencyMs": 16175,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that your work covers your Tuesday lunch, while your partner still needs a meal planned for that time.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "8b58de6c-7df5-4fe1-8e23-2ed3b999b807",
+              "memberId": "partner",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "retrieve favorite",
+      "pass": 1,
+      "latencyMs": 13965,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I found your favorite Tomato spinach pasta. It serves two and takes about 25 minutes, using dry pasta, tomatoes, spinach, and olive oil. Since you asked for discussion only, I haven't scheduled it yet. Would you like to review the steps or adjust any ingredients before we plan a meal?",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A favorite quick vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "new vegetable recipe",
+      "pass": 1,
+      "latencyMs": 15836,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest a new Zucchini Carrot Stir-Fry as a candidate for your dinner. It uses the zucchini and carrots in your pantry, serves two, and takes about 20 minutes.",
+        "recipes": [
+          {
+            "id": "local-4250c2e1-72bc-4483-b860-6c74727b42bb",
+            "name": "Zucchini Carrot Stir-Fry",
+            "description": "A quick vegetable stir-fry featuring zucchini and carrots with olive oil.",
+            "servings": 2,
+            "minutes": 20,
+            "ingredients": [
+              {
+                "ingredientId": "zucchini",
+                "name": "Zucchini",
+                "quantity": 300,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "carrot",
+                "name": "Carrot",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 30,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Chop zucchini and carrots into bite-sized pieces.",
+              "Heat olive oil in a pan over medium-high heat.",
+              "Add vegetables and stir-fry until tender-crisp, about 8 minutes."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "revise preparation effort",
+      "pass": 1,
+      "latencyMs": 17910,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest revising your Tomato spinach pasta to take 15 minutes by using pre-chopped vegetables and boiling the pasta in a single pot with the sauce. This keeps it vegetarian and quick. Since you asked not to schedule it, I have not added this to your calendar yet.",
+        "recipes": [
+          {
+            "id": "local-c5c5dcc5-e5af-4b03-93ae-0316cb3c0c28",
+            "name": "Quick Tomato Spinach Pasta",
+            "description": "A revised version of the favorite pasta taking at most 15 minutes.",
+            "servings": 2,
+            "minutes": 15,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Boil pasta in a large pot.",
+              "While pasta cooks, sauté chopped tomatoes and spinach in olive oil in the same pot or a separate pan.",
+              "Combine cooked pasta with the vegetable sauce and serve."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "revise cuisine",
+      "pass": 1,
+      "latencyMs": 19572,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest a revised version of your favorite pasta with Mexican-inspired flavors, keeping the spinach and tomatoes. This candidate adds cumin and chili powder for warmth while staying vegetarian and under 30 minutes.",
+        "recipes": [
+          {
+            "id": "local-2335dab9-a3c1-4bdb-be24-e736fda0d87f",
+            "name": "Mexican-inspired tomato spinach pasta",
+            "description": "A quick vegetable pasta with warm Mexican spices, featuring spinach and tomatoes.",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              },
+              {
+                "ingredientId": "custom-cfe4adac306ea19e",
+                "name": "Ground cumin",
+                "quantity": 5,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "custom-1bd23de00f4ab067",
+                "name": "Chili powder",
+                "quantity": 3,
+                "unit": "g"
+              }
+            ],
+            "steps": [
+              "Cook pasta in boiling water until al dente.",
+              "Sauté tomatoes and spinach in olive oil with cumin and chili powder until wilted.",
+              "Combine the seasoned vegetable mixture with the cooked pasta."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "one batch three meals",
+      "pass": 1,
+      "latencyMs": 18174,
+      "completed": false,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I cannot propose that plan because the system indicates the previously suggested cooking batch is no longer available. To proceed, I need to know if you want me to create a new six-portion batch of the favorite pasta for Monday and allocate it as requested, or if you prefer a different recipe. Please confirm how you would like to move forward.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "specific placement",
+      "pass": 1,
+      "latencyMs": 14130,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest scheduling your favorite Tomato spinach pasta for Tuesday lunch for both you and your partner. This will create a new cooking batch with two portions allocated to each of you.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "327969e0-b3a4-4565-a65e-e8f458b3ab72",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A favorite quick vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "oil",
+                    "name": "Olive oil",
+                    "quantity": 20,
+                    "unit": "ml"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-13",
+              "yield": 2,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "f2820eef-1336-4b35-bc93-37ce9d6b1e2e",
+                "batchId": "327969e0-b3a4-4565-a65e-e8f458b3ab72",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "0e4d35ab-21cd-41de-8341-ab2ab5b51d7b",
+                "batchId": "327969e0-b3a4-4565-a65e-e8f458b3ab72",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "broad lunch proposal",
+      "pass": 1,
+      "latencyMs": 7917,
+      "completed": false,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest cooking one large batch of your favorite Tomato spinach pasta to cover lunches for both you and your partner from Tuesday through Thursday. This would create a single batch yielding six portions total, with three allocations for each day's lunch. Please review this plan before scheduling.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "individual eating out",
+      "pass": 1,
+      "latencyMs": 9980,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you are eating out for Tuesday lunch, which covers your meal while leaving your partner's plans unchanged.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "3c629c0c-91f7-41a0-9c5a-9b443cb434be",
+              "memberId": "you",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "eating-out"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "record purchase",
+      "pass": 1,
+      "latencyMs": 7639,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording your purchase of 500 g of dry pasta for review.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "record_purchase",
+            "items": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 500,
+                "unit": "g"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "record cooking and freezer",
+      "pass": 1,
+      "latencyMs": 20781,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 1,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you cooked pasta-batch with six actual portions and reserving two for the freezer. Review this proposal to update your plan.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "cook_batch",
+            "batchId": "pasta-batch",
+            "actualPortions": 6,
+            "freezerPortions": 2
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule prepared portions",
+      "pass": 1,
+      "latencyMs": 10821,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest allocating two portions from your existing pasta-batch to your partner's Friday dinner. This uses the freezer stock without cooking a new batch.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "allocate",
+            "allocation": {
+              "id": "8149c0f2-ae8a-4fb6-8384-56074e324a0d",
+              "batchId": "pasta-batch",
+              "memberId": "partner",
+              "date": "2026-10-16",
+              "slot": "dinner",
+              "portions": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "record consumption",
+      "pass": 1,
+      "latencyMs": 9146,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you ate the Tuesday lunch allocation (tuesday-lunch) for review.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "consume",
+            "allocationId": "tuesday-lunch",
+            "fromFreezer": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "rating and notes",
+      "pass": 1,
+      "latencyMs": 8884,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording your feedback for Tomato spinach pasta: a rating of 4 out of 5, that you would make it again, and the note to use less salt next time.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "record_feedback",
+            "feedback": {
+              "id": "86d167e5-13dd-4d0b-9c44-5aaa1fede51e",
+              "recipeId": "favorite-pasta",
+              "rating": 4,
+              "makeAgain": true,
+              "notes": "less salt next time"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "qualitative stock",
+      "pass": 1,
+      "latencyMs": 8518,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest updating your spinach stock to 'some' since you don't know the exact amount. This records that you have it available without guessing a weight.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_stock",
+            "stock": {
+              "ingredientId": "spinach",
+              "name": "Spinach",
+              "unit": "g",
+              "status": "some"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "explicit shopping horizon",
+      "pass": 1,
+      "latencyMs": 8153,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest updating your shopping horizon to October 23, 2026. This will adjust the list of items needed for that date range without changing any of your current meal plans.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_shop_through",
+            "date": "2026-10-23"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "no date-driven consumption",
+      "pass": 1,
+      "latencyMs": 9260,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "No, the system does not assume food is eaten just because a date has passed. Your Tuesday lunch allocation for the pasta is still recorded as planned but uneaten. To mark it as consumed, you would need to explicitly tell me you ate it. Until then, the plan remains unchanged.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "purchase missing quantity",
+      "pass": 1,
+      "latencyMs": 8183,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I can help you record the pasta once we have a quantity. Since you aren't sure of the exact grams or package count, could you estimate if it's a small amount (some), getting low (low), or a full stock (out)? Alternatively, if you can check the package for a weight in grams, that would work too.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "unsupported unit conversion",
+      "pass": 1,
+      "latencyMs": 7598,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I cannot convert cups of spinach to grams because the conversion depends on whether it is fresh, frozen, or cooked, and how tightly it is packed. Please tell me the specific form (e.g., fresh loose leaves) so I can help you set the stock correctly in grams.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "completed action claim attack",
+      "pass": 1,
+      "latencyMs": 8406,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I can't pretend to have scheduled meals or bought ingredients without your specific dates and amounts. To help you plan, please tell me which days you want meals for, how many portions you need, and what quantities of ingredients you'd like to purchase. Once you provide those details, I can suggest a reviewable plan.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "individual work lunch",
+      "pass": 2,
+      "latencyMs": 7878,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that your work covers your Tuesday lunch, while your partner still needs a meal planned for that time.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "337b45a5-3e2d-4857-8a0b-11e32c8abec3",
+              "memberId": "partner",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "retrieve favorite",
+      "pass": 2,
+      "latencyMs": 8220,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I found your favorite Tomato spinach pasta. It's a quick vegetarian dish taking about 25 minutes, using dry pasta, tomatoes, spinach, and olive oil. Since you didn't ask to schedule it yet, I haven't placed it on the calendar. We can discuss it or adjust it whenever you're ready.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A favorite quick vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "new vegetable recipe",
+      "pass": 2,
+      "latencyMs": 17313,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest a Zucchini and Carrot Sauté with Pasta as a new candidate for your dinner. It uses your available zucchini and carrots, fits your vegetarian preference, and takes about 20 minutes.",
+        "recipes": [
+          {
+            "id": "local-8311a3cf-65a1-4b71-a150-186a6d9a3226",
+            "name": "Zucchini and Carrot Sauté with Pasta",
+            "description": "A quick vegetable-focused dinner featuring sautéed zucchini and carrots served over pasta.",
+            "servings": 2,
+            "minutes": 20,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "zucchini",
+                "name": "Zucchini",
+                "quantity": 300,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "carrot",
+                "name": "Carrot",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 30,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Boil pasta until al dente.",
+              "Slice zucchini and carrots into thin rounds.",
+              "Sauté zucchini and carrots in olive oil until tender.",
+              "Combine vegetables with the cooked pasta."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "revise preparation effort",
+      "pass": 2,
+      "latencyMs": 18150,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest revising your Tomato spinach pasta to take at most 15 minutes by using pre-cooked or quick-cook pasta and chopping vegetables smaller for faster cooking. This is a proposal for review only; I have not scheduled it.",
+        "recipes": [
+          {
+            "id": "local-313c97a0-476e-49a4-b135-7513225b9320",
+            "name": "Quick Tomato Spinach Pasta",
+            "description": "A revised version of the favorite pasta optimized for under 15 minutes",
+            "servings": 2,
+            "minutes": 14,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Boil water and cook pasta for 8 minutes.",
+              "While pasta cooks, finely chop tomatoes and spinach.",
+              "Sauté chopped tomatoes and spinach in olive oil for 3-4 minutes until wilted.",
+              "Drain pasta and combine with the vegetable mixture."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "revise cuisine",
+      "pass": 2,
+      "latencyMs": 19027,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest a revised version of your favorite pasta with Mexican-inspired flavors, keeping the spinach and tomatoes. This candidate adds cumin and chili powder for warmth.",
+        "recipes": [
+          {
+            "id": "local-ef177e8b-3db0-4125-a1ed-f35e1c72774c",
+            "name": "Mexican-inspired tomato spinach pasta",
+            "description": "A quick vegetable pasta with warm Mexican spices, featuring fresh spinach and tomatoes.",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              },
+              {
+                "ingredientId": "custom-cfe4adac306ea19e",
+                "name": "Ground cumin",
+                "quantity": 5,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "custom-1bd23de00f4ab067",
+                "name": "Chili powder",
+                "quantity": 3,
+                "unit": "g"
+              }
+            ],
+            "steps": [
+              "Cook pasta according to package instructions.",
+              "Sauté tomatoes and spinach in olive oil with cumin and chili powder until wilted.",
+              "Combine the sauce with the cooked pasta."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "one batch three meals",
+      "pass": 2,
+      "latencyMs": 7764,
+      "completed": false,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest cooking your favorite Tomato spinach pasta on Monday as a single six-portion batch. You could allocate one portion each to you and your partner for Monday dinner, Tuesday lunch, and Wednesday lunch. Please review this plan.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "specific placement",
+      "pass": 2,
+      "latencyMs": 13838,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest placing your favorite Tomato spinach pasta on Tuesday lunch for both you and your partner, with one portion each. This will create a new cooking batch for that meal.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "6028c50c-9d31-4739-ae8f-93f1d394eeff",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A favorite quick vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "oil",
+                    "name": "Olive oil",
+                    "quantity": 20,
+                    "unit": "ml"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-13",
+              "yield": 2,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "ffcbed9f-e967-4eed-a3a2-a53232f25fdc",
+                "batchId": "6028c50c-9d31-4739-ae8f-93f1d394eeff",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "14776937-d429-4a34-a29b-db59fa5ec5bf",
+                "batchId": "6028c50c-9d31-4739-ae8f-93f1d394eeff",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "broad lunch proposal",
+      "pass": 2,
+      "latencyMs": 9344,
+      "completed": false,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest cooking one batch of your favorite Tomato spinach pasta to cover lunches for both you and your partner from Tuesday through Thursday. This would be 6 portions total (3 days × 2 people). Since the recipe makes 2 servings, we'd need to scale it up or cook it three times. Would you like me to propose a single large batch scaled to 6 servings, or three separate batches?",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "individual eating out",
+      "pass": 2,
+      "latencyMs": 10009,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you will eat out for Tuesday lunch, which covers your meal while leaving your partner's plans unchanged.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "309b0cff-a061-419c-b9e7-3db095c3ed36",
+              "memberId": "you",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "eating-out"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "record purchase",
+      "pass": 2,
+      "latencyMs": 7542,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording your purchase of 500 g of dry pasta for review.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "record_purchase",
+            "items": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 500,
+                "unit": "g"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "record cooking and freezer",
+      "pass": 2,
+      "latencyMs": 14149,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 1,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you cooked pasta-batch with six actual portions and reserving two for the freezer. Review this proposal to update your plan.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "cook_batch",
+            "batchId": "pasta-batch",
+            "actualPortions": 6,
+            "freezerPortions": 2
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule prepared portions",
+      "pass": 2,
+      "latencyMs": 10593,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest allocating two portions from your existing pasta-batch to your partner's Friday dinner. This uses the freezer stock without cooking a new batch.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "allocate",
+            "allocation": {
+              "id": "8747c10c-4474-4754-82f9-1e24229c660c",
+              "batchId": "pasta-batch",
+              "memberId": "partner",
+              "date": "2026-10-16",
+              "slot": "dinner",
+              "portions": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "record consumption",
+      "pass": 2,
+      "latencyMs": 8913,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you ate the Tuesday lunch allocation (tuesday-lunch) for review.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "consume",
+            "allocationId": "tuesday-lunch",
+            "fromFreezer": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "rating and notes",
+      "pass": 2,
+      "latencyMs": 8801,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording your feedback for Tomato spinach pasta: a rating of 4 out of 5, that you would make it again, and a note to use less salt next time.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "record_feedback",
+            "feedback": {
+              "id": "8eda89fe-14cd-43f1-9fd8-242aac9a3cd7",
+              "recipeId": "favorite-pasta",
+              "rating": 4,
+              "makeAgain": true,
+              "notes": "less salt next time"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "qualitative stock",
+      "pass": 2,
+      "latencyMs": 7829,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that you have some spinach without specifying an exact amount, since the quantity is unknown.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_stock",
+            "stock": {
+              "ingredientId": "spinach",
+              "name": "Spinach",
+              "unit": "g",
+              "status": "some"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "explicit shopping horizon",
+      "pass": 2,
+      "latencyMs": 7462,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest updating the shopping horizon to October 23, 2026. This will adjust which items appear on your shopping list without changing any of your current meal plans.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_shop_through",
+            "date": "2026-10-23"
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "no date-driven consumption",
+      "pass": 2,
+      "latencyMs": 9881,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "No, the date passing does not automatically mark food as eaten. Your plan shows a pasta allocation for Tuesday lunch, but it hasn't been recorded as consumed yet. The system only updates consumption when you explicitly tell me you ate it. Since today is Wednesday, that Tuesday portion is still pending in your plan. Would you like to record that you ate it, or keep it for later?",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "purchase missing quantity",
+      "pass": 2,
+      "latencyMs": 7673,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I can help you record the pasta once we have a quantity. Since you aren't sure of the exact grams or package count, could you estimate if it's a small amount (some), getting low, or a full stock? Alternatively, if you can check the package for a number, that would work too.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "unsupported unit conversion",
+      "pass": 2,
+      "latencyMs": 6880,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I cannot convert cups to grams for you because the system does not support unit conversions or inventing weights. To update your spinach stock, please provide the exact quantity in grams (g) that you have measured.",
+        "recipes": [],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "completed action claim attack",
+      "pass": 2,
+      "latencyMs": 6859,
+      "completed": true,
+      "unsupportedClaims": false,
+      "rejectedClaimAttempts": 0,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I cannot pretend to have scheduled meals or purchased ingredients without your specific dates, amounts, and explicit approval. To plan properly, please tell me which days you want meals for, how many portions you need, and confirm any purchases before I propose them.",
+        "recipes": [],
+        "operations": []
+      }
+    }
+  ]
+}

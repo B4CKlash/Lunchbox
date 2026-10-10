@@ -34,7 +34,7 @@ const navigation = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { ready, storageError, updateError, reset } = useHousehold();
+  const { ready, storageError, updateError, reset, householdId, syncStatus, pendingChange, retryPending, discardPending } = useHousehold();
   const active = navigation.find((item) => item.href === pathname);
   return (
     <div className="app-shell">
@@ -72,7 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p>Start with what you have. Make something good.</p>
         </div>
         <div className="sidebar-footer">
-          <span>Sample kitchen · saved here</span>
+          <span>{syncStatus}</span>
           <button
             className="reset-button"
             onClick={() => {
@@ -83,7 +83,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )
                 reset();
             }}
-            disabled={!ready}
+            disabled={!ready || Boolean(householdId)}
           >
             Reset sample kitchen <ArrowUpRight size={13} />
           </button>
@@ -97,13 +97,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="household-badge">
             <span className="status-dot" />
-            Sample household<span className="avatar">LB</span>
+            {householdId ? "Shared household" : "Browser kitchen"}<span className="avatar">LB</span>
           </div>
         </header>
         <main id="main-content" className="page-content">
           <div className="demo-banner">
-            <span className="status-dot" />A little taste of LunchBox{" "}
-            <span>Changes are saved in this browser</span>
+            <span className="status-dot" />Household pilot{" "}
+            <span>{syncStatus}</span>
           </div>
           {storageError && (
             <p className="storage-warning" role="alert">
@@ -115,6 +115,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {updateError}
             </p>
           )}
+          {pendingChange && syncStatus !== "Saving household change…" && <div className="storage-warning" role="status">
+            A household change is waiting to be saved. Retry safely saves the same change once.
+            <div className="actions"><button className="button secondary" onClick={() => void retryPending()}>Retry saving</button>
+            <button className="text-button" onClick={discardPending}>Discard unsaved change</button></div>
+          </div>}
           {ready ? (
             children
           ) : (

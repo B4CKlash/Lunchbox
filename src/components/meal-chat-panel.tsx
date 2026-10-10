@@ -8,6 +8,8 @@ import { chatMealsResponseSchema } from "@/lib/contracts";
 import { formatMealRetryTime, mealFailureMessage, mealRequestFailure } from "@/features/meals/client-request";
 import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meals/meal-retry";
 import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
+import { requestWorkerRecipe } from "@/features/meals/local-recipe-request";
+import { chatMealsRequestSchema } from "@/lib/contracts";
 
 const prompts = [
   "What can I make tonight?",
@@ -19,10 +21,14 @@ const prompts = [
 export function MealChatPanel({
   onNotice,
   aiMode,
+  aiBackend = "gateway",
   onImportUrl,
+  active,
 }: {
   onNotice: (message: string) => void;
   aiMode: "demo" | "ai";
+  aiBackend?: "gateway" | "local-worker";
+  active: boolean;
   onImportUrl: (url: string) => void;
 }) {
   const {
@@ -60,15 +66,15 @@ export function MealChatPanel({
   }, [workspace.aiCooldownUntil, deferAiRequests]);
 
   // A result from an older kitchen must never appear as a current recommendation.
-  // Keeping this panel mounted allows a response to finish when only the view changes.
+  // Leaving Chat releases its request before the recipe feed resumes.
   useEffect(
     () => () => activeRequest.current?.abort(),
-    [context, chatResetVersion],
+    [context, chatResetVersion, active],
   );
 
   async function sendMessage(prompt: string) {
     const message = prompt.trim();
-    if (!message || loading || activeRequest.current) return;
+    if (!active || !message || loading || activeRequest.current) return;
     if (cooldownActive) {
       setError("AI is busy. Please wait before sending another message.");
       return;
@@ -86,7 +92,7 @@ export function MealChatPanel({
         activeRequest.current = null;
         setPending(null);
         setError(
-          "Your kitchen or conversation changed. Send your message again to use the latest details.",
+          "Reply stopped. Your message is saved; send it again when you’re ready.",
         );
       },
       { once: true },
@@ -97,15 +103,19 @@ export function MealChatPanel({
     setWaiting(null);
     try {
       const result = await withMealRateLimitRecovery(async () => {
-        const response = await fetch("/api/meals/chat", {
+        const input = chatMealsRequestSchema.parse({
+          ...JSON.parse(context),
+          messages: workspace.chatMessages,
+          message,
+        });
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(aiBackend === "local-worker" ? 240000 : 50000)]);
+        const response = aiMode === "ai" && aiBackend === "local-worker"
+          ? await requestWorkerRecipe({ kind: "chat", input }, signal)
+          : await fetch("/api/meals/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...JSON.parse(context),
-            messages: workspace.chatMessages,
-            message,
-          }),
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(50000)]),
+          body: JSON.stringify(input),
+          signal,
         });
         if (!response.ok) throw await mealRequestFailure(response);
         const parsed = chatMealsResponseSchema.safeParse(await response.json());

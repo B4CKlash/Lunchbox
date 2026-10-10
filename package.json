@@ -12,9 +12,12 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "tsx --conditions=react-server --test \"src/**/*.test.ts\"",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm test",
+    "worker": "tsx --conditions=react-server --env-file=.env.local scripts/local-ai-worker.ts",
+    "evaluate:local": "tsx --conditions=react-server --env-file=.env.local scripts/evaluate-local-ai.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.66",
     "@supabase/supabase-js": "^2.117.2",
     "ai": "7.0.122",
     "htmlparser2": "^12.0.0",

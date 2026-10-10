@@ -1,0 +1,31 @@
+{
+  "evaluatedAt": "2026-10-08T20:00:26.020Z",
+  "model": "qwen3.5:27b",
+  "digest": "2d2e4b8fc7c0479b70f8cba9fc8bdb49a3c9a43a8a6da3873b724c9fca4672ef",
+  "results": [
+    {
+      "scenario": "individual work lunch",
+      "pass": 1,
+      "latencyMs": 14176,
+      "completed": true,
+      "unsupportedClaims": false,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that your work covers your Tuesday lunch. Your partner will still need a meal plan for that occasion.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "e276a65f-17ee-4a08-9dae-17e1228204a2",
+              "memberId": "partner",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "work"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
