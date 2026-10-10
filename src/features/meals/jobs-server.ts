@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { authorizeHouseholdRequest, checkDatabaseError, getHouseholdDatabase, HouseholdApiError, householdFailure, householdRequestBody, householdResponse, requireHouseholdMember } from "@/features/accounts/server";
@@ -8,6 +9,7 @@ import { applyPilotCommand } from "@/features/planning/pilot";
 import { aiJobSchema, claimedAiJobSchema, enqueueAiJobSchema, isWorkerOnline, publicAiJob, workerActionSchema, type AiJobResult, type ClaimedAiJob } from "./jobs";
 import { claimsCompletedAction, favoriteClaimFacts } from "./planning-claims";
 import { findPlanningFavorites } from "./planning-fixtures";
+import { extractExplicitProfileChanges } from "@/features/planning/profile";
 
 export function authorizeWorker(request: Request, env: Record<string, string | undefined> = process.env) {
   const configured = env.LUNCHBOX_WORKER_TOKEN;
@@ -25,10 +27,21 @@ export function validateAiJobResult(job: ClaimedAiJob, result: AiJobResult) {
   if (job.kind !== result.kind) throw new HouseholdApiError(400, "invalid_result", "The worker returned the wrong kind of result.");
   const favoriteFacts = result.kind === "planning" ? favoriteClaimFacts(findPlanningFavorites(job.context), result.data) : [];
   if ((result.kind === "planning" || result.kind === "chat") && claimsCompletedAction(result.data.reply, favoriteFacts)) throw new HouseholdApiError(400, "invalid_result", "The worker claimed an action was completed without a household receipt.");
+  if (result.kind === "planning" || result.kind === "chat") {
+    const message = job.request.kind === "planning" ? job.request.message : job.request.kind === "chat" ? job.request.input.message : "";
+    if (!isDeepStrictEqual(result.data.profileChanges ?? [], extractExplicitProfileChanges(job.context, message, job.actorMemberId)))
+      throw new HouseholdApiError(400, "invalid_result", "The worker's saved preferences did not match the explicit current request.");
+  }
   if (result.kind !== "planning") return result;
   let state = job.context;
   // Preview only. Actual changes must be accepted through /commands.
   for (const [index, operation] of result.data.operations.entries()) {
+    if (operation.type === "upsert_profile_fact" || operation.type === "remove_profile_fact" || operation.type === "receive_recipe_chat_result"
+      || operation.type === "receive_planning_result" || (operation.type === "propose" && operation.changes.some((change) => change.type === "upsert_profile_fact" || change.type === "remove_profile_fact")))
+      throw new HouseholdApiError(400, "invalid_result", "Preference learning uses the bound assistant response, not model-authored household commands.");
+    const changes = operation.type === "propose" ? operation.changes : [operation];
+    if (changes.some((change) => change.type === "record_feedback" && change.feedback.memberId !== job.actorMemberId))
+      throw new HouseholdApiError(400, "invalid_result", "Recipe feedback must belong to the original requesting person.");
     state = applyPilotCommand(state, { id: `job-preview-${job.id}-${index}`, expectedRevision: state.pilot?.revision ?? 0, operation }).state;
   }
   return result;

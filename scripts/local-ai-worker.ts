@@ -3,6 +3,7 @@ import { claimedAiJobSchema, aiJobResultSchema, type AiJobResult, type ClaimedAi
 import { createLocalModel, verifyLocalModel } from "../src/features/meals/local-model";
 import { runLocalPlanning } from "../src/features/meals/local-planner";
 import { liveChatAboutMeals, liveSuggestMeals } from "../src/features/meals/live-provider";
+import { explicitProfileReply, extractExplicitProfileChanges } from "../src/features/planning/profile";
 import { importRecipe } from "../src/features/meals/import-provider";
 import { publicAiError } from "../src/features/meals/ai-runtime";
 
@@ -117,7 +118,15 @@ export async function processJob(job: ClaimedAiJob, signal: AbortSignal): Promis
   switch (job.request.kind) {
     case "planning": return { kind: "planning", data: await runLocalPlanning(job.context, job.request.message, { model, signal, verify: false, actorMemberId: job.actorMemberId }) };
     case "suggest": return { kind: "suggest", data: await liveSuggestMeals({ ...job.request.input, pantry: job.context.pantry, preferences: job.context.preferences }, { model, signal, householdContext: job.context, actorMemberId: job.actorMemberId }) };
-    case "chat": return { kind: "chat", data: await liveChatAboutMeals({ ...job.request.input, pantry: job.context.pantry, preferences: job.context.preferences, recipeBox: job.context.workspace.recipeBox }, { model, signal, householdContext: job.context, actorMemberId: job.actorMemberId }) };
+    case "chat": {
+      const input = job.request.input;
+      const profileChanges = extractExplicitProfileChanges(job.context, input.message, job.actorMemberId);
+      const reply = explicitProfileReply(job.context, input.message, job.actorMemberId);
+      const data = reply ? { source: "ai" as const, reply, recipes: [], servings: job.context.preferences.servings }
+        : await liveChatAboutMeals({ ...input, pantry: job.context.pantry, preferences: job.context.preferences, recipeBox: job.context.workspace.recipeBox }, { model, signal, householdContext: job.context, actorMemberId: job.actorMemberId });
+      return { kind: "chat", data: { ...data, ...(profileChanges.length ? { profileChanges } : {}) } };
+    }
+
     case "extract": return { kind: "extract", data: await importRecipe(job.request.input, { model, signal }) };
   }
 }

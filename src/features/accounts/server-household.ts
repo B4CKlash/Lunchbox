@@ -3,10 +3,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { householdStateSchema } from "@/lib/contracts";
+import { householdStateSchema, type PilotOperation } from "@/lib/contracts";
 import { applyHouseholdAction } from "@/features/meals/workspace-state";
 import { aiJobRequestSchema, aiJobResultSchema } from "@/features/meals/jobs";
 import { applyPilotCommand, ensurePilot, PilotCommandError } from "@/features/planning/pilot";
+import { extractExplicitProfileChanges } from "@/features/planning/profile";
 import { remoteCommandSchema, remoteHouseholdSchema, type RemoteCommand, type RemoteHousehold } from "@/features/pantry/remote-protocol";
 import { authorizeHouseholdRequest, checkDatabaseError, HouseholdApiError, householdFailure, householdRequestBody, householdResponse, requireHouseholdMember } from "./server";
 
@@ -32,8 +33,8 @@ export function reduceRemoteCommand(current: RemoteHousehold, input: RemoteComma
     const changes = operation.type === "propose" ? operation.changes
       : operation.type === "receive_planning_result" ? operation.proposal?.changes ?? []
       : operation.type === "apply_proposal" ? state.pilot.proposals.find((proposal) => proposal.id === operation.proposalId)?.changes ?? [] : [operation];
-    if (changes.some((change) => change.type === "record_feedback") && !current.currentMemberId)
-      throw new HouseholdApiError(409, "actor_unavailable", "This account needs a household person before saving feedback.");
+    if (changes.some((change) => ["record_feedback", "upsert_profile_fact", "remove_profile_fact"].includes(change.type)) && !current.currentMemberId)
+      throw new HouseholdApiError(409, "actor_unavailable", "This account needs a household person before saving preferences or feedback.");
     const result = applyPilotCommand(state, input.command.command, { actorMemberId: current.currentMemberId });
     if (result.duplicate) throw new HouseholdApiError(409, "command_id_reused", "Retry this action using its original request identifier.");
     return { state: result.state, receipt: result.receipt };
@@ -41,6 +42,37 @@ export function reduceRemoteCommand(current: RemoteHousehold, input: RemoteComma
   const next = applyHouseholdAction(state, input.command.action);
   if (next.pilot?.revision !== current.revision + 1) throw new HouseholdApiError(400, "invalid_request", "This action cannot be applied to the live household. Use the planning workspace.");
   return { state: next, receipt: { id: input.commandId, revision: current.revision + 1, summary: "Household updated." } };
+}
+
+/** A browser can resume a partner's response, but cannot author its evidence or effects. */
+export function assertProfileResultJob(
+  current: RemoteHousehold,
+  operation: PilotOperation,
+  row: Record<string, unknown> | null | undefined,
+  sourceActorMemberId: string | undefined,
+) {
+  const source = operation.type === "receive_planning_result" ? operation.profileSource
+    : operation.type === "receive_recipe_chat_result" ? {
+      jobId: operation.jobId, request: operation.request, actorMemberId: operation.actorMemberId, changes: operation.result.profileChanges ?? [],
+    } : undefined;
+  if (!source) return;
+  const request = aiJobRequestSchema.safeParse(row?.request);
+  const result = aiJobResultSchema.safeParse(row?.result);
+  const expectedKind = operation.type === "receive_recipe_chat_result" ? "chat" : "planning";
+  if (!row || row.status !== "completed" || row.household_revision !== current.revision || row.session_id !== current.state.pilot?.session.id
+    || sourceActorMemberId !== source.actorMemberId || !request.success || request.data.kind !== expectedKind
+    || !result.success || result.data.kind !== expectedKind) {
+    throw new HouseholdApiError(409, "invalid_profile_result", "This assistant response no longer matches the household or its original requester. Retry with the current kitchen.");
+  }
+  const message = request.data.kind === "planning" ? request.data.message : request.data.kind === "chat" ? request.data.input.message : "";
+  const expected = extractExplicitProfileChanges(current.state, message, sourceActorMemberId!);
+  const persistedChanges = result.data.kind === "planning" || result.data.kind === "chat" ? result.data.data.profileChanges ?? [] : [];
+  const sourceMessage = operation.type === "receive_planning_result" ? operation.session.messages.find((entry) => entry.id === `job-${source.jobId}-user`) : undefined;
+  if (message !== source.request || !isDeepStrictEqual(source.changes, expected) || !isDeepStrictEqual(persistedChanges, expected)
+    || (operation.type === "receive_planning_result" && (sourceMessage?.role !== "user" || sourceMessage.authorMemberId !== source.actorMemberId || sourceMessage.text !== message))
+    || (operation.type === "receive_recipe_chat_result" && (result.data.kind !== "chat" || !isDeepStrictEqual(operation.result, result.data.data)))) {
+    throw new HouseholdApiError(409, "invalid_profile_result", "These saved preferences or conversation do not match the completed assistant request.");
+  }
 }
 
 export async function applyRemoteCommand(db: SupabaseClient, userId: string, input: RemoteCommand) {
@@ -60,6 +92,17 @@ export async function applyRemoteCommand(db: SupabaseClient, userId: string, inp
     // applied before the database existed. A retried purchase stays a no-op.
     const duplicate = applyPilotCommand(current.state, mutation.command);
     if (duplicate.duplicate) return { ...current, receipt: duplicate.receipt, duplicate: true };
+  }
+  if (mutation.kind === "pilot" && ((mutation.command.operation.type === "receive_planning_result" && mutation.command.operation.profileSource)
+    || mutation.command.operation.type === "receive_recipe_chat_result")) {
+    const operation = mutation.command.operation;
+    const jobId = operation.type === "receive_recipe_chat_result" ? operation.jobId
+      : operation.type === "receive_planning_result" ? operation.profileSource!.jobId : "";
+    const job = await db.from("household_ai_jobs").select("status,household_revision,session_id,requested_by,request,result").eq("household_id", input.householdId).eq("id", jobId).maybeSingle();
+    checkDatabaseError(job.error);
+    const actor = job.data ? await db.from("household_members").select("member_id").eq("household_id", input.householdId).eq("user_id", job.data.requested_by).maybeSingle() : null;
+    if (actor) checkDatabaseError(actor.error);
+    assertProfileResultJob(current, operation, job.data, actor?.data?.member_id);
   }
   if (mutation.kind === "pilot" && mutation.command.operation.type === "receive_planning_result" && mutation.command.operation.directPlacement) {
     const source = mutation.command.operation.directPlacement;

@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
+import { ProfileMemory } from "@/components/profile-memory";
 import { MealChatPanel } from "@/components/meal-chat-panel";
 import { MealPlanPanel } from "@/components/meal-plan-panel";
 import { RecipeCard } from "@/components/recipe-card";
@@ -124,6 +125,7 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
         </div>
         <span className="pill demo-pill">{aiMode === "ai" ? "AI kitchen assistant" : "Demo recipe workspace"}</span>
       </header>
+      <ProfileMemory />
       <section
         className={`personalization-banner${state.preferences.onboardingComplete ? " complete" : ""}`}
         aria-label="Recommendation preferences"

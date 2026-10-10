@@ -11,6 +11,26 @@ const draft = (patch: Partial<LocalPlanningDraft> = {}): LocalPlanningDraft => (
 let index = 0;
 const ids = () => `test-${index++}`;
 
+test("explicit stable profile assertions bypass model inference and temporary constraints stay request-only", async () => {
+  let calls = 0;
+  const model = new MockLanguageModelV4({ doGenerate: async () => { calls++; throw new Error("No inference needed"); } });
+  const result = await runLocalPlanning(state(), "I dislike vegetables. We don't have an oven.", { model, verify: false, actorMemberId: "partner" });
+  assert.equal(calls, 0);
+  assert.equal(result.profileChanges?.length, 2);
+  assert.deepEqual(result.operations, []);
+  assert.deepEqual(result.recipes, []);
+  const food = result.profileChanges?.[0];
+  assert.equal(food?.type === "upsert_profile_fact" && food.value.kind === "food-dislike" && food.value.scope.kind === "member" && food.value.scope.memberId, "partner");
+  await assert.rejects(runLocalPlanning(state(), "I dislike mushrooms tonight.", { model, verify: false }), /No inference needed/);
+  assert.equal(calls, 1);
+});
+
+test("local planning feedback is attributed by the application to the current requester", () => {
+  const result = reviewLocalPlanningWire(state(), { intent: "feedback", reply: "Review this rating.",
+    feedback: [{ recipeId: recipe.id, rating: 5, makeAgain: true, notes: "Good" }] }, "partner", "I rate the pasta five out of five.");
+  assert.equal(result.operations[0].type === "record_feedback" && result.operations[0].feedback.memberId, "partner");
+});
+
 test("local planning preserves favorite provenance without rewriting it", () => {
   const result = reviewLocalPlanningDraft(state(), draft({ intent: "favorite", favoriteRecipeIds: ["favorite"] }), ids);
   assert.deepEqual(result.recipes, [recipe]);

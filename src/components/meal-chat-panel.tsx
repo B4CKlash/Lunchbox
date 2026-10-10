@@ -8,9 +8,12 @@ import { chatMealsResponseSchema } from "@/lib/contracts";
 import { formatMealRetryTime, mealFailureMessage, mealRequestFailure } from "@/features/meals/client-request";
 import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meals/meal-retry";
 import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
-import { requestWorkerRecipe } from "@/features/meals/local-recipe-request";
-import { chatMealsRequestSchema } from "@/lib/contracts";
+import { requestWorkerRecipeJob } from "@/features/meals/local-recipe-request";
+import { chatMealsRequestSchema, type ChatMealsResponse } from "@/lib/contracts";
+import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
+import type { AiJob } from "@/features/meals/jobs";
 import { recommendationContextKey } from "@/features/meals/recommendation-context";
+import { planningUserMessageAuthor } from "@/features/meals/planning-message-author";
 
 const prompts = [
   "What can I make tonight?",
@@ -38,6 +41,9 @@ export function MealChatPanel({
     householdId,
     setChatDraft,
     completeChatTurn,
+    dispatchPilot,
+    flushHouseholdChanges,
+    pendingChange,
     chatResetVersion,
     clearChat,
     clearRecipeFocus,
@@ -50,7 +56,9 @@ export function MealChatPanel({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<MealRequestWait | null>(null);
+  const [retrySave, setRetrySave] = useState<{ key: string; message: string; jobId: string } | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
+  const completedReply = useRef<{ key: string; message: string; result: ChatMealsResponse; jobId: string; actorMemberId: string; baseRevision: number } | null>(null);
   const latestCooldown = useRef({ until: workspace.aiCooldownUntil, deferAiRequests });
   const cooldownActive = useMealCooldown(workspace.aiCooldownUntil);
   const context = JSON.stringify({
@@ -64,6 +72,7 @@ export function MealChatPanel({
   });
   const requestKey = JSON.stringify([householdId, currentMemberId, recommendationContextKey(state, currentMemberId ?? state.pilot?.members[0]?.id), context]);
   const loading = pending?.key === requestKey;
+  const replyAlreadySaved = Boolean(retrySave && workspace.chatMessages.some((message) => message.id === `job-${retrySave.jobId}-assistant`));
 
   useEffect(() => {
     latestCooldown.current = { until: workspace.aiCooldownUntil, deferAiRequests };
@@ -101,31 +110,48 @@ export function MealChatPanel({
       },
       { once: true },
     );
-    setChatDraft(message);
+    if (workspace.chatDraft !== message) setChatDraft(message);
     setPending({ key: requestKey, prompt: message });
     setError(null);
     setWaiting(null);
     try {
-      const result = await withMealRateLimitRecovery(async () => {
+      const response = await withMealRateLimitRecovery(async () => {
+        const snapshot = await flushHouseholdChanges();
+        const cached = completedReply.current;
+        if (cached?.key === requestKey && cached.message === message) {
+          if (!snapshot.workspace.chatMessages.some((entry) => entry.id === `job-${cached.jobId}-assistant`)
+            && snapshot.pilot?.revision === cached.baseRevision) return cached;
+          // A global retry may already have saved it, or a conflict may have
+          // superseded its revision. A new send needs a fresh authenticated job.
+          completedReply.current = null; setRetrySave(null);
+        }
+        const actorMemberId = currentMemberId ?? snapshot.pilot?.members[0]?.id ?? "you";
         const input = chatMealsRequestSchema.parse({
-          ...JSON.parse(context),
-          messages: workspace.chatMessages,
-          message,
+          pantry: snapshot.pantry, preferences: snapshot.preferences,
+          meals: snapshot.workspace.calendar.draft ?? snapshot.meals,
+          planStatus: snapshot.workspace.calendar.draft !== null ? "draft" : "committed",
+          recipeBox: snapshot.workspace.recipeBox, focusedRecipe: snapshot.workspace.focusedRecipe ?? undefined,
+          focusedServings: snapshot.workspace.focusedServings ?? undefined,
+          messages: snapshot.workspace.chatMessages, message,
         });
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(aiBackend === "local-worker" ? 240000 : 50000)]);
-        const response = aiMode === "ai" && aiBackend === "local-worker"
-          ? await requestWorkerRecipe({ kind: "chat", input }, signal)
-          : await fetch("/api/meals/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-          signal,
-        });
-        if (!response.ok) throw await mealRequestFailure(response);
-        const parsed = chatMealsResponseSchema.safeParse(await response.json());
-        if (!parsed.success)
-          throw new Error("That reply wasn’t in a usable format. Please try again.");
-        return parsed.data;
+        let job: AiJob | undefined;
+        let result: ChatMealsResponse;
+        const memoryReply = snapshot.pilot && !householdId ? explicitProfileReply(snapshot, message, actorMemberId) : null;
+        if (aiMode === "ai" && aiBackend === "local-worker") {
+          job = await requestWorkerRecipeJob({ kind: "chat", input }, signal);
+          if (job.result?.kind !== "chat" || !job.actorMemberId) throw new Error("The completed reply is missing its requesting person. Please retry.");
+          result = job.result.data;
+        } else {
+          const fetched = memoryReply ? Response.json({ source: "demo", reply: memoryReply, recipes: [], servings: snapshot.preferences.servings })
+            : await fetch("/api/meals/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal });
+          if (!fetched.ok) throw await mealRequestFailure(fetched);
+          const parsed = chatMealsResponseSchema.safeParse(await fetched.json());
+          if (!parsed.success) throw new Error("That reply wasn’t in a usable format. Please try again.");
+          result = parsed.data;
+          if (snapshot.pilot && !householdId) result = { ...result, profileChanges: extractExplicitProfileChanges(snapshot, message, actorMemberId) };
+        }
+        return { key: requestKey, message, result, jobId: job?.id ?? crypto.randomUUID(), actorMemberId: job?.actorMemberId ?? actorMemberId, baseRevision: job?.householdRevision ?? snapshot.pilot?.revision ?? 0 };
       }, {
         signal: controller.signal,
         getCooldownUntil: () => latestCooldown.current.until,
@@ -134,6 +160,15 @@ export function MealChatPanel({
       });
       if (controller.signal.aborted) return;
       activeRequest.current = null;
+      if (state.pilot && (!householdId || (aiMode === "ai" && aiBackend === "local-worker"))) {
+        completedReply.current = response;
+        setRetrySave({ key: response.key, message, jobId: response.jobId });
+        const saved = await dispatchPilot({ type: "receive_recipe_chat_result", baseRevision: response.baseRevision, jobId: response.jobId,
+          request: message, actorMemberId: response.actorMemberId, result: response.result, submittedDraft: message });
+        if (!saved.ok) throw new Error(saved.error ?? "The reply could not be saved. Your draft is kept; retry saving it.");
+        completedReply.current = null;
+        setRetrySave(null);
+      } else {
       completeChatTurn(
         [
           {
@@ -141,19 +176,20 @@ export function MealChatPanel({
             role: "user",
             text: message,
             recipes: [],
-            servings: result.servings,
+            servings: response.result.servings,
           },
           {
             id: crypto.randomUUID(),
             role: "assistant",
-            text: result.reply,
-            source: result.source,
-            recipes: result.recipes,
-            servings: result.servings,
+            text: response.result.reply,
+            source: response.result.source,
+            recipes: response.result.recipes,
+            servings: response.result.servings,
           },
         ],
         message,
       );
+      }
       setPending(null);
     } catch (reason) {
       if (controller.signal.aborted) return;
@@ -222,7 +258,7 @@ export function MealChatPanel({
           >
             <p className="eyebrow">
               {message.role === "user"
-                ? "YOU"
+                ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : state.pilot?.members[0]?.id, members: state.pilot?.members ?? [], shared: Boolean(householdId) })
                 : message.source === "ai"
                   ? "AI ASSISTANT"
                   : "DEMO ASSISTANT"}
@@ -311,9 +347,12 @@ export function MealChatPanel({
             <span>{loading ? waiting ? "Waiting…" : "Sending…" : cooldownActive ? "Please wait" : "Send"}</span>
           </button>
         </div>
-        {error ? (
+        {error && !replyAlreadySaved ? (
           <p className="error-message" role="alert">
             {error}
+            {retrySave?.key === requestKey ? pendingChange
+              ? " Use Retry saving in the household notice above to retry the original save."
+              : <button type="button" className="text-button" onClick={() => void sendMessage(retrySave.message)}>Retry saving reply</button> : null}
           </p>
         ) : null}
         {!loading && cooldownActive ? (
@@ -327,7 +366,7 @@ export function MealChatPanel({
         ) : null}
         <div className="composer-footer">
           <p className="footnote">
-            {aiMode === "ai" ? "AI replies" : "Demo replies"} · last 20 messages saved in this browser
+            {aiMode === "ai" ? "AI replies" : "Demo replies"} · last 20 messages saved in your kitchen
           </p>
           {loading ? (
             <button className="text-button" type="button" onClick={() => {
