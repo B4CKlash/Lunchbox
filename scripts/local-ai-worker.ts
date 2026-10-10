@@ -116,8 +116,8 @@ export async function processJob(job: ClaimedAiJob, signal: AbortSignal): Promis
   const model = createLocalModel();
   switch (job.request.kind) {
     case "planning": return { kind: "planning", data: await runLocalPlanning(job.context, job.request.message, { model, signal, verify: false, actorMemberId: job.actorMemberId }) };
-    case "suggest": return { kind: "suggest", data: await liveSuggestMeals({ ...job.request.input, pantry: job.context.pantry, preferences: job.context.preferences }, { model, signal, householdContext: job.context }) };
-    case "chat": return { kind: "chat", data: await liveChatAboutMeals({ ...job.request.input, pantry: job.context.pantry, preferences: job.context.preferences, recipeBox: job.context.workspace.recipeBox }, { model, signal, householdContext: job.context }) };
+    case "suggest": return { kind: "suggest", data: await liveSuggestMeals({ ...job.request.input, pantry: job.context.pantry, preferences: job.context.preferences }, { model, signal, householdContext: job.context, actorMemberId: job.actorMemberId }) };
+    case "chat": return { kind: "chat", data: await liveChatAboutMeals({ ...job.request.input, pantry: job.context.pantry, preferences: job.context.preferences, recipeBox: job.context.workspace.recipeBox }, { model, signal, householdContext: job.context, actorMemberId: job.actorMemberId }) };
     case "extract": return { kind: "extract", data: await importRecipe(job.request.input, { model, signal }) };
   }
 }

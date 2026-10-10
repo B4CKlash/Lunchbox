@@ -1,3 +1,4 @@
+import { recommendationContextKey } from "./recommendation-context";
 import { pilotChangeSchema, type HouseholdState, type PilotOperation, type PlanningSession, type Recipe } from "@/lib/contracts";
 
 const refreshPrefix = "[LunchBox context refresh]\n";
@@ -43,6 +44,7 @@ export function planningRefreshFingerprint(state: HouseholdState) {
     stock: sort(pilot?.stock ?? [], (entry) => `${entry.ingredientId}:${entry.unit}`),
     stockChecks: sort(pilot?.stockChecks ?? [], (entry) => `${entry.ingredientId}:${entry.unit}`),
     prepared: sort(pilot?.prepared ?? [], (entry) => entry.batchId).map(({ batchId, produced, consumed, freezerPortions }) => ({ batchId, produced, consumed, freezerPortions })),
+    recommendation: recommendationContextKey(state),
     preferences: state.preferences,
     members: pilot?.members,
     session: pilot ? { memberIds: pilot.session.memberIds, constraints: pilot.session.constraints, equipment: pilot.session.equipment, slots: pilot.session.slots, days: pilot.session.days, startDate: pilot.session.startDate } : null,

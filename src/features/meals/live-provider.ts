@@ -1,4 +1,5 @@
 import "server-only";
+import { buildRecommendationContext, recommendationContextInstructions } from "./recommendation-context";
 import { randomUUID } from "node:crypto";
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
@@ -48,7 +49,7 @@ const suggestionDraftSchema = z.object({
   explanation: z.string(),
 });
 type MealContext = ChatMealsRequest & { knownIngredients?: KnownIngredient[]; recentRecipeNames?: string[]; preferredIngredients?: KnownIngredient[] };
-export type LiveProviderOptions = { signal?: AbortSignal; model?: LanguageModel; householdContext?: HouseholdState };
+export type LiveProviderOptions = { signal?: AbortSignal; model?: LanguageModel; householdContext?: HouseholdState; actorMemberId?: string };
 
 export { pantryForModel } from "@/features/pantry/stock-projection";
 
@@ -212,6 +213,7 @@ Be concise. Return at most three recipe refs. An explanation or clarification ca
 async function runChat(context: ChatMealsRequest, options: LiveProviderOptions) {
   const toolkit = createMealTools(context, options.householdContext);
   const prompt = JSON.stringify({
+    kitchen: options.householdContext ? buildRecommendationContext(options.householdContext, options.actorMemberId) : undefined,
     pantry: pantryForModel(context.pantry, options.householdContext),
     preferences: context.preferences,
     recentRecipeNames: [],
@@ -226,8 +228,7 @@ async function runChat(context: ChatMealsRequest, options: LiveProviderOptions) 
   });
   const output = await generateStructured({
     schema: outputSchema,
-    instructions: options.householdContext?.pilot ? `${instructions}
-This household uses the live pilot calendar. Earlier draft/commit instructions do not apply: cards create candidates, and explicit review applies live changes. Qualitative stock is unknown in quantity; use stockChecks and never infer a quantity or sufficiency from some/low.` : instructions,
+    instructions: `${instructions}\n${recommendationContextInstructions}${options.householdContext?.pilot ? "\nThis household uses the live pilot calendar. Earlier draft/commit instructions do not apply: cards create candidates, and explicit review applies live changes. Qualitative stock is unknown in quantity; use stockChecks and never infer a quantity or sufficiency from some/low." : ""}`,
     prompt,
     tools: toolkit.tools,
     toolPhaseComplete: toolkit.toolPhaseComplete,
@@ -276,8 +277,9 @@ export async function liveSuggestMeals(input: SuggestMealsRequest, options: Live
         ...options,
         signal,
         schema: suggestionDraftSchema,
-        instructions: suggestionInstructions,
+        instructions: suggestionInstructions + "\n" + recommendationContextInstructions,
         prompt: JSON.stringify({
+          kitchen: options.householdContext ? buildRecommendationContext(options.householdContext, options.actorMemberId) : undefined,
           pantry: pantryForModel(parsed.pantry, options.householdContext),
           preferences: parsed.preferences,
           direction: parsed.direction ?? "",
