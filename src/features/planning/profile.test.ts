@@ -103,7 +103,29 @@ test("remembered target matching stays within its scope and requires one exact p
       target: { kind: "ingredient", ingredientId: "new-saffron", name: "Saffron" }, disliked: true },
   } }).state;
   assert.deepEqual(extractExplicitProfileChanges(conflict, "I no longer dislike saffron.", "you"), []);
-  assert.equal(explicitProfileReply(conflict, "Forget that I dislike saffron.", "you"), null);
+  assert.match(explicitProfileReply(conflict, "Forget that I dislike saffron.", "you") ?? "", /Please clarify/);
+});
+
+test("a known ingredient becoming ambiguous requires clarification before correction or forgetting", () => {
+  const initial = state();
+  const known = householdStateSchema.parse({ ...initial, pantry: [...initial.pantry,
+    { id: "saffron-1", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const dislike = extractExplicitProfileChanges(known, "I dislike saffron.", "you")[0];
+  const saved = applyPilotCommand(known, { id: "known-saffron", expectedRevision: 0, operation: dislike }).state;
+  const ambiguous = householdStateSchema.parse({ ...saved, pantry: [...saved.pantry,
+    { id: "saffron-2", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const before = structuredClone(ambiguous);
+  for (const message of ["I no longer dislike saffron.", "Forget that I dislike saffron.", "I like saffron. We don't have an oven."]) {
+    assert.deepEqual(extractExplicitProfileChanges(ambiguous, message, "you"), []);
+    assert.match(explicitProfileReply(ambiguous, message, "you") ?? "", /Which ingredient.*Please clarify/);
+    assert.deepEqual(ambiguous, before);
+  }
+  // Another person's broad wording cannot edit the earlier person's known fact.
+  assert.deepEqual(upserts(extractExplicitProfileChanges(ambiguous, "I dislike saffron.", "partner")), [
+    { kind: "food-dislike", scope: { kind: "member", memberId: "partner" }, target: { kind: "text", text: "saffron" }, disliked: true },
+  ]);
 });
 
 test("older snapshots and receipt inverses default profile facts without resetting household data", () => {
