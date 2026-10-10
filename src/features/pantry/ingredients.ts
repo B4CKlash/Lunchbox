@@ -122,6 +122,9 @@ export function resolveIngredient(
 
 export function knownIngredientsFromHousehold(state: HouseholdState): KnownIngredient[] {
   const refs: KnownIngredient[] = state.pantry.map((item) => ({ ingredientId: item.id, name: item.name, unit: item.unit }));
+  // Container identity is canonical; `each` here is only an identity lookup
+  // reference and never a claim about the number of foods in a container.
+  refs.push(...(state.pilot?.packageStock ?? []).map((item) => ({ ingredientId: item.ingredientId, name: item.name, unit: "each" as const })));
   const recipes = [
     ...state.meals.map((meal) => meal.recipe),
     ...(state.workspace.calendar.draft ?? []).map((meal) => meal.recipe),
