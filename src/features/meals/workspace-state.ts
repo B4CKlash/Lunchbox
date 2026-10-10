@@ -18,7 +18,7 @@ import { pendingPantryIngredients, rememberRecipeNames } from "./suggestion-hist
 
 export type HouseholdAction =
   | { type: "replace"; state: HouseholdState }
-  | { type: "setPantry"; pantry: PantryItem[] }
+  | { type: "setPantry"; pantry: PantryItem[]; confirmedExactStock?: { ingredientId: string; unit: PantryItem["unit"] }[] }
   | { type: "setPreferences"; preferences: Preferences }
   | { type: "recordSuggestions"; input: SuggestMealsRequest; recipes: Recipe[] }
   | { type: "setSuggestionDirection"; direction: string }
@@ -80,6 +80,24 @@ function nextHousehold(
   current: HouseholdState,
   action: HouseholdAction,
 ): HouseholdState {
+  if (current.pilot) {
+    const pilot = current.pilot;
+    if (action.type === "addMeal" || action.type === "discussRecipe") {
+      return { ...current, workspace: {
+        ...current.workspace,
+        focusedRecipe: action.recipe,
+        focusedServings: action.servings,
+      }, pilot: { ...pilot, session: {
+        ...pilot.session,
+        candidates: [...pilot.session.candidates.filter((recipe) => recipe.id !== action.recipe.id), action.recipe].slice(-30),
+        focusedRecipeId: action.recipe.id,
+        rejectedRecipeIds: pilot.session.rejectedRecipeIds.filter((recipeId) => recipeId !== action.recipe.id),
+      } } };
+    }
+    if (["removeMeal", "setMealServings", "setCalendarDraft", "commitCalendar", "discardCalendarDraft", "setCalendarSettings"].includes(action.type)) {
+      throw new Error("Use the live planning workspace to change the calendar.");
+    }
+  }
   const editableMeals = current.workspace.calendar.draft ?? current.meals;
   const withDraft = (draft: PlannedMeal[] | null): HouseholdState => ({
     ...current,
@@ -317,7 +335,53 @@ export function applyHouseholdAction(
 ): HouseholdState {
   // Zod parses nested objects into fresh data, so recipes held by callers, the
   // recipe box, conversation, and meal plan never share a mutable snapshot.
-  return householdStateSchema.parse(nextHousehold(current, action));
+  const next = nextHousehold(current, action);
+  // Late suggestion responses must not advance shared revisions or invalidate
+  // the last reversible planning action when their kitchen context is stale.
+  if (next === current) return current;
+  if (current.pilot && next.pilot && action.type !== "replace") {
+    const suggestionsOnly = action.type === "setSuggestionDirection"
+      || action.type === "setSuggestionStreamEnabled"
+      || action.type === "appendSuggestionBlock"
+      || action.type === "recordSuggestions";
+    next.pilot = { ...next.pilot, revision: current.pilot.revision + 1,
+      // A later action must never undo an earlier pantry or preference update.
+      receipts: next.pilot.receipts.map((receipt) => {
+        const copy = { ...receipt };
+        if (suggestionsOnly && copy.inverse && copy.undoRevision === current.pilot!.revision) {
+          copy.undoRevision = current.pilot!.revision + 1;
+        } else {
+          delete copy.inverse;
+        }
+        return copy;
+      }),
+      // Suggestion history does not change a reviewed planning proposal's
+      // calendar or stock requirements. Keep a current review applicable.
+      proposals: next.pilot.proposals.map((proposal) => suggestionsOnly
+        && proposal.status === "pending" && proposal.baseRevision === current.pilot!.revision
+        ? { ...proposal, baseRevision: current.pilot!.revision + 1 }
+        : proposal),
+    };
+    if (action.type === "setPantry") {
+      const confirmed = new Set((action.confirmedExactStock ?? []).map((item) => JSON.stringify([item.ingredientId, item.unit])));
+      next.pilot.stock = next.pilot.stock.flatMap((stock) => {
+        const key = JSON.stringify([stock.ingredientId, stock.unit]);
+        const before = current.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
+        const after = next.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
+        const changed = confirmed.has(key) || JSON.stringify(before.map((item) => item.quantity)) !== JSON.stringify(after.map((item) => item.quantity));
+        const useSoonChanged = JSON.stringify(before.map((item) => item.useSoon)) !== JSON.stringify(after.map((item) => item.useSoon));
+        const metadata = { ...stock, ...(useSoonChanged ? { useSoon: after.some((item) => item.useSoon) } : {}) };
+        if (!changed) return [metadata];
+        confirmed.add(key);
+        if (!after.length) return [];
+        // A fresh measurement changes certainty without erasing optional dates
+        // or source details. Historical purchase lots are a separate record.
+        return [{ ...metadata, status: "exact" as const, quantity: after.reduce((sum, item) => sum + item.quantity, 0), name: after[0].name }];
+      });
+      next.pilot.stockChecks = next.pilot.stockChecks.filter((stock) => !confirmed.has(JSON.stringify([stock.ingredientId, stock.unit])));
+    }
+  }
+  return householdStateSchema.parse(next);
 }
 
 export type HouseholdStore = {

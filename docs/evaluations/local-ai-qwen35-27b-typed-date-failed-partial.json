@@ -1,0 +1,190 @@
+{
+  "evaluatedAt": "2026-10-08T20:02:07.623Z",
+  "model": "qwen3.5:27b",
+  "digest": "2d2e4b8fc7c0479b70f8cba9fc8bdb49a3c9a43a8a6da3873b724c9fca4672ef",
+  "results": [
+    {
+      "scenario": "individual work lunch",
+      "pass": 1,
+      "latencyMs": 4848,
+      "completed": false,
+      "unsupportedClaims": false,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest recording that your work covers your Tuesday lunch. Your partner will still need a meal planned for that time.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "1d9b7a5f-e118-4919-a8ca-c8a4d8ec5dd3",
+              "memberId": "partner",
+              "date": "2026-10-20",
+              "slot": "lunch",
+              "reason": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "retrieve favorite",
+      "pass": 1,
+      "latencyMs": 15173,
+      "completed": true,
+      "unsupportedClaims": false,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I found your favorite 'Tomato spinach pasta' recipe for discussion. It serves 2, takes 25 minutes, and includes dry pasta, tomatoes, spinach, and olive oil. Since you asked not to schedule it yet, no calendar changes are proposed.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A favorite quick vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "new vegetable recipe",
+      "pass": 1,
+      "latencyMs": 21211,
+      "completed": true,
+      "unsupportedClaims": false,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest a new Zucchini and Carrot Stir-fry as a candidate for your review. It uses the zucchini and carrots in your pantry, serves two, and takes about 20 minutes.",
+        "recipes": [
+          {
+            "id": "local-e2253fab-6123-4f14-b4a5-093a748fac2c",
+            "name": "Zucchini and Carrot Stir-fry",
+            "description": "A quick vegetable stir-fry featuring zucchini and carrots.",
+            "servings": 2,
+            "minutes": 20,
+            "ingredients": [
+              {
+                "ingredientId": "zucchini",
+                "name": "Zucchini",
+                "quantity": 300,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "carrot",
+                "name": "Carrot",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 30,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Slice Zucchini and Carrot into thin strips.",
+              "Heat Olive oil in a pan over medium-high heat.",
+              "Stir-fry Zucchini and Carrot until tender-crisp, about 5-7 minutes."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    },
+    {
+      "scenario": "revise preparation effort",
+      "pass": 1,
+      "latencyMs": 22416,
+      "completed": true,
+      "unsupportedClaims": false,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest revising your Tomato spinach pasta to take at most 15 minutes by pre-chopping vegetables and using smaller pasta shapes for faster cooking. This is a proposal for review only; it will not be scheduled.",
+        "recipes": [
+          {
+            "id": "local-97520c73-3eef-4eba-a158-4da87cba277c",
+            "name": "Quick Tomato Spinach Pasta",
+            "description": "A revised version of the favorite pasta optimized for under 15 minutes.",
+            "servings": 2,
+            "minutes": 14,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Boil water and cook small pasta shapes for 8-9 minutes.",
+              "While pasta cooks, sauté chopped tomatoes in olive oil for 3 minutes.",
+              "Stir in spinach until wilted (1 minute).",
+              "Drain pasta and combine with the tomato-spinach mixture."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    }
+  ]
+}

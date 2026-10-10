@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { mealFailureMessage, mealRequestFailure } from "@/features/meals/client-request";
 import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meals/meal-retry";
 import { generateRecipeBlock, RECIPE_BLOCK_DELAY_MS, waitForRecipeBlock } from "@/features/meals/recipe-feed";
+import { requestWorkerRecipe } from "./local-recipe-request";
 import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
 import { suggestMealsResponseSchema, type SuggestionBlock, type SuggestMealsRequest } from "@/lib/contracts";
 
 type SuggestionOptions = {
+  aiBackend?: "gateway" | "local-worker";
   enabled: boolean;
   resetVersion: number;
   aiMode: "ai" | "demo";
@@ -16,7 +18,7 @@ type SuggestionOptions = {
   recentRecipeNames: string[];
   blocks: SuggestionBlock[];
   streamEnabled: boolean;
-  appendSuggestionBlock: (input: SuggestMealsRequest, block: SuggestionBlock) => void;
+  appendSuggestionBlock: (input: SuggestMealsRequest, block: SuggestionBlock) => Promise<{ ok: boolean; error?: string }>;
   setSuggestionStreamEnabled: (enabled: boolean) => void;
 };
 type FeedStatus = {
@@ -32,7 +34,7 @@ type FeedStatus = {
 };
 
 export function useMealSuggestions(request: string, contextKey: string, options: SuggestionOptions) {
-  const { enabled, resetVersion, streamEnabled, aiMode, aiCooldownUntil } = options;
+  const { enabled, resetVersion, streamEnabled, aiMode, aiBackend = "gateway", aiCooldownUntil } = options;
   const [visible, setVisible] = useState(true);
   const [manualRequest, setManualRequest] = useState(0);
   const [status, setStatus] = useState<FeedStatus | null>(null);
@@ -100,7 +102,9 @@ export function useMealSuggestions(request: string, contextKey: string, options:
             getExistingNames: () => latest.current.blocks.flatMap((block) => block.recipes.map((recipe) => recipe.name)),
             send: (input) => withMealRateLimitRecovery(async () => {
               if (!valid()) throw new DOMException("Recipe generation stopped", "AbortError");
-              const response = await fetch("/api/meals/suggest", {
+              const response = aiMode === "ai" && aiBackend === "local-worker"
+                ? await requestWorkerRecipe({ kind: "suggest", input }, AbortSignal.any([controller.signal, AbortSignal.timeout(240_000)]))
+                : await fetch("/api/meals/suggest", {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
                 signal: AbortSignal.any([controller.signal, AbortSignal.timeout(50_000)]),
               });
@@ -114,8 +118,10 @@ export function useMealSuggestions(request: string, contextKey: string, options:
               deferRequests: (until) => latest.current.deferAiRequests(until),
               onWaiting: (waiting) => updateStatus({ loading: true, ...(waiting ? { waiting } : {}) }),
             }),
-            onBatch: (input, block) => {
-              if (valid()) latest.current.appendSuggestionBlock(input, block);
+            onBatch: async (input, block) => {
+              if (!valid()) return;
+              const result = await latest.current.appendSuggestionBlock(input, block);
+              if (!result.ok) throw new Error(result.error ?? "These recipes could not be saved. Please retry.");
             },
           });
           if (!valid()) return;
@@ -156,7 +162,7 @@ export function useMealSuggestions(request: string, contextKey: string, options:
         ? { ...previous, loading: false, waiting: undefined, nextAt: undefined }
         : previous);
     };
-  }, [contextKey, resetVersion, enabled, visible, streamEnabled, manualRequest, aiMode]);
+  }, [contextKey, resetVersion, enabled, visible, streamEnabled, manualRequest, aiMode, aiBackend]);
 
   function pause() {
     activeRequest.current?.abort();

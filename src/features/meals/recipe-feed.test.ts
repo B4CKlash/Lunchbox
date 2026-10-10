@@ -47,6 +47,49 @@ test("a six-recipe block saves each sequential half and carries its names into t
   assert.equal(saved[1].recipes[0].servings, 2);
 });
 
+test("the next worker half and block completion wait for remote persistence", async () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  };
+  const started = [deferred(), deferred()];
+  const saved = [deferred(), deferred()];
+  let calls = 0;
+  let batches = 0;
+  let completed = false;
+  const run = generateRecipeBlock({
+    seed, aiMode: "ai", signal: new AbortController().signal,
+    getInput: input, getExistingNames: () => [],
+    send: async () => ++calls === 1 ? reply("Soup A", "Soup B", "Soup C") : reply("Soup D", "Soup E", "Soup F"),
+    onBatch: async () => {
+      const batch = batches++;
+      started[batch].resolve();
+      await saved[batch].promise;
+    },
+  }).then((result) => { completed = true; return result; });
+
+  await started[0].promise;
+  assert.equal(calls, 1, "The second job cannot read an unsaved household revision");
+  saved[0].resolve();
+  await started[1].promise;
+  assert.equal(calls, 2);
+  assert.equal(completed, false, "The next block cannot start before the final half is durable");
+  saved[1].resolve();
+  assert.equal((await run).outcome, "complete");
+});
+
+test("a failed remote save stops the block before another worker request", async () => {
+  let calls = 0;
+  await assert.rejects(generateRecipeBlock({
+    seed, aiMode: "ai", signal: new AbortController().signal,
+    getInput: input, getExistingNames: () => [],
+    send: async () => { calls++; return reply("Soup A", "Soup B", "Soup C"); },
+    onBatch: async () => { throw new Error("The household change could not be saved."); },
+  }), { message: "The household change could not be saved." });
+  assert.equal(calls, 1);
+});
+
 test("duplicates anywhere in the retained feed or block do not become new cards or an automatic refill loop", async () => {
   let calls = 0;
   const saved: SuggestionBlock[] = [];
@@ -54,7 +97,7 @@ test("duplicates anywhere in the retained feed or block do not become new cards 
     seed, aiMode: "ai", signal: new AbortController().signal,
     getInput: input, getExistingNames: () => ["Old soup"],
     send: async () => ++calls === 1 ? reply(" old   SOUP ", "New soup", "New soup") : reply("NEW SOUP"),
-    onBatch: (_input, block) => saved.push(block),
+    onBatch: (_input, block) => { saved.push(block); },
   });
   assert.equal(calls, 2);
   assert.equal(result.outcome, "duplicates");
@@ -101,7 +144,7 @@ test("a second-half error or empty clarification preserves earlier recipes witho
         if (fails) throw new Error("Unavailable");
         return { source: "ai", recipes: [], explanation: "Please clarify the next direction." };
       },
-      onBatch: (_input, block) => saved.push(block),
+      onBatch: (_input, block) => { saved.push(block); },
     });
     if (fails) await assert.rejects(run, { message: "Unavailable" });
     else {

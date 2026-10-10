@@ -41,8 +41,8 @@ test("configuration defaults are explicit", () => {
   }
 });
 
-test("runtime accepts request-context OIDC and categorizes development and production Gateway failures", async (t) => {
-  const names = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "NODE_ENV"] as const;
+test("explicit Gateway adapter accepts request-context OIDC and categorizes failures", async (t) => {
+  const names = ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "NODE_ENV", "LUNCHBOX_AI_BACKEND"] as const;
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   const contextSymbol = Symbol.for("@vercel/request-context");
   const globals = globalThis as typeof globalThis & { [key: symbol]: unknown };
@@ -54,7 +54,7 @@ test("runtime accepts request-context OIDC and categorizes development and produ
   t.mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected network request in offline authentication test"); });
   try {
     for (const name of names) Reflect.deleteProperty(process.env, name);
-    Object.assign(process.env, { NODE_ENV: "test" });
+    Object.assign(process.env, { NODE_ENV: "test", LUNCHBOX_AI_BACKEND: "gateway" });
     globals[contextSymbol] = { get: () => ({ headers: { "x-vercel-oidc-token": token } }) };
     globalThis.AI_SDK_DEFAULT_PROVIDER = createGateway({
       fetch: async (_url, init) => {
@@ -93,6 +93,19 @@ test("runtime accepts request-context OIDC and categorizes development and produ
       if (previous[name] === undefined) Reflect.deleteProperty(process.env, name);
       else Reflect.set(process.env, name, previous[name]);
     }
+  }
+});
+
+test("local-worker mode never silently falls back to Gateway", async (t) => {
+  const previous = process.env.LUNCHBOX_AI_BACKEND;
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected external inference"); });
+  try {
+    process.env.LUNCHBOX_AI_BACKEND = "local-worker";
+    await assert.rejects(generateStructured({ schema: z.object({ ok: z.boolean() }), prompt: "Test", instructions: "Test", operation: "chat" }),
+      (error: unknown) => error instanceof AiRuntimeError && error.code === "configuration");
+  } finally {
+    if (previous === undefined) delete process.env.LUNCHBOX_AI_BACKEND;
+    else process.env.LUNCHBOX_AI_BACKEND = previous;
   }
 });
 

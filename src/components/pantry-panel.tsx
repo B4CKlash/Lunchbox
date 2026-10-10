@@ -18,11 +18,10 @@ import {
   type PantryTag,
 } from "@/lib/contracts";
 import { knownIngredientsFromHousehold, normalizeIngredientName, resolveIngredient } from "@/features/pantry/ingredients";
+import { pantryStockDisplay } from "@/features/pantry/stock-display";
 import { applyPantryImport, PantryImportError, preparePantryImport, resolvePantryImportRow, type PantryImportRow } from "@/features/pantry/import";
 
 const locations = ["Fridge", "Freezer", "Cupboard", "Garden"] as const;
-const amount = (quantity: number, unit: string) =>
-  `${quantity.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${unit}`;
 
 export function PantryPanel() {
   const { householdResetVersion } = useHousehold();
@@ -46,10 +45,10 @@ function PantryContent() {
   const [defaultTag, setDefaultTag] = useState<PantryTag>("special");
   const [receiptText, setReceiptText] = useState("");
   const [reviewRows, setReviewRows] = useState<PantryImportRow[]>([]);
-  const useSoon = state.pantry.filter(
-    (item) => item.useSoon && item.quantity > 0,
-  );
-  const inStock = state.pantry.filter((item) => item.quantity > 0);
+  const [saving, setSaving] = useState(false);
+  const stockFor = (item: PantryItem) => pantryStockDisplay(item, state.pilot?.stock);
+  const useSoon = state.pantry.filter((item) => { const stock = stockFor(item); return stock.useSoon && stock.onHand; });
+  const inStock = state.pantry.filter((item) => stockFor(item).onHand);
   const shown =
     filter === "all"
       ? state.pantry
@@ -57,6 +56,7 @@ function PantryContent() {
         ? useSoon
         : state.pantry.filter((item) => inferPantryCategory(item) === filter);
   const editing = editor && editor !== "new" ? editor : null;
+  const editingStock = editing ? stockFor(editing) : null;
 
   function openEditor(item: PantryItem | "new") {
     setError(null);
@@ -66,8 +66,9 @@ function PantryContent() {
     setAmbiguous([]);
   }
 
-  function saveItem(event: FormEvent<HTMLFormElement>) {
+  async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
     const unit = unitSchema.safeParse(form.get("unit"));
@@ -120,13 +121,17 @@ function PantryContent() {
       setError("This ingredient already has an entry in that unit. Edit that entry instead.");
       return;
     }
-    setPantry(
+    setSaving(true);
+    const saved = await setPantry(
       editing
         ? state.pantry.map((item, index) =>
             index === editingIndex ? result.data : item,
           )
         : [...state.pantry, result.data],
+      [{ ingredientId: result.data.id, unit: result.data.unit }],
     );
+    setSaving(false);
+    if (!saved.ok) { setError(saved.error ?? "The pantry change was not saved. Try again."); return; }
     setMessage(
       `${result.data.name} ${editing ? "updated" : "added to your pantry"}.`,
     );
@@ -154,10 +159,15 @@ function PantryContent() {
     setError(null);
   }
 
-  function saveImport() {
+  async function saveImport() {
+    if (saving) return;
     try {
+      const uncertainMerge = reviewRows.find((row) => row.merge && state.pantry.some((item) => item.id === row.ingredientId && item.unit === row.unit && stockFor(item).uncertain));
+      if (uncertainMerge) throw new Error(`${uncertainMerge.name} has an unknown balance. Measure its current total before combining amounts, or record the purchase in Shopping.`);
       const result = applyPantryImport(state.pantry, reviewRows, knownIngredients);
-      setPantry(result.pantry);
+      setSaving(true);
+      const saved = await setPantry(result.pantry, reviewRows.flatMap((row) => row.ingredientId ? [{ ingredientId: row.ingredientId, unit: row.unit }] : []));
+      if (!saved.ok) { setError(saved.error ?? "The pantry import was not saved. Try again."); return; }
       setEditor(null);
       setEditingIndex(null);
       setAmbiguous([]);
@@ -169,7 +179,7 @@ function PantryContent() {
         setReviewRows((rows) => rows.map((row, i) => i === index ? { ...row, ingredientId: null, candidates: reason.candidates! } : row));
       }
       setError(reason instanceof Error ? reason.message : "These pantry items could not be saved. Check the review rows.");
-    }
+    } finally { setSaving(false); }
   }
 
   function capturePhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -239,15 +249,15 @@ function PantryContent() {
                 <option value="">Choose an existing ingredient</option>
                 {row.candidates.map((candidate) => {
                   const stock = state.pantry.find((item) => item.id === candidate.ingredientId && item.unit === candidate.unit);
-                  return <option key={candidate.ingredientId} value={candidate.ingredientId}>{candidate.name} · {stock ? `${amount(stock.quantity, stock.unit)} in ${stock.location}` : `saved recipe (${candidate.unit})`}</option>;
+                  return <option key={candidate.ingredientId} value={candidate.ingredientId}>{candidate.name} · {stock ? `${stockFor(stock).label} in ${stock.location}` : `saved recipe (${candidate.unit})`}</option>;
                 })}
               </select>
             </label> : null}
-            {existing ? <label className="checkbox-label"><input type="checkbox" checked={row.merge} onChange={(event) => updateImportRow(index, { merge: event.target.checked, ...(event.target.checked ? { tag: existing.tag } : {}) })} /> Add to existing {amount(existing.quantity, existing.unit)} in {existing.location}</label> : null}
+            {existing ? <label className="checkbox-label"><input type="checkbox" checked={row.merge} disabled={stockFor(existing).uncertain} onChange={(event) => updateImportRow(index, { merge: event.target.checked, ...(event.target.checked ? { tag: existing.tag } : {}) })} /> Add to existing {stockFor(existing).label} in {existing.location}{stockFor(existing).uncertain ? ". Measure the current total first." : ""}</label> : null}
             <button className="text-button" onClick={() => setReviewRows((rows) => rows.filter((_, i) => i !== index))}>Remove</button>
           </div>;
         })}
-        <div className="actions"><button className="button secondary" onClick={() => setReviewRows([])}>Cancel</button><button className="button" disabled={!reviewRows.length} onClick={saveImport}>Save reviewed items</button></div>
+        <div className="actions"><button className="button secondary" onClick={() => setReviewRows([])}>Cancel</button><button className="button" disabled={saving || !reviewRows.length} onClick={() => void saveImport()}>{saving ? "Saving…" : "Save reviewed items"}</button></div>
       </section> : null}
       {error ? <p className="error-message" role="alert">{error}</p> : null}
       <p className="status-message" role="status">{message}</p>
@@ -310,7 +320,8 @@ function PantryContent() {
               <X size={20} />
             </button>
           </div>
-          <form key={editing ? `${editing.id}:${editing.unit}:${editingIndex}` : "new"} onSubmit={saveItem}>
+          {editingStock?.uncertain ? <p className="muted">Current stock: {editingStock.label}. Enter the exact total you measured to replace this uncertainty. <Link href="/shopping">Keep or edit a qualitative amount in Shopping.</Link></p> : null}
+          <form key={editing ? `${editing.id}:${editing.unit}:${editingIndex}` : "new"} onSubmit={(event) => void saveItem(event)}>
             <div className="ingredient-fields">
               <label className="field ingredient-name">
                 Ingredient name
@@ -337,14 +348,15 @@ function PantryContent() {
                 </datalist>
               </label>
               <label className="field">
-                Amount
+                {editingStock?.uncertain ? "Measured total amount" : "Amount"}
                 <input
                   name="quantity"
                   type="number"
                   min="0"
                   max="100000"
                   step="any"
-                  defaultValue={editing?.quantity ?? 1}
+                  defaultValue={editingStock ? editingStock.quantity ?? "" : 1}
+                  placeholder={editingStock?.uncertain ? "Enter a measured total" : undefined}
                   required
                 />
               </label>
@@ -407,7 +419,7 @@ function PantryContent() {
                 <input
                   name="useSoon"
                   type="checkbox"
-                  defaultChecked={editing?.useSoon ?? false}
+                  defaultChecked={editingStock?.useSoon ?? false}
                 />{" "}
                 Use this soon
               </label>
@@ -419,8 +431,8 @@ function PantryContent() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="button">
-                  {editing ? "Save changes" : "Add to pantry"}
+                <button type="submit" className="button" disabled={saving}>
+                  {saving ? "Saving…" : editing ? "Save changes" : "Add to pantry"}
                 </button>
               </div>
             </div>
@@ -497,17 +509,19 @@ function PantryContent() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((item) => (
+                {shown.map((item) => {
+                  const stock = stockFor(item);
+                  return (
                   <tr key={`${item.id}:${item.unit}:${state.pantry.indexOf(item)}`}>
                     <td>
                       <span
-                        className={`ingredient-dot ${item.useSoon && item.quantity > 0 ? "soon" : ""}`}
+                        className={`ingredient-dot ${stock.useSoon && stock.onHand ? "soon" : ""}`}
                         aria-hidden="true"
                       />
                       <strong>{item.name}</strong>
                     </td>
                     <td className="quantity">
-                      {amount(item.quantity, item.unit)}
+                      {stock.label}
                     </td>
                     <td>
                       <span className="category-label">
@@ -519,12 +533,12 @@ function PantryContent() {
                     </td>
                     <td><span className={`pantry-tag tag-${item.tag}`}>{item.tag}</span></td>
                     <td>
-                      {item.quantity === 0 ? (
+                      {!stock.onHand ? (
                         <span className="muted small">Out of stock</span>
-                      ) : item.useSoon ? (
+                      ) : stock.useSoon ? (
                         <span className="pill warm">Use soon</span>
                       ) : (
-                        <span className="muted small">Ready when you are</span>
+                        <span className="muted small">{stock.uncertain ? "Check amount before cooking" : "Ready when you are"}</span>
                       )}
                     </td>
                     <td>
@@ -537,7 +551,7 @@ function PantryContent() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                );})}
               </tbody>
             </table>
           </div>

@@ -164,6 +164,107 @@ test("only a valid current block clears pending additions, and legacy recording 
   assert.ok(rejected.updateError);
 });
 
+test("stale pilot suggestion responses preserve the input snapshot, revision, and available undo", async () => {
+  const { ensurePilot, applyPilotCommand } = await import("@/features/planning/pilot");
+  const original = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const input = { pantry: original.pantry, preferences: original.preferences };
+  const changed = applyHouseholdAction(original, { type: "setSuggestionDirection", direction: "Use apples" });
+  const state = applyPilotCommand(changed, {
+    id: "change-shopping-window",
+    expectedRevision: changed.pilot!.revision,
+    operation: { type: "set_shop_through", date: "2026-10-15" },
+  }).state;
+  assert.ok(state.pilot!.receipts.at(-1)?.inverse);
+  const snapshot = structuredClone(state);
+  const currentInput = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
+  const ignored: HouseholdAction[] = [
+    { type: "appendSuggestionBlock", input, block: suggestionBlock(input) },
+    { type: "recordSuggestions", input, recipes: [recipe()] },
+    { type: "appendSuggestionBlock", input: currentInput, block: { ...suggestionBlock(currentInput), contextKey: "a different kitchen" } },
+  ];
+  for (const action of ignored) {
+    assert.equal(applyHouseholdAction(state, action), state);
+    assert.deepEqual(state, snapshot);
+  }
+});
+
+test("pilot recipe selection retains an earlier block's portions without rewriting recipe amounts or planning meals", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const original = createSampleHousehold();
+  const input = { pantry: original.pantry, preferences: original.preferences };
+  const block = { ...suggestionBlock(input), recipes: [{ ...recipe(), servings: 4 }] };
+  let state = applyHouseholdAction(original, { type: "appendSuggestionBlock", input, block });
+  state = applyHouseholdAction(state, { type: "setPreferences", preferences: { ...state.preferences, servings: 6 } });
+  state = ensurePilot(state, "2026-10-08");
+  const actions: HouseholdAction[] = [
+    { type: "addMeal", id: "earlier-block", recipe: block.recipes[0], servings: block.servings },
+    { type: "discussRecipe", recipe: block.recipes[0], servings: block.servings },
+  ];
+  for (const action of actions) {
+    const selected = applyHouseholdAction(state, action);
+    assert.equal(selected.workspace.focusedServings, 2);
+    assert.deepEqual(selected.workspace.focusedRecipe, block.recipes[0]);
+    assert.deepEqual(selected.pilot!.session.candidates, block.recipes);
+    assert.equal(selected.pilot!.session.focusedRecipeId, block.recipes[0].id);
+    assert.equal(selected.preferences.servings, 6);
+    assert.equal(selected.workspace.focusedRecipe!.servings, 4);
+    assert.equal(selected.workspace.focusedRecipe!.ingredients[0].quantity, 150);
+    assert.deepEqual(selected.workspace.suggestions.blocks, [block]);
+    assert.deepEqual(selected.pantry, state.pantry);
+    assert.deepEqual(selected.meals, state.meals);
+    assert.deepEqual(selected.pilot!.batches, state.pilot!.batches);
+    assert.deepEqual(selected.pilot!.allocations, state.pilot!.allocations);
+    assert.equal(state.workspace.focusedRecipe, null);
+  }
+});
+
+test("valid recipe feed updates keep a reviewed pilot proposal applicable and preserve planning undo", async () => {
+  const { ensurePilot, applyPilotCommand } = await import("@/features/planning/pilot");
+  const initial = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const proposed = applyPilotCommand(initial, {
+    id: "propose-shopping-window", expectedRevision: initial.pilot.revision,
+    operation: {
+      type: "propose", id: "shopping-window", title: "Review the shopping window",
+      changes: [{ type: "set_shop_through", date: "2026-10-16" }],
+    },
+  });
+  let state = proposed.state;
+  const input = { pantry: state.pantry, preferences: state.preferences, direction: "More rice" };
+  const actions: HouseholdAction[] = [
+    { type: "setSuggestionDirection", direction: input.direction },
+    { type: "setSuggestionStreamEnabled", enabled: false },
+    { type: "appendSuggestionBlock", input, block: suggestionBlock(input) },
+    { type: "recordSuggestions", input, recipes: [recipe("another-idea")] },
+  ];
+  for (const action of actions) {
+    const previous = state;
+    const snapshot = structuredClone(state);
+    state = ensurePilot(applyHouseholdAction(state, action));
+    assert.deepEqual(previous, snapshot);
+    assert.deepEqual(state.pantry, initial.pantry);
+    assert.equal(state.pilot.revision, snapshot.pilot!.revision + 1);
+    assert.equal(state.pilot.proposals[0].status, "pending");
+    assert.equal(state.pilot.proposals[0].baseRevision, state.pilot.revision);
+    assert.ok(state.pilot.receipts[0].inverse);
+    assert.equal(state.pilot.receipts[0].undoRevision, state.pilot.revision);
+    assert.deepEqual(state.pilot.batches, initial.pilot.batches);
+    assert.deepEqual(state.pilot.allocations, initial.pilot.allocations);
+  }
+  const applied = applyPilotCommand(state, {
+    id: "apply-shopping-window", expectedRevision: state.pilot.revision,
+    operation: { type: "apply_proposal", proposalId: "shopping-window" },
+  });
+  assert.equal(applied.state.pilot.shopThrough, "2026-10-16");
+  assert.equal(applied.state.pilot.proposals[0].status, "applied");
+  const undone = applyPilotCommand(state, {
+    id: "undo-shopping-window-proposal", expectedRevision: state.pilot.revision,
+    operation: { type: "undo", receiptId: proposed.receipt.id },
+  });
+  assert.deepEqual(undone.state.pilot.proposals, initial.pilot.proposals);
+  assert.equal(undone.state.pilot.shopThrough, initial.pilot.shopThrough);
+  assert.deepEqual(undone.state.workspace.suggestions, state.workspace.suggestions);
+});
+
 test("AI cooldown is shared, can only extend, and leaves kitchen content untouched", () => {
   const original = createSampleHousehold();
   const until = Date.UTC(2026, 8, 30);
@@ -616,4 +717,45 @@ test("calendar validation rejects invalid dates, duplicate slots and IDs, and un
   );
   assert.equal(rejected.state, inbox);
   assert.match(rejected.updateError ?? "", /Place every recipe/);
+});
+
+test("measuring the historical amount again explicitly replaces uncertain stock", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const item = state.pantry[0];
+  state.pilot.stock = [{ ingredientId: item.id, name: item.name, unit: item.unit, status: "some" }];
+  const preserved = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry });
+  assert.equal(preserved.pilot?.stock[0]?.status, "some");
+  const confirmed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry, confirmedExactStock: [{ ingredientId: item.id, unit: item.unit }] });
+  assert.equal(confirmed.pilot?.stock[0]?.status, "exact");
+  assert.equal(confirmed.pilot?.stock[0]?.quantity, item.quantity);
+  assert.equal(confirmed.pantry[0].quantity, item.quantity);
+  assert.equal(state.pilot.stock[0].status, "some");
+});
+
+test("pantry measurements preserve optional stock details and historical purchase lots", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const item = state.pantry[0];
+  const details = { purchasedOn: "2026-10-07", bestBefore: "2026-10-14", sourceNote: "Farm box", useSoon: true };
+  state.pilot.stock = [{ ingredientId: item.id, name: item.name, unit: item.unit, status: "some", ...details }];
+  state.pilot.purchaseLots.push({ id: "purchase:0", commandId: "purchase", recordedAt: "2026-10-08T12:00:00.000Z", ingredientId: item.id, name: item.name, unit: item.unit, quantity: 100, purchasedOn: details.purchasedOn, bestBefore: details.bestBefore, sourceNote: details.sourceNote, lotCode: "box-A" });
+  const changed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry.map((entry) => entry === item ? { ...entry, quantity: 123 } : entry) });
+  assert.deepEqual(changed.pilot?.stock[0], { ingredientId: item.id, name: item.name, unit: item.unit, status: "exact", quantity: 123, ...details });
+  assert.deepEqual(changed.pilot?.purchaseLots, state.pilot.purchaseLots);
+  const removed = applyHouseholdAction(changed, { type: "setPantry", pantry: changed.pantry.filter((entry) => entry.id !== item.id || entry.unit !== item.unit) });
+  assert.equal(removed.pilot?.stock.length, 0);
+  assert.deepEqual(removed.pilot?.purchaseLots, state.pilot.purchaseLots);
+});
+
+test("explicitly discussing a library recipe reconsiders only that rejected candidate", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const chosen = recipe();
+  state.pilot.session.rejectedRecipeIds = [chosen.id, "another-rejected-recipe"];
+  const result = applyHouseholdAction(state, { type: "discussRecipe", recipe: chosen, servings: 2 });
+  assert.deepEqual(result.pilot?.session.rejectedRecipeIds, ["another-rejected-recipe"]);
+  assert.equal(result.pilot?.session.focusedRecipeId, chosen.id);
+  assert.deepEqual(result.pilot?.allocations, state.pilot.allocations);
+  assert.deepEqual(state.pilot.session.rejectedRecipeIds, [chosen.id, "another-rejected-recipe"]);
 });

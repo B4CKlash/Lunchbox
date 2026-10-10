@@ -9,3 +9,6 @@ coverage/
 !.env.example
 *.log
 *.tsbuildinfo
+.local/
+supabase/.temp/
+supabase/.branches/

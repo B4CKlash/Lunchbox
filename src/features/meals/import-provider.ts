@@ -106,7 +106,7 @@ type ImportOptions = {
 
 export async function importRecipe(input: ImportRecipeRequest, options: ImportOptions = {}): Promise<ImportRecipeResponse> {
   const request = importRecipeRequestSchema.parse(input);
-  if (!options.extract && getAiMode() !== "ai") throw new AiRuntimeError("configuration");
+  if (!options.extract && !options.model && getAiMode() !== "ai") throw new AiRuntimeError("configuration");
   const known = request.knownIngredients ?? [];
   let source: SourceRecipe | undefined;
   let sourceUrl: string | undefined;

@@ -1,0 +1,50 @@
+{
+  "model": "qwen3.5:27b",
+  "digest": "2d2e4b8fc7c0479b70f8cba9fc8bdb49a3c9a43a8a6da3873b724c9fca4672ef",
+  "sessionStart": "2026-10-08",
+  "focusDate": "2026-10-08",
+  "results": [
+    {
+      "actorMemberId": "you",
+      "latencyMs": 14354,
+      "complete": true,
+      "output": {
+        "reply": "I suggest recording that your Tuesday lunch is covered by work, while keeping your partner's lunch open for planning.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "95a9e690-ad17-4f6e-8d07-a8cdb0c45ffb",
+              "memberId": "you",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "actorMemberId": "partner",
+      "latencyMs": 15148,
+      "complete": true,
+      "output": {
+        "reply": "I suggest recording that your Tuesday lunch is covered by work, while keeping your partner's lunch open for planning.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "set_coverage",
+            "coverage": {
+              "id": "90709a91-02cc-4755-9fc5-4c5ac9879fa2",
+              "memberId": "partner",
+              "date": "2026-10-13",
+              "slot": "lunch",
+              "reason": "work"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -554,3 +554,20 @@ test("public errors never expose provider messages or response bodies", () => {
     assert.ok(!JSON.stringify(result).includes("secret"));
   }
 });
+
+test("local recipe context never exposes historical exact balances for qualitative stock", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const { pantryForModel } = await import("./live-provider");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  state.pantry = [{ id: "rice", name: "Jasmine rice", quantity: 800, unit: "g", location: "Cupboard", useSoon: false, tag: "special" }];
+  state.pilot.stock = [{ ingredientId: "rice", name: "Jasmine rice", unit: "g", status: "some" }];
+  const before = structuredClone(state);
+  const pantry = pantryForModel(state.pantry, state);
+  assert.equal("quantity" in pantry[0], false);
+  assert.equal("quantityKnown" in pantry[0] && pantry[0].quantityKnown, false);
+  const input = { ...context(), pantry: state.pantry, focusedRecipe: favorite(), focusedServings: 2 };
+  const reviewed = createMealTools(input, state).reviewPlan({ scope: "focused" });
+  assert.equal(reviewed.shortages?.length, 0);
+  assert.equal("stockChecks" in reviewed && reviewed.stockChecks?.[0]?.required, 150);
+  assert.deepEqual(state, before);
+});

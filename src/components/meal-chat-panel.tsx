@@ -8,6 +8,8 @@ import { chatMealsResponseSchema } from "@/lib/contracts";
 import { formatMealRetryTime, mealFailureMessage, mealRequestFailure } from "@/features/meals/client-request";
 import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meals/meal-retry";
 import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
+import { requestWorkerRecipe } from "@/features/meals/local-recipe-request";
+import { chatMealsRequestSchema } from "@/lib/contracts";
 
 const prompts = [
   "What can I make tonight?",
@@ -19,11 +21,13 @@ const prompts = [
 export function MealChatPanel({
   onNotice,
   aiMode,
+  aiBackend = "gateway",
   onImportUrl,
   active,
 }: {
   onNotice: (message: string) => void;
   aiMode: "demo" | "ai";
+  aiBackend?: "gateway" | "local-worker";
   active: boolean;
   onImportUrl: (url: string) => void;
 }) {
@@ -99,15 +103,19 @@ export function MealChatPanel({
     setWaiting(null);
     try {
       const result = await withMealRateLimitRecovery(async () => {
-        const response = await fetch("/api/meals/chat", {
+        const input = chatMealsRequestSchema.parse({
+          ...JSON.parse(context),
+          messages: workspace.chatMessages,
+          message,
+        });
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(aiBackend === "local-worker" ? 240000 : 50000)]);
+        const response = aiMode === "ai" && aiBackend === "local-worker"
+          ? await requestWorkerRecipe({ kind: "chat", input }, signal)
+          : await fetch("/api/meals/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...JSON.parse(context),
-            messages: workspace.chatMessages,
-            message,
-          }),
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(50000)]),
+          body: JSON.stringify(input),
+          signal,
         });
         if (!response.ok) throw await mealRequestFailure(response);
         const parsed = chatMealsResponseSchema.safeParse(await response.json());

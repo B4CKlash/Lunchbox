@@ -16,7 +16,7 @@ export async function generateRecipeBlock({ seed, aiMode, signal, getInput, getE
   getInput: () => SuggestMealsRequest;
   getExistingNames: () => readonly string[];
   send: (input: SuggestMealsRequest) => Promise<SuggestMealsResponse>;
-  onBatch: (input: SuggestMealsRequest, block: SuggestionBlock) => void;
+  onBatch: (input: SuggestMealsRequest, block: SuggestionBlock) => void | Promise<void>;
 }): Promise<{ outcome: RecipeBlockOutcome; block?: SuggestionBlock; explanation?: string }> {
   const recipes: Recipe[] = [];
   let block: SuggestionBlock | undefined;
@@ -44,7 +44,8 @@ export async function generateRecipeBlock({ seed, aiMode, signal, getInput, getE
     if (!fresh.length) return { outcome: "duplicates", block, explanation };
     recipes.push(...fresh);
     block = { ...seed, source: response.source, recipes: [...recipes], ...(explanation ? { explanation } : {}) };
-    onBatch(input, block);
+    // Shared households must finish saving this half before the next job reads its revision.
+    await onBatch(input, block);
     signal.throwIfAborted();
     // Demo recipes are finite, even if the server mode changed during the session.
     if (response.source === "demo" || aiMode === "demo") return { outcome: "demo", block, explanation };

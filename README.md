@@ -8,9 +8,9 @@ LunchBox connects the food you have, the meals you plan, and the groceries you n
 
 [Open LunchBox](https://lunchbox-snowy.vercel.app).
 
-The shared hackathon foundation provides a pantry → meal suggestions → shopping flow, with sample ingredients, a demo recipe provider, serving calculations, and browser-local saved state. It gives five contributors clear places to build without recreating the core application.
+This branch extends the hackathon app into a household pilot: a persistent planning conversation, one live calendar with coverage per person, cooking batches, shopping, purchases, prepared food, and feedback. `/recipes` retains the recipe library and reviewed imports. Authored planning fixtures are clearly labeled.
 
-There is no connected AI, shared database, or account system yet. Suggestions are labeled as demo results. Planning meals calculates shortages without deducting pantry inventory.
+Shared households use the existing Supabase sign-in with server-authorized membership, invitations, revision checks, and recovery copies. A private Mac worker can run local inference through Ollama. Manual planning works when the worker is offline; there is no implicit paid AI fallback. These capabilities require configuration and are **not enabled in production by this branch**. See [delivery status and release gates](docs/HOUSEHOLD_PILOT_DELIVERY.md).
 
 ## Run locally
 
@@ -23,7 +23,9 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. The home page redirects to `/pantry`; `/meals` and `/shopping` complete the demo.
+Open `http://localhost:3000`. The home page redirects to `/pantry`; `/meals` opens the planning workspace, `/recipes` the recipe library, and `/shopping` the shopping and cooking workflow. Browser-local fixtures require no credentials.
+
+For shared development, use a separate Supabase project or the local stack described in [household setup](docs/HOUSEHOLD_DEVELOPMENT.md). Copy `.env.example` into ignored `.env.local` and configure only that environment. Follow [the local worker runbook](docs/LOCAL_AI_WORKER.md) for Ollama and model evaluation.
 
 ```sh
 npm run check  # lint, type checking, and tests
@@ -51,7 +53,7 @@ Vercel is connected to this repository: pull requests get previews and `main` de
 
 ## Original concept and references
 
-The broader idea connects the food you have, meals you plan, groceries you buy, and what you cook. Purchase confirmation, cooking updates, leftovers, and undo remain design references beyond this initial app foundation.
+The broader idea connects the food you have, meals you plan, groceries you buy, and what you cook. The household pilot implements the corresponding validated domain commands; the original concept remains a design reference and is not evidence that a release gate has passed.
 
 | File | Purpose |
 | --- | --- |

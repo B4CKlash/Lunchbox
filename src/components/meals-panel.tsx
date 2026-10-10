@@ -30,7 +30,7 @@ const modes = [
   { id: "plan", label: "Calendar", icon: CalendarDays },
 ] as const;
 
-export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
+export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" | "ai"; aiBackend?: "gateway" | "local-worker" }) {
   const { state, setPreferences, setWorkspaceMode, householdResetVersion, appendSuggestionBlock, setSuggestionDirection, setSuggestionStreamEnabled, deferAiRequests } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
@@ -51,8 +51,9 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     }),
     contextKey,
     {
-      enabled: state.workspace.mode === "suggestions" && collection === "suggested" && !importOpen,
+      enabled: (Boolean(state.pilot) || state.workspace.mode === "suggestions") && collection === "suggested" && !importOpen,
       aiMode,
+      aiBackend,
       blocks,
       streamEnabled,
       appendSuggestionBlock,
@@ -64,7 +65,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     },
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
-  const mode = state.workspace.mode;
+  const mode = state.pilot ? "suggestions" : state.workspace.mode;
   const draftMeals = state.workspace.calendar.draft ?? state.meals;
   const profileLabels = selectedPreferenceLabels([
     ...(state.preferences.goals ?? []),
@@ -75,7 +76,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     ...(state.preferences.cookingStyles ?? []),
   ]);
 
-  function updatePreferences(patch: Partial<Preferences>) {
+  async function updatePreferences(patch: Partial<Preferences>) {
     const parsed = preferencesSchema.safeParse({
       ...state.preferences,
       ...patch,
@@ -88,7 +89,8 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
     }
     setPreferenceError(null);
     setCollection("suggested");
-    setPreferences(parsed.data);
+    const saved = await setPreferences(parsed.data);
+    if (!saved.ok) setPreferenceError(saved.error ?? "Preferences could not be saved.");
   }
 
   function generateMore(event: FormEvent<HTMLFormElement>) {
@@ -153,7 +155,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
         role="group"
         aria-label="Recipe workspace views"
       >
-        {modes.map(({ id, label, icon: Icon }) => (
+        {(state.pilot ? modes.filter((entry) => entry.id === "suggestions") : modes).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             aria-pressed={mode === id}
@@ -167,12 +169,12 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
             ) : null}
           </button>
         ))}
-        <span className="workspace-hint">Follow your appetite.</span>
+        <Link className="text-link" href="/meals">Open planning conversation <ArrowRight size={16} /></Link>
       </div>
       <p className="status-message" role="status">
         {message}
       </p>
-      {draftMeals.length >= 50 ? (
+      {!state.pilot && draftMeals.length >= 50 ? (
         <p className="error-message" role="status">
           Your plan holds up to 50 meals. Remove one to add another.
         </p>
@@ -187,6 +189,7 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
           key={`${householdResetVersion}:${importSeed.request}`}
           initialUrl={importUrl}
           aiMode={aiMode}
+          aiBackend={aiBackend}
           onClose={() => setImportOpen(false)}
           onNotice={setMessage}
           onSaved={() => { setCollection("saved"); setWorkspaceMode("suggestions"); setImportOpen(false); }}
@@ -376,11 +379,12 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
               waiting={waiting}
               cooldownActive={cooldownActive}
               cooldownUntil={state.workspace.aiCooldownUntil}
-              onDirection={(value) => {
-                setSuggestionDirection(value);
+              onDirection={async (value) => {
                 setCollection("suggested");
-                if (value === direction) generateNext();
-                else setSuggestionStreamEnabled(true);
+                if (value === direction) { generateNext(); return; }
+                const saved = await setSuggestionDirection(value);
+                if (!saved.ok) { setMessage(saved.error ?? "The recipe direction could not be saved."); return; }
+                if (!streamEnabled) await setSuggestionStreamEnabled(true);
               }}
               onNext={generateNext}
               onPause={pause}
@@ -390,8 +394,8 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
           )}
         </section>
       </div>
-      <div hidden={mode !== "chat"}>
-        <MealChatPanel active={mode === "chat" && !importOpen} aiMode={aiMode} onNotice={setMessage} onImportUrl={(url) => {
+      {!state.pilot && <><div hidden={mode !== "chat"}>
+        <MealChatPanel active={mode === "chat" && !importOpen} aiMode={aiMode} aiBackend={aiBackend} onNotice={setMessage} onImportUrl={(url) => {
           setImportSeed((previous) => ({ url, resetVersion: householdResetVersion, request: previous.request + 1 }));
           setImportOpen(true);
           requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
@@ -406,7 +410,8 @@ export function MealsPanel({ aiMode }: { aiMode: "demo" | "ai" }) {
           onRefresh={() => { setCollection("suggested"); setWorkspaceMode("suggestions"); generateNext(); }}
         />
       </div>
-      {mode !== "plan" ? (
+      </>}
+      {state.pilot ? <aside className="workspace-plan-strip"><div><h2>Bring a recipe into the conversation.</h2><p>Choose a recipe to discuss, then place it on your live calendar.</p></div><Link className="button" href="/meals">Open planner <ArrowRight size={16} /></Link></aside> : mode !== "plan" ? (
         <aside className="workspace-plan-strip" aria-label="Plan overview">
           <div>
             <span className="eyebrow">IT ALL COMES TOGETHER</span>

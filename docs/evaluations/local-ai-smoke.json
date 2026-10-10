@@ -1,0 +1,102 @@
+{
+  "evaluatedAt": "2026-10-08T19:33:11.347Z",
+  "model": "qwen3.5:9b",
+  "digest": "d63f830f28d515fefea546f213fca7a75e9dd5176ef51a6deabc952d1c99a911",
+  "results": [
+    {
+      "scenario": "individual work lunch",
+      "pass": 1,
+      "latencyMs": 7966,
+      "completed": false,
+      "unsupportedClaims": false,
+      "invalidStateChanges": false,
+      "output": {
+        "reply": "I suggest cooking 'Tomato spinach pasta' (favorite-pasta) for your Tuesday lunch. This uses 200g pasta, 200g tomatoes, 100g spinach, and 20ml oil. Your wife still needs a separate lunch allocation on that day.",
+        "recipes": [
+          {
+            "id": "favorite-pasta",
+            "name": "Tomato spinach pasta",
+            "description": "A favorite quick vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+            ],
+            "provenance": {
+              "source": "import",
+              "method": "text"
+            }
+          },
+          {
+            "id": "local-7c8d4d32-c876-498e-bce7-914b3ee2d31e",
+            "name": "Tomato spinach pasta",
+            "description": "A favorite quick vegetable pasta",
+            "servings": 2,
+            "minutes": 25,
+            "ingredients": [
+              {
+                "ingredientId": "pasta",
+                "name": "Dry pasta",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "tomatoes",
+                "name": "Tomatoes",
+                "quantity": 200,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "spinach",
+                "name": "Spinach",
+                "quantity": 100,
+                "unit": "g"
+              },
+              {
+                "ingredientId": "oil",
+                "name": "Olive oil",
+                "quantity": 20,
+                "unit": "ml"
+              }
+            ],
+            "steps": [
+              "Cook pasta.",
+              "Cook tomatoes and spinach in oil.",
+              "Combine."
+            ],
+            "provenance": {
+              "source": "ai"
+            }
+          }
+        ],
+        "operations": []
+      }
+    }
+  ]
+}

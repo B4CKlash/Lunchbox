@@ -1,0 +1,358 @@
+{
+  "model": "qwen3.5:27b",
+  "digest": "2d2e4b8fc7c0479b70f8cba9fc8bdb49a3c9a43a8a6da3873b724c9fca4672ef",
+  "thinking": "on",
+  "temperature": 0.2,
+  "maxOutputTokens": 4000,
+  "timeoutMs": 120000,
+  "purpose": "Targeted required batch regression check, not the full release gate.",
+  "results": [
+    {
+      "scenario": "one batch three meals",
+      "pass": 1,
+      "latencyMs": 31663,
+      "completed": true,
+      "stateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest cooking your favorite pasta on Monday as a six-portion batch. This would cover both of you for Monday dinner, Tuesday lunch, and Wednesday lunch—one portion each per meal. Review this plan before confirming.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "4470f9f6-79f6-4777-bc64-b53db886230e",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A favorite quick vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "oil",
+                    "name": "Olive oil",
+                    "quantity": 20,
+                    "unit": "ml"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-12",
+              "yield": 6,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "69c36171-8cbf-4f6f-822c-78fbad1dd38b",
+                "batchId": "4470f9f6-79f6-4777-bc64-b53db886230e",
+                "memberId": "you",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "b01d136c-f81c-4156-9e40-15f778d39d42",
+                "batchId": "4470f9f6-79f6-4777-bc64-b53db886230e",
+                "memberId": "partner",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "990f74d3-3453-4205-a2e7-849008a2670b",
+                "batchId": "4470f9f6-79f6-4777-bc64-b53db886230e",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "3e48def7-ccf1-4754-8fa9-fc9845e64da2",
+                "batchId": "4470f9f6-79f6-4777-bc64-b53db886230e",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "b446d28a-81f7-4209-84bb-3bf311598bb8",
+                "batchId": "4470f9f6-79f6-4777-bc64-b53db886230e",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "ed7ed663-e5e0-4c53-a1a5-5952312de790",
+                "batchId": "4470f9f6-79f6-4777-bc64-b53db886230e",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "broad lunch proposal",
+      "pass": 1,
+      "latencyMs": 120019,
+      "completed": false,
+      "rejectedClaimAttempts": 0,
+      "error": "The operation was aborted due to timeout"
+    },
+    {
+      "scenario": "one batch three meals",
+      "pass": 2,
+      "latencyMs": 28725,
+      "completed": true,
+      "stateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest cooking your favorite pasta on Monday as a six-portion batch. This would cover both of you for Monday dinner, Tuesday lunch, and Wednesday lunch—one portion each per meal. Review this plan to confirm.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A favorite quick vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "oil",
+                    "name": "Olive oil",
+                    "quantity": 20,
+                    "unit": "ml"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-12",
+              "yield": 6,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "b01a71e3-d342-4f66-bac5-17d3f307177c",
+                "batchId": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+                "memberId": "you",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "641b9808-8268-49df-b6d5-a92f0e4977fa",
+                "batchId": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+                "memberId": "partner",
+                "date": "2026-10-12",
+                "slot": "dinner",
+                "portions": 1
+              },
+              {
+                "id": "fd0c250e-905d-4c05-89b4-5c25a5e0bdae",
+                "batchId": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "1cdc6a85-62c4-4027-8e31-2e183dfedc7d",
+                "batchId": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "75629ca5-117a-42dd-8003-23190c331a4d",
+                "batchId": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "25637bc5-55c4-49c6-8535-f937d7639539",
+                "batchId": "eb99d8f3-b491-43d4-ac42-247e2c48486c",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "broad lunch proposal",
+      "pass": 2,
+      "latencyMs": 28921,
+      "completed": true,
+      "stateMutation": false,
+      "rejectedClaimAttempts": 0,
+      "output": {
+        "reply": "I suggest planning one batch of your favorite tomato spinach pasta to cover lunch for both of you Tuesday through Thursday. That's 6 portions total (one each per day). Review this plan before confirming.",
+        "recipes": [],
+        "operations": [
+          {
+            "type": "create_batch",
+            "batch": {
+              "id": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+              "recipe": {
+                "id": "favorite-pasta",
+                "name": "Tomato spinach pasta",
+                "description": "A favorite quick vegetable pasta",
+                "servings": 2,
+                "minutes": 25,
+                "ingredients": [
+                  {
+                    "ingredientId": "pasta",
+                    "name": "Dry pasta",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "tomatoes",
+                    "name": "Tomatoes",
+                    "quantity": 200,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "spinach",
+                    "name": "Spinach",
+                    "quantity": 100,
+                    "unit": "g"
+                  },
+                  {
+                    "ingredientId": "oil",
+                    "name": "Olive oil",
+                    "quantity": 20,
+                    "unit": "ml"
+                  }
+                ],
+                "steps": [
+                  "Cook pasta. Cook tomatoes and spinach in oil. Combine."
+                ],
+                "provenance": {
+                  "source": "import",
+                  "method": "text"
+                }
+              },
+              "prepareDate": "2026-10-13",
+              "yield": 6,
+              "reservedExtra": 0
+            },
+            "allocations": [
+              {
+                "id": "d88c5af8-3120-4d2f-a7a6-bb4fbf820e80",
+                "batchId": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+                "memberId": "you",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "a3e5441e-33a9-4779-bcbe-3e628a97eb53",
+                "batchId": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+                "memberId": "partner",
+                "date": "2026-10-13",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "9dd604ee-4da9-47d1-a400-3e19d4f79fd7",
+                "batchId": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+                "memberId": "you",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "5d525a69-aba7-4b99-ae72-63692f8483c0",
+                "batchId": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+                "memberId": "partner",
+                "date": "2026-10-14",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "4f65212a-c148-4ced-a6db-a1d62390f150",
+                "batchId": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+                "memberId": "you",
+                "date": "2026-10-15",
+                "slot": "lunch",
+                "portions": 1
+              },
+              {
+                "id": "f82a1d82-eda0-4884-8666-7fb4831dc869",
+                "batchId": "b29fe831-45e2-4dbb-b387-c818f6c9ced0",
+                "memberId": "partner",
+                "date": "2026-10-15",
+                "slot": "lunch",
+                "portions": 1
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
