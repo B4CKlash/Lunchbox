@@ -1,5 +1,5 @@
 import { calendarDateSchema, recipeSchema, type HouseholdState, type Recipe, type ShoppingItem } from "@/lib/contracts";
-import { buildPilotShoppingList, ensurePilot } from "./pilot";
+import { buildPilotShoppingList, ensurePilot, type PilotStockCheck } from "./pilot";
 
 type CandidateShortage = Pick<ShoppingItem, "ingredientId" | "name" | "unit" | "quantity">;
 export type CandidateShoppingPreview = {
@@ -8,7 +8,10 @@ export type CandidateShoppingPreview = {
   /** Additional purchases caused by the candidate, beyond existing demand. */
   shortages: CandidateShortage[];
   /** Required is combined demand; candidateRequired is this batch's contribution. */
-  checks: Array<Omit<CandidateShortage, "quantity"> & { required: number; candidateRequired: number }>;
+  checks: Array<Omit<CandidateShortage, "quantity"> & {
+    required: number; candidateRequired: number;
+    packageAvailability?: Pick<PilotStockCheck, "knownAvailable" | "knownRemainder" | "packageStock">;
+  }>;
 };
 const keyFor = (ingredientId: string, unit: string) => JSON.stringify([ingredientId, unit]);
 const round = (quantity: number) => Math.round((quantity + Number.EPSILON) * 1000) / 1000;
@@ -49,6 +52,7 @@ export function previewCandidateShopping(state: HouseholdState, recipe: Recipe, 
     if (contribution > 0) preview.checks.push({
       ingredientId: check.ingredientId, name: check.name, unit: check.unit,
       required: check.required, candidateRequired: contribution,
+      ...(check.packageStock.length ? { packageAvailability: { knownAvailable: check.knownAvailable, knownRemainder: check.knownRemainder, packageStock: check.packageStock } } : {}),
     });
   }
   return preview;

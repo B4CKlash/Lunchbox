@@ -61,7 +61,8 @@ test("package checks include a candidate covered alone when the combined plan ex
   const preview = previewCandidateShopping(state, candidate, 2, "2026-10-13");
   assert.deepEqual(buildPilotShoppingList(state).checks, [], "the existing400g plan fits the measured500g");
   assert.deepEqual(preview.shortages, [], "unknown container contents cannot create a definite purchase amount");
-  assert.deepEqual(preview.checks, [{ ingredientId: "beans", name: "Canned white beans", unit: "g", required: 700, candidateRequired: 300 }]);
+  assert.deepEqual(preview.checks, [{ ingredientId: "beans", name: "Canned white beans", unit: "g", required: 700, candidateRequired: 300,
+    packageAvailability: { knownAvailable: 500, knownRemainder: 200, packageStock: state.pilot.packageStock } }]);
   assert.deepEqual(state, before);
 });
 
