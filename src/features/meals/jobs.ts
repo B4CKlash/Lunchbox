@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatMealsRequestSchema, chatMealsResponseSchema, householdStateSchema, importRecipeRequestSchema, importRecipeResponseSchema, pilotOperationSchema, recipeSchema, suggestMealsRequestSchema, suggestMealsResponseSchema } from "@/lib/contracts";
+import { chatMealsRequestSchema, chatMealsResponseSchema, householdStateSchema, importRecipeRequestSchema, importRecipeResponseSchema, pilotOperationSchema, profileFactChangeSchema, recipeSchema, suggestMealsRequestSchema, suggestMealsResponseSchema } from "@/lib/contracts";
 
 /** Transport envelopes reuse the application's canonical recipe/domain schemas. */
 export const aiJobRequestSchema = z.discriminatedUnion("kind", [
@@ -12,6 +12,7 @@ export const planningResultSchema = z.object({
   reply: z.string().min(1).max(4000),
   recipes: z.array(recipeSchema).max(10),
   operations: z.array(pilotOperationSchema).max(30),
+  profileChanges: z.array(profileFactChangeSchema).max(10).optional(),
 });
 export const aiJobResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("planning"), data: planningResultSchema }),

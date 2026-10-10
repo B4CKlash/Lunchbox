@@ -4,6 +4,7 @@ import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import { calendarDateSchema, mealSlotSchema, recipeSchema, unitSchema, type HouseholdState, type KnownIngredient, type PilotOperation, type Recipe } from "@/lib/contracts";
 import { resolveIngredient } from "@/features/pantry/ingredients";
+import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
 import { applyPilotCommand, buildPilotShoppingList, ensurePilot } from "@/features/planning/pilot";
 import { addDays } from "@/features/planning/calendar";
 import { createLocalModel, verifyLocalModel } from "./local-model";
@@ -91,7 +92,7 @@ export function reviewLocalPlanningWire(state: HouseholdState, input: unknown, a
     removeAllocationIds: [], purchases: [], stock: [], cooking: [], consumption: [], feedback: [], shopThrough: null,
     ...wire,
   });
-  return reviewLocalPlanningDraft(state, groundLocalPlanningDraft(state, draft, actorMemberId));
+  return reviewLocalPlanningDraft(state, groundLocalPlanningDraft(state, draft, actorMemberId), randomUUID, actorMemberId);
 }
 
 
@@ -99,7 +100,7 @@ const instructions = `You are the resident meal-planning assistant for one house
 First classify the CURRENT REQUEST in intent. Choose clarify when a requested exact inventory/cooking/purchase action lacks a required amount, supported unit, known entity, or clear meaning. An explicit qualitative stock statement (some, low, out) needs NO numeric amount: choose stock and copy that status with quantity:null. Clarify/discuss responses contain only intent and reply and can never change the household. Refusing a unit conversion must use clarify, not stock; never substitute out/low for unknown stock. A purchase with unknown amount must use clarify, not a stock correction. Choose allocate-prepared when scheduling existing leftovers/freezer portions; its allocations use an existing batchId. Choose consume to record eating an existing allocation, and use an exact allocationId from context. Populate ONLY the corresponding relevant arrays. For intent coverage, populate coverage and leave recipes/favoriteRecipeIds/batches empty. For favorite, populate favoriteRecipeIds only. For generate/revise, populate recipes only unless placement is explicitly requested. For purchase/cook/consume/feedback/stock/horizon, fill ONLY purchases/cooking/consumption/feedback/stock/shopThrough respectively. Only place permits a combination of recipe candidates, batches, allocations and external coverage for a broad plan. Within place, irrelevant arrays are []. Other intents contain only their allowed fields. Copying a recipe from context into recipes is NOT retrieval. Never generate unrelated recipes. Example: "Work covers my Tuesday lunch" => intent coverage, one coverage entry for actorMemberId at Tuesday lunch with reason:"work".
 You produce candidates and REVIEWABLE actions, never execute anything. Do not claim you saved, scheduled, added, removed, bought, cooked, ate, rated, updated, or changed the household. Describe proposals with "I suggest", "You could", or "Review". If a user claims an action happened in the real world, you may propose recording it. Never invent missing details for purchases, cooking, or consumption; ask for them. No allergy safety or medical nutrition claims.
 Use ONLY opaque person references from members: "requester" is the authenticated person speaking and "other" is their partner. These are references, not display names; never output IDs "you" or "partner". "I", "me", and "my" refer ONLY to actorMemberId, the authenticated person making this request. "My wife", "partner", or "spouse" refer to the other member in a two-person household; ask for a named person in a larger household. Coverage records meals ALREADY PROVIDED EXTERNALLY, not people who still need food. A person who "still needs lunch" must NOT get a coverage entry. One person's work lunch covers only that person; for "my work covers lunch, my wife still needs lunch", coverage.memberId is actorMemberId, never the other member. Both people require separate allocations. For dates, copy the user's weekday word literally (e.g. "Monday") instead of calculating an ISO date. The application resolves it using the supplied planningDates table. Use YYYY-MM-DD only when the user explicitly states a date. Explicit weekdays override focusDate. For a single undated placement use focusDate; for broad requests such as "fill this week", use the full visible session.startDate/days scope. Relative terms today/tomorrow/yesterday require clarification because this snapshot does not supply the household's current local day. User focus is session.focusDate/focusSlot.
-Read savedRecipes and feedback for favorites. Return exact favoriteRecipeIds; do not rewrite a saved recipe. New recipes belong in recipes, max 3. Revised recipes are new snapshots. For a recipe focused in session, revise it when requested. Honor maxMinutes, household and person preferences, food constraints, rejectedRecipeIds, and equipment. List all ingredients with quantities for recipe base servings. Supported units ONLY g, ml, each. Never invent unit conversions. Use supplied canonical ingredient names unchanged when the ingredient matches; preserve raw/cooked, fresh/dried, canned/dry forms. Do not mix ingredient identities. Recipe steps refer to ingredient names without repeating numeric quantities. New ingredient names are permitted and will be resolved for review. Vegetable-focused means include several actual vegetables, not just garnish.
+Read savedRecipes and feedback for favorites. Return exact favoriteRecipeIds; do not rewrite a saved recipe. New recipes belong in recipes, max 3. Revised recipes are new snapshots. For a recipe focused in session, revise it when requested. Honor maxMinutes, household and person preferences, food constraints, rejectedRecipeIds, and equipment. Current profileFacts and authored preferences are durable truth; old conversation never recreates an absent, corrected, forgotten, or undone fact. Explicit current-request constraints apply to this request only unless the application separately records them. You cannot author saved preference changes or claim to have saved them. List all ingredients with quantities for recipe base servings. Supported units ONLY g, ml, each. Never invent unit conversions. Use supplied canonical ingredient names unchanged when the ingredient matches; preserve raw/cooked, fresh/dried, canned/dry forms. Do not mix ingredient identities. Recipe steps refer to ingredient names without repeating numeric quantities. New ingredient names are permitted and will be resolved for review. Vegetable-focused means include several actual vegetables, not just garnish.
 Discussion, favorite retrieval, new recipes, and revisions have NO calendar actions unless the user explicitly requests placement. "Put this on Tuesday" uses the focused recipe, one portion per selected person unless specified. Recipe references in batches are an existing recipe ID from savedRecipes/candidates, or "new:0", "new:1", "new:2" for new recipe array indexes. Batch portions count the total cooked yield. Sum allocations + reservedExtra must not exceed portions. Prepare on or before every allocation. Planning to cook a recipe in the future creates a NEW batch; it never needs an existing batch ID. One multi-occasion cooking request uses ONE entry in batches with every meal allocation NESTED inside that entry. Top-level allocations are ONLY for already existing batch IDs from context; they must be [] if no batches exist yet. Unallocated portions for the freezer count as reservedExtra. Never exceed known prepared balances.
 Existing cooked or planned batches can use allocations with their exact batchId. Do not create another batch when the user wants existing leftovers/freezer food. Do not allocate to already covered people/occasions; clearing an allocation can be proposed by exact removeAllocationIds. coverage automatically replaces that person's existing meal; other people's meals remain.
 A broad request filling days proposes the entire set for review. Purchasing/cooking/consumption/feedback/stock updates must be explicitly requested. For a purchase require a stated positive quantity and supported unit. Qualitative stock uses some/low/out and quantity:null; it NEVER invents a balance. For exact stock include the stated quantity. Cooking needs a real existing batch ID and explicitly stated actualPortions; freezerPortions defaults0 only if none is requested. Feedback requires a user-specified 1-to-5 rating. shopThrough changes ONLY upon an explicit shopping horizon request, never because calendar view changes.
@@ -118,7 +119,7 @@ function knownIngredients(state: HouseholdState): KnownIngredient[] {
 }
 
 /** Convert model drafts to canonical recipe snapshots and validated proposals. */
-export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, idFactory: () => string = randomUUID): LocalPlanningResult {
+export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, idFactory: () => string = randomUUID, actorMemberId?: string): LocalPlanningResult {
   const current = ensurePilot(state);
   const draft = localPlanningDraftSchema.parse(input);
   const rejected = new Set(current.pilot.session.rejectedRecipeIds);
@@ -169,7 +170,7 @@ export function reviewLocalPlanningDraft(state: HouseholdState, input: unknown, 
   if (draft.purchases.length) operations.push({ type: "record_purchase", items: draft.purchases.map((item) => ({ ...resolve(item), quantity: item.quantity })) });
   for (const cooking of draft.cooking) operations.push({ type: "cook_batch", ...cooking });
   for (const consumption of draft.consumption) operations.push({ type: "consume", ...consumption });
-  for (const feedback of draft.feedback) operations.push({ type: "record_feedback", feedback: { ...feedback, id: idFactory() } });
+  for (const feedback of draft.feedback) operations.push({ type: "record_feedback", feedback: { ...feedback, id: idFactory(), ...(actorMemberId ? { memberId: actorMemberId } : {}) } });
   if (draft.shopThrough !== null) operations.push({ type: "set_shop_through", date: draft.shopThrough });
   let preview = current;
   for (const operation of operations) {
@@ -293,6 +294,9 @@ export async function runLocalPlanning(
   if (options.verify !== false) await verifyLocalModel(process.env, options.signal);
   const actorMemberId = options.actorMemberId ?? current.pilot.members[0].id;
   if (!current.pilot.members.some((member) => member.id === actorMemberId)) throw new Error("The requesting person is not in this household.");
+  const profileChanges = extractExplicitProfileChanges(current, message, actorMemberId);
+  const profileReply = explicitProfileReply(current, message, actorMemberId);
+  if (profileReply) return { reply: profileReply, recipes: [], operations: [], ...(profileChanges.length ? { profileChanges } : {}) };
   const prompt = JSON.stringify({
     currentRequest: message,
     ...modelPlanningContext(current, actorMemberId),
@@ -321,7 +325,7 @@ export async function runLocalPlanning(
     try {
       const reviewed = reviewLocalPlanningWire(current, result.output, actorMemberId, message);
       options.onGeneratedAttempt?.({ unsupportedClaim: false });
-      return reviewed;
+      return { ...reviewed, ...(profileChanges.length ? { profileChanges } : {}) };
     }
     catch (error) {
       options.onGeneratedAttempt?.({ unsupportedClaim: error instanceof Error && error.message === "The assistant claimed an unperformed household action. Please retry." });

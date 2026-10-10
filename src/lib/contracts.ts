@@ -230,6 +230,45 @@ export const recipeWorkspaceSchema = z.object({
 // remain readable; ensurePilot performs the explicit, recoverable migration.
 const pilotIdSchema = z.string().trim().min(1).max(160);
 const portionsSchema = z.number().finite().positive().max(1000);
+export const profileScopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("household") }),
+  z.object({ kind: z.literal("member"), memberId: pilotIdSchema }),
+]);
+export const profileFoodTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("ingredient"), ingredientId: z.string().min(1).max(80), name: z.string().trim().min(1).max(80) }),
+  z.object({ kind: z.literal("category"), category: pantryCategorySchema }),
+  // Preserve unfamiliar or ambiguous wording instead of guessing an identity.
+  z.object({ kind: z.literal("text"), text: z.string().trim().min(1).max(80) }),
+]);
+export const profileFactValueSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("food-dislike"), scope: profileScopeSchema, target: profileFoodTargetSchema, disliked: z.boolean() }),
+  z.object({ kind: z.literal("equipment"), equipment: z.string().trim().min(1).max(80), availability: z.enum(["available", "unavailable", "unknown"]) }),
+]);
+export const profileFactSchema = z.object({
+  id: z.string().min(1).max(1000),
+  value: profileFactValueSchema,
+  source: z.object({
+    kind: z.enum(["manual", "conversation"]), sourceText: z.string().trim().min(1).max(2000),
+    recordedAt: z.iso.datetime(), commandId: pilotIdSchema,
+    jobId: z.uuid().optional(), messageId: z.string().max(160).optional(), actorMemberId: pilotIdSchema.optional(),
+  }),
+});
+export const profileFactChangeSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("upsert_profile_fact"), value: profileFactValueSchema, sourceText: z.string().trim().min(1).max(2000) }),
+  z.object({ type: z.literal("remove_profile_fact"), factId: z.string().min(1).max(1000), sourceText: z.string().trim().min(1).max(2000) }),
+]);
+export const profileResultSourceSchema = z.object({
+  jobId: z.uuid(), request: z.string().min(1).max(2000), actorMemberId: pilotIdSchema,
+  changes: z.array(profileFactChangeSchema).min(1).max(10),
+});
+export const chatMealsResponseSchema = z.object({
+  source: recipeSourceSchema,
+  reply: z.string().min(1).max(2000),
+  recipes: z.array(recipeSchema).max(10),
+  servings: z.number().int().min(1).max(12),
+  // Authored from the explicit current request, never model-inferred memory.
+  profileChanges: z.array(profileFactChangeSchema).max(10).optional(),
+});
 export const householdMemberSchema = z.object({
   id: pilotIdSchema,
   name: z.string().trim().min(1).max(80),
@@ -334,6 +373,7 @@ export const stockEntrySchema = z.object({
   message: "A purchase needs a positive amount.",
 });
 export const pilotChangeSchema = z.discriminatedUnion("type", [
+  ...profileFactChangeSchema.options,
   z.object({ type: z.literal("set_coverage"), coverage: mealCoverageSchema }),
   z.object({ type: z.literal("clear_coverage"), coverageId: pilotIdSchema }),
   z.object({ type: z.literal("create_batch"), batch: cookingBatchInputSchema, allocations: z.array(mealAllocationInputSchema).max(200) }),
@@ -366,11 +406,16 @@ export const pilotOperationSchema = z.discriminatedUnion("type", [
   ...pilotChangeSchema.options,
   z.object({ type: z.literal("set_session"), session: planningSessionSchema }),
   z.object({ type: z.literal("receive_planning_result"), baseRevision: z.number().int().nonnegative(), session: planningSessionSchema,
+    profileSource: profileResultSourceSchema.optional(),
     proposal: z.object({ id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }).optional(),
     directPlacement: z.object({ jobId: z.uuid(), request: z.string().min(1).max(2000), actorMemberId: pilotIdSchema,
       change: z.object({ type: z.literal("create_batch"), batch: cookingBatchInputSchema, allocations: z.array(mealAllocationInputSchema).min(1).max(12) }),
     }).optional(),
   }).refine((operation) => !(operation.proposal && operation.directPlacement), { message: "A response must either apply its explicit placement or offer a proposal." }),
+  z.object({ type: z.literal("receive_recipe_chat_result"), baseRevision: z.number().int().nonnegative(), jobId: z.uuid(),
+    request: z.string().min(1).max(1000), actorMemberId: pilotIdSchema, result: chatMealsResponseSchema,
+    submittedDraft: z.string().max(1000),
+  }),
   z.object({ type: z.literal("propose"), id: pilotIdSchema, title: z.string().min(1).max(200), changes: z.array(pilotChangeSchema).min(1).max(300) }),
   z.object({ type: z.literal("apply_proposal"), proposalId: pilotIdSchema,
     selectedAllocationIds: z.array(pilotIdSchema).max(5000).optional(), includeOtherChanges: z.boolean().optional(),
@@ -389,6 +434,8 @@ export const pilotCommandSchema = z.object({
 });
 const pilotDataSchema = z.object({
   schemaVersion: z.literal(1),
+  // Also defaults inside older receipt inverses, preserving their readability.
+  profileFacts: z.array(profileFactSchema).max(200).default([]),
   members: z.array(householdMemberSchema).min(1).max(12),
   coverage: z.array(mealCoverageSchema).max(2000),
   batches: z.array(cookingBatchSchema).max(1000),
@@ -457,12 +504,6 @@ export const chatMealsRequestSchema = z.object({
   message: z.string().trim().min(1).max(1000),
   focusedRecipe: recipeSchema.optional(),
   focusedServings: z.number().int().min(1).max(12).optional(),
-});
-export const chatMealsResponseSchema = z.object({
-  source: recipeSourceSchema,
-  reply: z.string().min(1).max(2000),
-  recipes: z.array(recipeSchema).max(10),
-  servings: z.number().int().min(1).max(12),
 });
 
 // Import drafts are intentionally not Recipes: unresolved fields must be reviewed.
@@ -542,6 +583,11 @@ export type ShoppingItem = {
 };
 
 export type HouseholdMember = z.infer<typeof householdMemberSchema>;
+export type ProfileScope = z.infer<typeof profileScopeSchema>;
+export type ProfileFoodTarget = z.infer<typeof profileFoodTargetSchema>;
+export type ProfileFactValue = z.infer<typeof profileFactValueSchema>;
+export type ProfileFact = z.infer<typeof profileFactSchema>;
+export type ProfileFactChange = z.infer<typeof profileFactChangeSchema>;
 export type MealCoverage = z.infer<typeof mealCoverageSchema>;
 export type CookingBatch = z.infer<typeof cookingBatchSchema>;
 export type MealAllocation = z.infer<typeof mealAllocationSchema>;

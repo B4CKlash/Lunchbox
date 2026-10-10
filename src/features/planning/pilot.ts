@@ -10,11 +10,14 @@ import {
   type PilotCommand,
   type PilotOperation,
   type PilotState,
+  type ProfileFact,
+  type ProfileFactChange,
   type ShoppingItem,
   type Unit,
 } from "@/lib/contracts";
 import { addDays, localDate } from "./calendar";
 import { directPlacementForRequest } from "./direct-placement";
+import { extractExplicitProfileChanges, profileFactId } from "./profile";
 
 export class PilotCommandError extends Error {
   constructor(
@@ -153,10 +156,16 @@ function validatePilot(pilot: PilotState) {
   unique(pilot.feedback, "Feedback entries");
   unique(pilot.receipts, "Receipts");
   unique(pilot.purchaseLots, "Purchase lots");
+  unique(pilot.profileFacts, "Profile facts");
   if (new Set(pilot.prepared.map((entry) => entry.batchId)).size !== pilot.prepared.length) fail("A batch has only one prepared balance.");
   if (new Set(pilot.stock.map((entry) => keyFor(entry.ingredientId, entry.unit))).size !== pilot.stock.length) fail("Stock entries must have unique ingredient and unit pairs.");
   if (new Set(pilot.stockChecks.map((entry) => keyFor(entry.ingredientId, entry.unit))).size !== pilot.stockChecks.length) fail("Stock checks must have unique ingredient and unit pairs.");
   const members = new Set(pilot.members.map((member) => member.id));
+  for (const fact of pilot.profileFacts) {
+    if (fact.id !== profileFactId(fact.value)) fail("Profile facts must use their canonical identity.");
+    if (fact.value.kind === "food-dislike" && fact.value.scope.kind === "member" && !members.has(fact.value.scope.memberId)) fail("Personal preferences must use a current household member.");
+    if (fact.source.kind === "conversation" && (!fact.source.jobId || !fact.source.messageId || !fact.source.actorMemberId)) fail("Conversational preferences need their source request.");
+  }
   const occupied = new Set<string>();
   for (const entry of [...pilot.coverage, ...pilot.allocations]) {
     if (!members.has(entry.memberId)) fail("Choose a current household member.");
@@ -215,9 +224,23 @@ function setPantryBalance(state: PilotHousehold, ingredientId: string, name: str
   if (override?.status === "exact") override.quantity = round(quantity);
 }
 
-function applyChange(state: PilotHousehold, change: PilotChange, now: string, commandId: string, changeIndex: number | string) {
+function applyChange(state: PilotHousehold, change: PilotChange, now: string, commandId: string, changeIndex: number | string,
+  profileSource?: { jobId: string; actorMemberId: string; messageId: string }) {
   const pilot = state.pilot;
   switch (change.type) {
+    case "upsert_profile_fact": {
+      const id = profileFactId(change.value);
+      const fact: ProfileFact = { id, value: structuredClone(change.value), source: {
+        kind: profileSource ? "conversation" : "manual", sourceText: change.sourceText,
+        recordedAt: now, commandId, ...profileSource,
+      } };
+      pilot.profileFacts = [...pilot.profileFacts.filter((entry) => entry.id !== id), fact];
+      break;
+    }
+    case "remove_profile_fact":
+      if (!pilot.profileFacts.some((fact) => fact.id === change.factId)) throw new PilotCommandError("not-found", "That saved preference is no longer available.");
+      pilot.profileFacts = pilot.profileFacts.filter((fact) => fact.id !== change.factId);
+      break;
     case "set_coverage": {
       const key = occasion(change.coverage);
       for (const allocation of pilot.allocations.filter((entry) => occasion(entry) === key)) removeAllocation(pilot, allocation.id);
@@ -386,6 +409,8 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string, co
 
 function summaryFor(operation: PilotOperation) {
   switch (operation.type) {
+    case "upsert_profile_fact": return "Saved a food or equipment preference for future recommendations.";
+    case "remove_profile_fact": return "Forgot the selected saved preference.";
     case "set_coverage": return `Marked ${operation.coverage.slot} on ${operation.coverage.date} as ${operation.coverage.reason.replaceAll("-", " ")}.`;
     case "create_batch": return `Planned ${operation.batch.yield} portions of ${operation.batch.recipe.name}.`;
     case "record_purchase": return `Recorded ${operation.items.length} purchased ingredient${operation.items.length === 1 ? "" : "s"}.`;
@@ -398,7 +423,8 @@ function summaryFor(operation: PilotOperation) {
     case "correct_prepared": return `Corrected prepared food: ${operation.produced} total portions, ${operation.freezerPortions} remaining in the freezer${operation.reopenAllocationIds.length ? `; reopened ${operation.reopenAllocationIds.length} meal${operation.reopenAllocationIds.length === 1 ? "" : "s"}` : ""}.`;
     case "record_feedback": return "Saved recipe feedback for future planning.";
     case "set_session": return "Saved the planning conversation and recipe candidates.";
-    case "receive_planning_result": return operation.directPlacement ? "Placed the requested recipe and saved the assistant response." : operation.proposal ? "Saved the assistant response and its reviewable proposal." : "Saved the assistant response and recipe candidates.";
+    case "receive_planning_result": return operation.profileSource ? `Saved ${operation.profileSource.changes.length} explicit preference change${operation.profileSource.changes.length === 1 ? "" : "s"} and the assistant response${operation.directPlacement ? "; placed the requested meal" : operation.proposal ? "; other changes await review" : ""}.` : operation.directPlacement ? "Placed the requested recipe and saved the assistant response." : operation.proposal ? "Saved the assistant response and its reviewable proposal." : "Saved the assistant response and recipe candidates.";
+    case "receive_recipe_chat_result": return operation.result.profileChanges?.length ? `Saved ${operation.result.profileChanges.length} explicit preference change${operation.result.profileChanges.length === 1 ? "" : "s"} and the recipe conversation.` : "Saved the recipe conversation.";
     case "propose": return `Prepared proposal: ${operation.title}.`;
     case "apply_proposal": return "Applied the reviewed planning proposal.";
     case "dismiss_proposal": return "Dismissed the planning proposal.";
@@ -453,7 +479,7 @@ function invalidateRevisedPlanningProposals(pilot: PilotState, previousSession: 
 export function applyPilotCommand(
   state: HouseholdState,
   input: unknown,
-  { now = new Date().toISOString() }: { now?: string } = {},
+  { now = new Date().toISOString(), actorMemberId }: { now?: string; actorMemberId?: string } = {},
 ): { state: PilotHousehold; receipt: ActionReceipt; duplicate: boolean } {
   const parsed = pilotCommandSchema.safeParse(input);
   if (!parsed.success) throw new PilotCommandError("invalid", parsed.error.issues[0]?.message ?? "Invalid planning command.");
@@ -471,15 +497,41 @@ export function applyPilotCommand(
   const { receipts: oldReceipts, revision, ...data } = current.pilot;
   const inverse = { pantry: structuredClone(current.pantry), data: structuredClone(data) };
   const operation = command.operation;
+  // Authenticate newly authored feedback, while keeping existing proposal
+  // authors and legacy unattributed feedback when a proposal is accepted.
+  const attributeFeedback = (change: PilotChange) => {
+    if (change.type !== "record_feedback" || !actorMemberId) return;
+    if (!current.pilot.members.some((member) => member.id === actorMemberId)) fail("Choose the authenticated household member before saving feedback.");
+    if (change.feedback.memberId && change.feedback.memberId !== actorMemberId) fail("Recipe feedback must belong to the person making this request.");
+    change.feedback.memberId = actorMemberId;
+  };
+  if (operation.type === "record_feedback") attributeFeedback(operation);
+  if (operation.type === "propose") operation.changes.forEach(attributeFeedback);
+  if (operation.type === "receive_planning_result") operation.proposal?.changes.forEach(attributeFeedback);
   let changeIndex = 0;
   const apply = (target: PilotHousehold, change: PilotChange) => applyChange(target, change, now, command.id, changeIndex++);
-  if (operation.type === "receive_planning_result" && operation.baseRevision !== revision) {
+  if ((operation.type === "receive_planning_result" || operation.type === "receive_recipe_chat_result") && operation.baseRevision !== revision) {
     throw new PilotCommandError("conflict", "The household changed after this assistant request. Refresh its suggestions before saving them.");
   }
   const directPlacement = operation.type === "receive_planning_result" && operation.directPlacement
     ? directPlacementForRequest(current, operation.directPlacement.request, operation.directPlacement.actorMemberId, [operation.directPlacement.change]) : null;
   if (operation.type === "receive_planning_result" && operation.directPlacement && !directPlacement) fail("This response needs a proposal review before changing the calendar.");
-  const sessionOnly = operation.type === "set_session" || (operation.type === "receive_planning_result" && !operation.proposal && !operation.directPlacement);
+  const profileSource = operation.type === "receive_planning_result" ? operation.profileSource
+    : operation.type === "receive_recipe_chat_result" && operation.result.profileChanges?.length
+      ? { jobId: operation.jobId, actorMemberId: operation.actorMemberId, request: operation.request, changes: operation.result.profileChanges } : undefined;
+  if (profileSource && JSON.stringify(profileSource.changes) !== JSON.stringify(extractExplicitProfileChanges(current, profileSource.request, profileSource.actorMemberId)))
+    fail("These saved preferences do not match the explicit current request.");
+  if (operation.type === "receive_planning_result" && profileSource) {
+    const sourceMessage = operation.session.messages.find((message) => message.id === `job-${profileSource.jobId}-user`);
+    if (sourceMessage?.role !== "user" || sourceMessage.authorMemberId !== profileSource.actorMemberId || sourceMessage.text !== profileSource.request)
+      fail("Saved preferences need their exact current message in the planning conversation.");
+  }
+  if (operation.type === "receive_recipe_chat_result" && JSON.stringify(operation.result.profileChanges ?? []) !== JSON.stringify(extractExplicitProfileChanges(current, operation.request, operation.actorMemberId)))
+    fail("The recipe response omitted or changed an explicit preference update.");
+  const profileChanges: ProfileFactChange[] = profileSource?.changes ?? [];
+  const sessionOnly = operation.type === "set_session"
+    || (operation.type === "receive_planning_result" && !operation.proposal && !operation.directPlacement && !profileChanges.length)
+    || (operation.type === "receive_recipe_chat_result" && !profileChanges.length);
   if (operation.type === "undo") {
     const last = oldReceipts.findLast((entry) => entry.inverse);
     if (!last || last.id !== operation.receiptId || !last.inverse || last.undoneBy || last.undoRevision !== revision) {
@@ -496,6 +548,9 @@ export function applyPilotCommand(
     const previousSession = current.pilot.session;
     current.pilot.session = operation.session;
     invalidateRevisedPlanningProposals(current.pilot, previousSession);
+    if (profileSource) for (const change of profileChanges) applyChange(current, change, now, command.id, changeIndex++, {
+      jobId: profileSource.jobId, actorMemberId: profileSource.actorMemberId, messageId: `job-${profileSource.jobId}-user`,
+    });
     if (directPlacement) apply(current, directPlacement);
     if (operation.type === "receive_planning_result" && operation.proposal) {
       const proposal = operation.proposal;
@@ -510,6 +565,28 @@ export function applyPilotCommand(
     }
     for (const previous of oldReceipts) {
       if (sessionOnly && previous.inverse && previous.undoRevision === revision) previous.undoRevision = revision + 1;
+    }
+  } else if (operation.type === "receive_recipe_chat_result") {
+    if (operation.submittedDraft !== operation.request) fail("The submitted recipe message does not match its source request.");
+    if (!current.pilot.members.some((member) => member.id === operation.actorMemberId)) fail("Choose the requesting household member.");
+    const userId = `job-${operation.jobId}-user`;
+    const assistantId = `job-${operation.jobId}-assistant`;
+    if (current.workspace.chatMessages.some((message) => message.id === userId || message.id === assistantId))
+      throw new PilotCommandError("conflict", "This recipe reply has already been saved.");
+    if (profileSource) for (const change of profileChanges) applyChange(current, change, now, command.id, changeIndex++, {
+      jobId: profileSource.jobId, actorMemberId: profileSource.actorMemberId, messageId: userId,
+    });
+    const result = operation.result;
+    current.workspace = { ...current.workspace,
+      chatMessages: [...current.workspace.chatMessages,
+        { id: userId, role: "user" as const, authorMemberId: operation.actorMemberId, text: operation.request, recipes: [], servings: result.servings },
+        { id: assistantId, role: "assistant" as const, source: result.source, text: result.reply, recipes: result.recipes, servings: result.servings },
+      ].slice(-20),
+      chatDraft: current.workspace.chatDraft === operation.submittedDraft ? "" : current.workspace.chatDraft,
+    };
+    if (sessionOnly) {
+      for (const previous of oldReceipts) if (previous.inverse && previous.undoRevision === revision) previous.undoRevision = revision + 1;
+      for (const proposal of current.pilot.proposals) if (proposal.status === "pending" && proposal.baseRevision === revision) proposal.baseRevision = revision + 1;
     }
   } else if (operation.type === "propose") {
     if (current.pilot.proposals.some((entry) => entry.id === operation.id)) fail("This proposal ID already exists.");
