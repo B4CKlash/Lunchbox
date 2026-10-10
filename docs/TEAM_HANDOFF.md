@@ -26,15 +26,21 @@ npm run build
 
 ## Household pilot extension
 
-The current branch follows [the household pilot objective](HOUSEHOLD_PILOT_OBJECTIVE.md). `/meals` is a persistent conversation, live calendar, focused recipe cards, and grocery preview. `/recipes` preserves suggestions, favorites, and reviewed imports. Earlier calendar drafts are recoverable proposals; there is no second committed-week calendar in the pilot.
+The integrated application follows [the household pilot objective](HOUSEHOLD_PILOT_OBJECTIVE.md). `/meals` is a persistent conversation, live calendar, focused recipe cards, and grocery preview. `/recipes` preserves the continuous recipe feed, favorites, and reviewed imports. Earlier calendar drafts are recoverable proposals; there is no second committed-week calendar in the pilot.
 
-Read [delivery status](HOUSEHOLD_PILOT_DELIVERY.md), [development setup](HOUSEHOLD_DEVELOPMENT.md), [shared household verification](HOUSEHOLD_SERVER_VERIFICATION.md), and [the local worker runbook](LOCAL_AI_WORKER.md). Earlier AI and calendar runbooks describe previous releases; their Gateway and arrange/commit workflows do not select the pilot's inference or calendar behavior.
+Read [delivery status](HOUSEHOLD_PILOT_DELIVERY.md), [development setup](HOUSEHOLD_DEVELOPMENT.md), [shared household verification](HOUSEHOLD_SERVER_VERIFICATION.md), and [the local worker runbook](LOCAL_AI_WORKER.md). Earlier calendar runbooks describe the previous arrange/commit workflow. Recipe-library suggestions, chat, and imports preserve existing Gateway deployments; selecting `LUNCHBOX_AI_BACKEND=local-worker` routes them through the authenticated worker. Shared households default to the worker, and the new-development example selects it explicitly. The pilot planning conversation uses its own clearly labeled fixture or local-worker mode.
+
+Recipe blocks retain their direction and original serving quantities through reload and pantry/preference changes. Shared-mode generation saves each half-block before requesting the next one. Feed controls and history use the same validated household commands, preserving current planning proposals and Undo.
 
 The household provider and storage adapter remain the single state boundary. `HouseholdState.version: 1` gains an additive, versioned `pilot` object. `ensurePilot` migrates earlier data without discarding originals; `applyPilotCommand` is shared by manual UI, server commands, and validation of local AI proposals. `buildPilotShoppingList` uses upcoming uncooked batches through the explicit shopping horizon. Planning never consumes inventory.
 
 Shared mode uses authenticated Supabase membership, stable account-to-person IDs, a revision-checked household snapshot, and command history. Local storage is an account-scoped cache with pending commands; the separate recovery archive is backup-only. Before import, join, account transitions, and resets, preserve the original browser data. Pending edits cannot be silently rebased over another person's full pantry or session.
 
 Ollama stays on the Mac. An authenticated outbound worker receives jobs, generates candidates and proposed actions, and returns them for validation and review. The fixture helper remains clearly labeled. Production household enablement, the hosted development database, protected preview verification, and the actual household pilot are release gates, not consequences of a passing local test.
+
+## Recipe journey design record
+
+Read [the living recipe journey brief](RECIPE_JOURNEY_DESIGN.md) for quick onboarding, brainstorming, shortlisting, pantry discovery inside recipes, total-serving allocation, and grocery previews before scheduling. It tracks agreed directions, open questions, recommended slices, and future acceptance examples separately from the inspected app baseline. These proposals are design work, not implemented feature claims; use the stable idea and decision IDs when refining them.
 
 ## Ownership and first tasks
 
