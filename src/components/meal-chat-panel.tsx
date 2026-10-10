@@ -20,9 +20,11 @@ export function MealChatPanel({
   onNotice,
   aiMode,
   onImportUrl,
+  active,
 }: {
   onNotice: (message: string) => void;
   aiMode: "demo" | "ai";
+  active: boolean;
   onImportUrl: (url: string) => void;
 }) {
   const {
@@ -60,15 +62,15 @@ export function MealChatPanel({
   }, [workspace.aiCooldownUntil, deferAiRequests]);
 
   // A result from an older kitchen must never appear as a current recommendation.
-  // Keeping this panel mounted allows a response to finish when only the view changes.
+  // Leaving Chat releases its request before the recipe feed resumes.
   useEffect(
     () => () => activeRequest.current?.abort(),
-    [context, chatResetVersion],
+    [context, chatResetVersion, active],
   );
 
   async function sendMessage(prompt: string) {
     const message = prompt.trim();
-    if (!message || loading || activeRequest.current) return;
+    if (!active || !message || loading || activeRequest.current) return;
     if (cooldownActive) {
       setError("AI is busy. Please wait before sending another message.");
       return;
@@ -86,7 +88,7 @@ export function MealChatPanel({
         activeRequest.current = null;
         setPending(null);
         setError(
-          "Your kitchen or conversation changed. Send your message again to use the latest details.",
+          "Reply stopped. Your message is saved; send it again when you’re ready.",
         );
       },
       { once: true },
