@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useHousehold } from "@/components/household-provider";
 import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
 import { naturalStockEntryOperation, packageStockLabel, prepareNaturalStockEntry, resolveNaturalStockIdentity, type NaturalStockEntryDraft } from "@/features/pantry/natural-stock-entry";
+import { assertNaturalStockReviewCurrent, captureNaturalStockReview, type NaturalStockReview } from "@/features/pantry/natural-stock-review";
 import { packageKindSchema, type PackageKind, type Unit } from "@/lib/contracts";
 
 /** One reviewed entry surface for measured stock and unresolved containers. */
@@ -11,11 +12,16 @@ export function NaturalStockEntry() {
   const { state, ready, dispatchPilot } = useHousehold();
   const [text, setText] = useState("");
   const [draft, setDraft] = useState<NaturalStockEntryDraft | null>(null);
+  const [review, setReview] = useState<NaturalStockReview | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const known = knownIngredientsFromHousehold(state);
+  function beginReview(value: NaturalStockEntryDraft) {
+    setDraft(value);
+    setReview(captureNaturalStockReview(state));
+  }
   function resolveName(value: NaturalStockEntryDraft) {
     if (!value.name.trim()) return;
     setDraft(resolveNaturalStockIdentity(value, known));
@@ -25,7 +31,7 @@ export function NaturalStockEntry() {
     <p className="muted">Try “I have 10 apples”, “I bought 1000 g beans”, or “I have 10 cans of beans”. Container contents stay unknown until measured.</p>
     <form onSubmit={(event) => {
       event.preventDefault(); setError(""); setMessage("");
-      try { setDraft(prepareNaturalStockEntry(text, known)); }
+      try { beginReview(prepareNaturalStockEntry(text, known)); }
       catch (reason) { setError(reason instanceof Error ? reason.message : "Check your stock statement."); }
     }}>
       <label className="field">Stock statement<input value={text} maxLength={1000} onChange={(event) => setText(event.target.value)} placeholder="I have half a jar of tomato sauce" /></label>
@@ -35,6 +41,7 @@ export function NaturalStockEntry() {
       event.preventDefault(); if (savingRef.current) return;
       savingRef.current = true; setError(""); setSaving(true);
       try {
+        assertNaturalStockReviewCurrent(review, state, draft);
         const result = await dispatchPilot(naturalStockEntryOperation(draft));
         if (!result.ok) throw new Error(result.error ?? "The stock update could not be saved.");
         setDraft(null); setText(""); setMessage("Stock update saved. Container contents are never converted automatically.");
@@ -62,7 +69,7 @@ export function NaturalStockEntry() {
     {error ? <p className="error-message" role="alert">{error}</p> : null}
     {message ? <p className="status-message" role="status">{message}</p> : null}
     {state.pilot?.packageStock.length ? <><h3>Containers on hand</h3><ul>{state.pilot.packageStock.map((stock) => <li key={`${stock.ingredientId}:${stock.packageKind}`}><strong>{stock.name}</strong> · {packageStockLabel(stock)} · contents unresolved <button className="text-button" type="button" disabled={saving} onClick={() => {
-      setDraft({ originalText: stock.sourceNote ?? `${stock.name}: ${packageStockLabel(stock)}`, name: stock.name, ingredientId: stock.ingredientId, candidates: [], operation: "set_total", status: stock.status, amount: stock.count ?? null, unit: null, packageKind: stock.packageKind as PackageKind }); setError(""); setMessage("");
+      beginReview({ originalText: stock.sourceNote ?? `${stock.name}: ${packageStockLabel(stock)}`, name: stock.name, ingredientId: stock.ingredientId, candidates: [], operation: "set_total", status: stock.status, amount: stock.count ?? null, unit: null, packageKind: stock.packageKind as PackageKind }); setError(""); setMessage("");
     }}>Update</button></li>)}</ul></> : <p className="muted small">No container stock recorded yet.</p>}
   </section>;
 }
