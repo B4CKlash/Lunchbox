@@ -44,15 +44,20 @@ export function planningFixtureRecipe(state: HouseholdState, variation: "pasta" 
   });
 }
 
-export function findPlanningFavorites(state: HouseholdState): Recipe[] {
-  // Saved recipes and "make again" are explicit household choices.
-  const feedback = new Map(state.pilot?.feedback.map((entry) => [entry.recipeId, entry]) ?? []);
+export function findPlanningFavorites(state: HouseholdState, audienceIds = state.pilot?.session.memberIds ?? []): Recipe[] {
+  const latest = new Map((state.pilot?.feedback ?? []).map((entry) => [JSON.stringify([entry.recipeId, entry.memberId ?? null]), entry]));
+  const opinions = (recipeId: string) => {
+    const household = latest.get(JSON.stringify([recipeId, null]));
+    const personal = audienceIds.flatMap((id) => { const entry = latest.get(JSON.stringify([recipeId, id])); return entry ? [entry] : []; });
+    return personal.length ? personal : household ? [household] : [];
+  };
   const rejected = new Set(state.pilot?.session.rejectedRecipeIds ?? []);
   const recipes = new Map<string, Recipe>();
   for (const { recipe, source } of state.workspace.recipeBox) recipes.set(recipe.id, { ...recipe, provenance: recipe.provenance ?? { source } });
-  for (const batch of state.pilot?.batches ?? []) if (feedback.get(batch.recipe.id)?.makeAgain) recipes.set(batch.recipe.id, batch.recipe);
-  return [...recipes.values()].filter((recipe) => !rejected.has(recipe.id) && feedback.get(recipe.id)?.makeAgain !== false)
-    .sort((left, right) => (feedback.get(right.id)?.rating ?? 0) - (feedback.get(left.id)?.rating ?? 0));
+  for (const batch of state.pilot?.batches ?? []) if (opinions(batch.recipe.id).some((entry) => entry.makeAgain)) recipes.set(batch.recipe.id, batch.recipe);
+  const score = (recipeId: string) => { const entries = opinions(recipeId); return entries.length ? entries.reduce((sum, entry) => sum + entry.rating, 0) / entries.length : 0; };
+  return [...recipes.values()].filter((recipe) => !rejected.has(recipe.id) && (!opinions(recipe.id).length || opinions(recipe.id).some((entry) => entry.makeAgain)))
+    .sort((left, right) => score(right.id) - score(left.id));
 }
 
 export function fixtureRecipeForRequest(state: HouseholdState, request: string): { reply: string; recipes: Recipe[] } {

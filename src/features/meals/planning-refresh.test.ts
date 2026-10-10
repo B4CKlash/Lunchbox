@@ -177,12 +177,14 @@ test("returned recipes cannot revive a rejected candidate or trigger another ref
   state.pilot.session.focusedRecipeId = recipe.id;
   const before = planningRefreshFingerprint(state);
   state.pilot.session.rejectedRecipeIds = [recipe.id];
-  // Rejection uses one explicit UI interaction callback, not a second automatic
-  // fingerprint trigger. A returned response cannot reintroduce the passed idea.
-  assert.equal(planningRefreshFingerprint(state), before);
+  // Rejection changes advice context; response bookkeeping cannot repeat it.
+  assert.notEqual(planningRefreshFingerprint(state), before);
+  const rejectedContext = planningRefreshFingerprint(state);
   for (const automatic of [true, false]) {
     assert.deepEqual(planningResponseCandidates(state.pilot.session, [recipe, replacement], automatic), [replacement]);
   }
-  const reconsidered = { ...state.pilot.session, rejectedRecipeIds: [] };
+  state.pilot.session.candidates = [replacement];
+  assert.equal(planningRefreshFingerprint(state), rejectedContext);
+  const reconsidered = { ...state.pilot.session, candidates: [recipe], rejectedRecipeIds: [] };
   assert.deepEqual(planningResponseCandidates(reconsidered, [], true), [recipe]);
 });

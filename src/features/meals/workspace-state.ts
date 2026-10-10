@@ -1,3 +1,4 @@
+import { recommendationContextKey } from "./recommendation-context";
 import {
   chatMessageSchema,
   householdStateSchema,
@@ -62,7 +63,8 @@ export type HouseholdAction =
   | { type: "clearChat" };
 
 function matchesSuggestionInput(current: HouseholdState, input: SuggestMealsRequest) {
-  return JSON.stringify(input.pantry) === JSON.stringify(current.pantry)
+  return (!input.recommendationKey || input.recommendationKey === recommendationContextKey(current, input.recommendationActorId))
+    && JSON.stringify(input.pantry) === JSON.stringify(current.pantry)
     && JSON.stringify(input.preferences) === JSON.stringify(current.preferences)
     && (input.direction ?? "") === current.workspace.suggestions.direction;
 }
@@ -177,7 +179,7 @@ function nextHousehold(
     case "appendSuggestionBlock": {
       if (!matchesSuggestionInput(current, action.input)) return current;
       const block = suggestionBlockSchema.parse(action.block);
-      const contextKey = JSON.stringify({ pantry: action.input.pantry, preferences: action.input.preferences, direction: action.input.direction ?? "" });
+      const contextKey = action.input.recommendationKey ?? JSON.stringify({ pantry: action.input.pantry, preferences: action.input.preferences, direction: action.input.direction ?? "" });
       if (block.contextKey !== contextKey || block.servings !== action.input.preferences.servings || block.direction !== (action.input.direction ?? ""))
         return current;
       const suggestions = current.workspace.suggestions;
@@ -343,7 +345,8 @@ export function applyHouseholdAction(
     const suggestionsOnly = action.type === "setSuggestionDirection"
       || action.type === "setSuggestionStreamEnabled"
       || action.type === "appendSuggestionBlock"
-      || action.type === "recordSuggestions";
+      || action.type === "recordSuggestions"
+      || ["setChatDraft", "setWorkspaceMode", "deferAiRequests", "appendChatMessages", "completeChatTurn", "clearChat", "clearRecipeFocus"].includes(action.type);
     next.pilot = { ...next.pilot, revision: current.pilot.revision + 1,
       // A later action must never undo an earlier pantry or preference update.
       receipts: next.pilot.receipts.map((receipt) => {

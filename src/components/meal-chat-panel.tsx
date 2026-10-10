@@ -10,6 +10,7 @@ import { withMealRateLimitRecovery, type MealRequestWait } from "@/features/meal
 import { useMealCooldown } from "@/features/meals/use-meal-cooldown";
 import { requestWorkerRecipe } from "@/features/meals/local-recipe-request";
 import { chatMealsRequestSchema } from "@/lib/contracts";
+import { recommendationContextKey } from "@/features/meals/recommendation-context";
 
 const prompts = [
   "What can I make tonight?",
@@ -33,6 +34,8 @@ export function MealChatPanel({
 }) {
   const {
     state,
+    currentMemberId,
+    householdId,
     setChatDraft,
     completeChatTurn,
     chatResetVersion,
@@ -59,7 +62,8 @@ export function MealChatPanel({
     focusedRecipe: workspace.focusedRecipe ?? undefined,
     focusedServings: workspace.focusedServings ?? undefined,
   });
-  const loading = pending?.key === context;
+  const requestKey = JSON.stringify([householdId, currentMemberId, recommendationContextKey(state, currentMemberId ?? state.pilot?.members[0]?.id), context]);
+  const loading = pending?.key === requestKey;
 
   useEffect(() => {
     latestCooldown.current = { until: workspace.aiCooldownUntil, deferAiRequests };
@@ -69,7 +73,7 @@ export function MealChatPanel({
   // Leaving Chat releases its request before the recipe feed resumes.
   useEffect(
     () => () => activeRequest.current?.abort(),
-    [context, chatResetVersion, active],
+    [requestKey, chatResetVersion, active],
   );
 
   async function sendMessage(prompt: string) {
@@ -98,7 +102,7 @@ export function MealChatPanel({
       { once: true },
     );
     setChatDraft(message);
-    setPending({ key: context, prompt: message });
+    setPending({ key: requestKey, prompt: message });
     setError(null);
     setWaiting(null);
     try {

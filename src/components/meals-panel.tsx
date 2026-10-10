@@ -16,6 +16,7 @@ import { useHousehold } from "@/components/household-provider";
 import { MealChatPanel } from "@/components/meal-chat-panel";
 import { MealPlanPanel } from "@/components/meal-plan-panel";
 import { RecipeCard } from "@/components/recipe-card";
+import { buildRecommendationContext, recommendationContextKey } from "@/features/meals/recommendation-context";
 import { selectedPreferenceLabels } from "@/features/meals/recommendation-options";
 import { RecipeImportPanel } from "@/components/recipe-import-panel";
 import { knownIngredientsFromHousehold } from "@/features/pantry/ingredients";
@@ -31,7 +32,7 @@ const modes = [
 ] as const;
 
 export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" | "ai"; aiBackend?: "gateway" | "local-worker" }) {
-  const { state, setPreferences, setWorkspaceMode, householdResetVersion, appendSuggestionBlock, setSuggestionDirection, setSuggestionStreamEnabled, deferAiRequests } = useHousehold();
+  const { state, currentMemberId, setPreferences, setWorkspaceMode, householdResetVersion, appendSuggestionBlock, setSuggestionDirection, setSuggestionStreamEnabled, deferAiRequests } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",
   );
@@ -41,17 +42,20 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
   const [importSeed, setImportSeed] = useState({ url: "", resetVersion: householdResetVersion, request: 0 });
   const importUrl = importSeed.resetVersion === householdResetVersion ? importSeed.url : "";
   const kitchen = { pantry: state.pantry, preferences: state.preferences, direction: state.workspace.suggestions.direction };
-  const contextKey = JSON.stringify(kitchen);
+  const actorId = currentMemberId ?? state.pilot?.members[0]?.id;
+  const contextKey = recommendationContextKey(state, actorId);
+  const audience = buildRecommendationContext(state, actorId).members.filter((member) => state.pilot?.session.memberIds.includes(member.id));
   const { blocks, direction, streamEnabled } = state.workspace.suggestions;
   const { loading, error, explanation, waiting, cooldownActive, generateNext, pause, resume } = useMealSuggestions(
     JSON.stringify({
       ...kitchen,
+      recommendationKey: contextKey, recommendationActorId: actorId,
       knownIngredients: knownIngredientsFromHousehold(state),
       preferredIngredients: state.workspace.suggestions.pendingIngredients,
     }),
     contextKey,
     {
-      enabled: (Boolean(state.pilot) || state.workspace.mode === "suggestions") && collection === "suggested" && !importOpen,
+      enabled: state.workspace.mode === "suggestions" && collection === "suggested" && !importOpen,
       aiMode,
       aiBackend,
       blocks,
@@ -65,7 +69,7 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
     },
   );
   const shopping = buildShoppingList(state.pantry, state.meals);
-  const mode = state.pilot ? "suggestions" : state.workspace.mode;
+  const mode = state.pilot && state.workspace.mode === "plan" ? "suggestions" : state.workspace.mode;
   const draftMeals = state.workspace.calendar.draft ?? state.meals;
   const profileLabels = selectedPreferenceLabels([
     ...(state.preferences.goals ?? []),
@@ -116,6 +120,7 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
               : "Find your next good meal."}
           </h1>
           <p>Browse an idea, talk it through, make it a plan.</p>
+          {audience.length ? <p>Cooking for {audience.map((member) => member.name).join(" and ")}</p> : null}
         </div>
         <span className="pill demo-pill">{aiMode === "ai" ? "AI kitchen assistant" : "Demo recipe workspace"}</span>
       </header>
@@ -155,7 +160,7 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
         role="group"
         aria-label="Recipe workspace views"
       >
-        {(state.pilot ? modes.filter((entry) => entry.id === "suggestions") : modes).map(({ id, label, icon: Icon }) => (
+        {(state.pilot ? modes.filter((entry) => entry.id !== "plan") : modes).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             aria-pressed={mode === id}
@@ -394,14 +399,14 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
           )}
         </section>
       </div>
-      {!state.pilot && <><div hidden={mode !== "chat"}>
+      <div hidden={mode !== "chat"}>
         <MealChatPanel active={mode === "chat" && !importOpen} aiMode={aiMode} aiBackend={aiBackend} onNotice={setMessage} onImportUrl={(url) => {
           setImportSeed((previous) => ({ url, resetVersion: householdResetVersion, request: previous.request + 1 }));
           setImportOpen(true);
           requestAnimationFrame(() => document.getElementById("import-heading")?.focus());
         }} />
       </div>
-      <div hidden={mode !== "plan"}>
+      {!state.pilot && <div hidden={mode !== "plan"}>
         <MealPlanPanel
           onNotice={setMessage}
           suggestions={blocks.flatMap((block) => block.recipes.map((recipe) => ({ recipe, source: block.source, servings: block.servings })))}
@@ -409,8 +414,7 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
           loading={false}
           onRefresh={() => { setCollection("suggested"); setWorkspaceMode("suggestions"); generateNext(); }}
         />
-      </div>
-      </>}
+      </div>}
       {state.pilot ? <aside className="workspace-plan-strip"><div><h2>Bring a recipe into the conversation.</h2><p>Choose a recipe to discuss, then place it on your live calendar.</p></div><Link className="button" href="/meals">Open planner <ArrowRight size={16} /></Link></aside> : mode !== "plan" ? (
         <aside className="workspace-plan-strip" aria-label="Plan overview">
           <div>

@@ -11,6 +11,7 @@ import { planningResultSchema } from "./jobs";
 import { findPlanningFavorites } from "./planning-fixtures";
 import { pantryForModel } from "./live-provider";
 import { claimsCompletedAction, favoriteClaimFacts } from "./planning-claims";
+import { buildRecommendationContext, recommendationContextInstructions } from "./recommendation-context";
 export { claimsCompletedAction } from "./planning-claims";
 
 const draftIngredient = z.object({ name: z.string(), quantity: z.number(), unit: unitSchema });
@@ -260,6 +261,7 @@ export function groundLocalPlanningDraft(state: HouseholdState, input: unknown, 
 }
 
 function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMemberId: string) {
+  const kitchen = buildRecommendationContext(state, actorMemberId);
   const others = state.pilot.members.filter((member) => member.id !== actorMemberId);
   const focusedRecipeId = state.pilot.session.rejectedRecipeIds.includes(state.pilot.session.focusedRecipeId ?? "") ? null : state.pilot.session.focusedRecipeId;
   const refs = new Map<string, string>([[actorMemberId, "requester"], ...others.map((member, index): [string, string] => [member.id, others.length === 1 ? "other" : `member_${index + 2}`])]);
@@ -270,6 +272,7 @@ function modelPlanningContext(state: ReturnType<typeof ensurePilot>, actorMember
   };
   return {
     actorMemberId: "requester",
+    kitchen: map({ ...kitchen, actorMemberId: "requester", audienceIds: kitchen.audienceIds.map((id) => refs.get(id)), members: undefined }),
     members: [state.pilot.members.find((member) => member.id === actorMemberId)!, ...others].map((member) => ({ id: refs.get(member.id), role: member.id === actorMemberId ? "person making this request (I/me/my)" : "the requesting person's partner", preferences: member.preferences, displayName: /^(you|partner)$/i.test(member.name) ? undefined : member.name })),
     planningDates: Array.from({ length: Math.max(14, state.pilot.session.days) }, (_, index) => {
       const date = addDays(state.pilot.session.startDate, index);
@@ -310,7 +313,7 @@ export async function runLocalPlanning(
   for (let attempt = 0; attempt < 2; attempt++) {
     abortSignal.throwIfAborted();
     const result = await generateText({
-      model: options.model ?? createLocalModel(), system: instructions + (attributedHistory ? "\nPast messages with an author reference belong to that person: I/me/my within that past message refer to its author. The current request belongs to requester. Do not assign an unattributed old message to a person by guessing." : ""),
+      model: options.model ?? createLocalModel(), system: `${instructions}\n${recommendationContextInstructions}` + (attributedHistory ? "\nPast messages with an author reference belong to that person: I/me/my within that past message refer to its author. The current request belongs to requester. Do not assign an unattributed old message to a person by guessing." : ""),
       prompt: `${prompt}\nCURRENT USER REQUEST (answer this only): ${message}${correction ? `\nCorrect the previous invalid response: ${correction}` : ""}`,
       output: Output.object({ schema: localPlanningWireSchema(current, actorMemberId, message) }),
       maxOutputTokens: 4000, maxRetries: 0, temperature: 0.2, abortSignal,

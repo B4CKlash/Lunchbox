@@ -432,6 +432,8 @@ export const householdStateSchema = z.object({
   workspace: recipeWorkspaceSchema.prefault({}),
 });
 export const suggestMealsRequestSchema = z.object({
+  recommendationKey: z.string().max(200000).optional(),
+  recommendationActorId: z.string().max(160).optional(),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   direction: directionSchema.optional(),
