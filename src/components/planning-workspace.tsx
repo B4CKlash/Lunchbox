@@ -7,6 +7,7 @@ import { useHousehold } from "@/components/household-provider";
 import { ProfileMemory } from "@/components/profile-memory";
 import { LocalPlanningAssistant, type LocalAssistantHandle } from "@/components/local-planning-assistant";
 import { fixtureRecipeForRequest } from "@/features/meals/planning-fixtures";
+import { buildRecommendationContext, recommendationContextForMessage } from "@/features/meals/recommendation-context";
 import { planningUserMessageAuthor } from "@/features/meals/planning-message-author";
 import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
 import { isPlanningRefresh, planningRefreshFingerprint, planningRefreshSummary, planningResponseChanges, planningResponseCandidates } from "@/features/meals/planning-refresh";
@@ -191,6 +192,7 @@ export function PlanningWorkspace() {
       let recipes: Recipe[] = [];
       let reply: string;
       let action: PilotOperation | undefined;
+      const fixtureContext = recommendationContextForMessage(buildRecommendationContext(state, actor), clean);
       const weekday = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(clean)?.[1]?.toLowerCase();
       const requestedDate = weekday ? dates.find((date) => dateLabel(date, { weekday: "long" }).toLowerCase() === weekday) : focusDate;
       const requestedSlot: MealSlot = /dinner/i.test(clean) ? "dinner" : /breakfast/i.test(clean) ? "breakfast" : /snack/i.test(clean) ? "snack" : focusSlot;
@@ -210,12 +212,12 @@ export function PlanningWorkspace() {
         reply = change ? `Requested: place ${focusedRecipe.name} on ${dateLabel(requestedDate)} ${requestedSlot} for the people with an open meal. See the saved-action receipt.` : "That occasion is already covered. Select the calendar cell to change an existing meal first.";
         action = change ?? undefined;
       } else if (/\b(fill|several days|batch|two lunches|three meals|whole week)\b/i.test(clean)) {
-        recipes = focusedRecipe ? [focusedRecipe] : fixtureRecipeForRequest(state, "Explore a pasta recipe").recipes;
+        recipes = focusedRecipe ? [focusedRecipe] : fixtureRecipeForRequest(state, "Explore a pasta recipe", fixtureContext).recipes;
         reply = recipes.length ? "One cooking batch can cover several occasions. I’ll show a proposal for the first three open occasions in this view. The groceries count this batch once; review before applying." : "Choose a recipe you want to consider before reviewing a batch. The earlier pasta example was passed over.";
       } else if (/freez/i.test(clean)) {
         reply = "Open the focused recipe’s placement controls and reserve extra portions before cooking. When you confirm cooking, record how many actually went into the freezer. Prepared food can then be scheduled later without creating another grocery requirement.";
       } else {
-        ({ reply, recipes } = fixtureRecipeForRequest(state, clean));
+        ({ reply, recipes } = fixtureRecipeForRequest(state, clean, fixtureContext));
       }
       recipes = recipes.filter((recipe) => !session.rejectedRecipeIds.includes(recipe.id));
       const nextCandidates = planningResponseCandidates(session, recipes, false);
