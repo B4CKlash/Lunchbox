@@ -54,6 +54,13 @@ test("review follows an edited target and rejects changed canonical identity cho
   assert.throws(() => assertNaturalStockReviewCurrent(review, ambiguous, prepareNaturalStockEntry("I have 10 apples")));
 });
 
+test("a newer qualitative observation invalidates review even when certainty stays unknown", () => {
+  const initial = change(kitchen(), { type: "set_package_stock", stock: { ingredientId: "beans", name: "Canned white beans", packageKind: "can", status: "some", sourceNote: "Some unopened cans" } });
+  const review = captureNaturalStockReview(initial);
+  const updated = change(initial, { type: "set_package_stock", stock: { ingredientId: "beans", name: "Canned white beans", packageKind: "can", status: "some", sourceNote: "One opened can with a little left" } });
+  assert.throws(() => assertNaturalStockReviewCurrent(review, updated, prepareNaturalStockEntry("I have 3 cans of canned white beans")));
+});
+
 test("unrelated stock, transcript growth and revision bookkeeping do not invalidate a reviewed total", () => {
   const initial = kitchen();
   const review = captureNaturalStockReview(initial);

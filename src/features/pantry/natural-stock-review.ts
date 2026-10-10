@@ -6,8 +6,8 @@ import type { NaturalStockEntryDraft } from "./natural-stock-entry";
 export function captureNaturalStockReview(state: HouseholdState) {
   return {
     pantry: state.pantry.map(({ id, unit, quantity }) => ({ id, unit, quantity })),
-    stock: (state.pilot?.stock ?? []).map(({ ingredientId, unit, status, quantity }) => ({ ingredientId, unit, status, quantity })),
-    packages: (state.pilot?.packageStock ?? []).map(({ ingredientId, packageKind, status, count }) => ({ ingredientId, packageKind, status, count })),
+    stock: (state.pilot?.stock ?? []).map(({ ingredientId, unit, status, quantity, sourceNote }) => ({ ingredientId, unit, status, quantity, sourceNote })),
+    packages: (state.pilot?.packageStock ?? []).map(({ ingredientId, packageKind, status, count, sourceNote }) => ({ ingredientId, packageKind, status, count, sourceNote })),
     packagePurchases: (state.pilot?.packagePurchases ?? []).map(({ id, ingredientId, packageKind }) => ({ id, ingredientId, packageKind })),
     known: knownIngredientsFromHousehold(state),
   };
