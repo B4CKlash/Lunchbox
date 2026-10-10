@@ -24,3 +24,13 @@ Desktop and 390×844 mobile at localhost:3100:
 Domain regressions cover source grounding, exact job/result binding, actor attribution, correction versus removal, old snapshot/inverse compatibility, persistence through serialization, and Undo after draft/view/cooldown changes.
 
 The final package/transport slice adds direct-provider typed context, profile-aware fixture eligibility, expanded local-model evidence and disposable two-account database evidence. Actual household device acceptance remains HP-10; this evidence does not enable production households.
+
+## Ordered merge review — 2026-10-10
+
+Independent review of this intermediate PR moved personal fact ownership and chat-save recovery into this slice before merging. Authenticated people cannot edit another person's facts or overwrite their feedback IDs; legacy household opinions remain separate. Completed conversation facts retain the original authenticated speaker. Failed recipe-chat saves flush pending persistence before reusing a reply, reject an obsolete cached revision, and stop offering an already-persisted reply for retry.
+
+Review also fixed remembered ingredient identity across changes in kitchen knowledge. An unresolved literal dislike remains correctable and forgettable after a canonical ingredient appears. A known custom ingredient remains correctable after its last stock/recipe reference disappears or the same identity returns. Different identities with the same wording, or conflicting remembered targets, produce clarification with no lasting effects. Exact wording and resolved IDs are used without inventing aliases or crossing personal/household scopes.
+
+The final intermediate source passes `npm run check` (404 tests, one optional database skip) and `npm run build` on Node 24.21.0. Independent lifecycle probes and focused authorization/retry reviews found no remaining blocker. The final package PR reruns the full expanded model gate against the combined source; this intermediate evidence does not replace that gate.
+
+PRs #26 and #27 are merged in order. Production household configuration remains closed: neither the production enable flag nor the service key was configured, and the canonical production household endpoint returned 503 `household_unconfigured`. Main merges deploy application code normally; HP-10 still gates enabling shared production households.
