@@ -12,7 +12,7 @@ import { requestWorkerRecipeJob } from "@/features/meals/local-recipe-request";
 import { chatMealsRequestSchema, type ChatMealsResponse } from "@/lib/contracts";
 import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
 import type { AiJob } from "@/features/meals/jobs";
-import { recommendationContextKey } from "@/features/meals/recommendation-context";
+import { buildRecommendationContext, recommendationContextKey } from "@/features/meals/recommendation-context";
 
 const prompts = [
   "What can I make tonight?",
@@ -118,6 +118,7 @@ export function MealChatPanel({
         const actorMemberId = currentMemberId ?? snapshot.pilot?.members[0]?.id ?? "you";
         const input = chatMealsRequestSchema.parse({
           pantry: snapshot.pantry, preferences: snapshot.preferences,
+          recommendationContext: buildRecommendationContext(snapshot, actorMemberId),
           meals: snapshot.workspace.calendar.draft ?? snapshot.meals,
           planStatus: snapshot.workspace.calendar.draft !== null ? "draft" : "committed",
           recipeBox: snapshot.workspace.recipeBox, focusedRecipe: snapshot.workspace.focusedRecipe ?? undefined,

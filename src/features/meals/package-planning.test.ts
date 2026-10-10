@@ -56,4 +56,5 @@ test("measured and individual counts use the same reviewed planning entry withou
     assert.deepEqual(reviewNaturalStockRequest(current, request)!.operations, []);
   }
   assert.equal(reviewNaturalStockRequest(current, "I have 10 apples; plan a lunch"), null);
+  assert.equal(reviewNaturalStockRequest(current, "No mushrooms tonight."), null);
 });

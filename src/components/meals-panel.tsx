@@ -51,6 +51,7 @@ export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" |
     JSON.stringify({
       ...kitchen,
       recommendationKey: contextKey, recommendationActorId: actorId,
+      recommendationContext: buildRecommendationContext(state, actorId),
       knownIngredients: knownIngredientsFromHousehold(state),
       preferredIngredients: state.workspace.suggestions.pendingIngredients,
     }),

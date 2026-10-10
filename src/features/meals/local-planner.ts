@@ -44,6 +44,10 @@ export type LocalPlanningResult = z.infer<typeof planningResultSchema>;
  * interpretation. The model cannot invent a package weight or purchase count. */
 export function reviewNaturalStockRequest(state: HouseholdState, request: string, idFactory: () => string = randomUUID): LocalPlanningResult | null {
   if (/[,;\n]|\b(?:please|plan|recipe|cook|then|but)\b/i.test(request)) return null;
+  // Bare avoidance such as “No mushrooms tonight” is a meal constraint,
+  // not an inventory assertion. Qualitative stock needs an explicit speaker.
+  if (!/\b(?:cans?|bags?|jars?|box(?:es)?|bottles?)\b/i.test(request)
+    && !/^(?:(?:i|we)\s+(?:have|bought|purchased)|bought|purchased|\d)/i.test(request.trim())) return null;
   if (!/^(?:(?:i|we)\s+(?:have|bought|purchased)|bought|purchased|\d|some\b|half\b|an?\b|opened\b|low\b|out\b|no\b)/i.test(request.trim())) return null;
   let draft;
   try { draft = prepareNaturalStockEntry(request, knownIngredientsFromHousehold(state)); }
