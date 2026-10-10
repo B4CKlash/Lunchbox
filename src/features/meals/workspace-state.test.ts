@@ -740,7 +740,7 @@ test("pantry measurements preserve optional stock details and historical purchas
   const details = { purchasedOn: "2026-10-07", bestBefore: "2026-10-14", sourceNote: "Farm box", useSoon: true };
   state.pilot.stock = [{ ingredientId: item.id, name: item.name, unit: item.unit, status: "some", ...details }];
   state.pilot.purchaseLots.push({ id: "purchase:0", commandId: "purchase", recordedAt: "2026-10-08T12:00:00.000Z", ingredientId: item.id, name: item.name, unit: item.unit, quantity: 100, purchasedOn: details.purchasedOn, bestBefore: details.bestBefore, sourceNote: details.sourceNote, lotCode: "box-A" });
-  const changed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry.map((entry) => entry === item ? { ...entry, quantity: 123 } : entry) });
+  const changed = applyHouseholdAction(state, { type: "setPantry", pantry: state.pantry.map((entry) => entry === item ? { ...entry, quantity: 123 } : entry), confirmedExactStock: [{ ingredientId: item.id, unit: item.unit }] });
   assert.deepEqual(changed.pilot?.stock[0], { ingredientId: item.id, name: item.name, unit: item.unit, status: "exact", quantity: 123, ...details });
   assert.deepEqual(changed.pilot?.purchaseLots, state.pilot.purchaseLots);
   const removed = applyHouseholdAction(changed, { type: "setPantry", pantry: changed.pantry.filter((entry) => entry.id !== item.id || entry.unit !== item.unit) });
@@ -758,4 +758,16 @@ test("explicitly discussing a library recipe reconsiders only that rejected cand
   assert.equal(result.pilot?.session.focusedRecipeId, chosen.id);
   assert.deepEqual(result.pilot?.allocations, state.pilot.allocations);
   assert.deepEqual(state.pilot.session.rejectedRecipeIds, [chosen.id, "another-rejected-recipe"]);
+});
+
+test("legacy quantity edits preserve uncertainty until one measured total is explicitly confirmed", async () => {
+  const { ensurePilot } = await import("@/features/planning/pilot");
+  const state = ensurePilot(createSampleHousehold(), "2026-10-08");
+  const item = state.pantry[0];
+  state.pilot.stock = [{ ingredientId: item.id, name: item.name, unit: item.unit, status: "some" }];
+  const pantry = [...state.pantry, { ...item, quantity: 100 }];
+  const changed = applyHouseholdAction(state, { type: "setPantry", pantry });
+  assert.equal(changed.pilot?.stock[0].status, "some");
+  assert.throws(() => applyHouseholdAction(state, { type: "setPantry", pantry, confirmedExactStock: [{ ingredientId: item.id, unit: item.unit }] }), /one measured total/);
+  assert.equal(state.pilot.stock[0].status, "some");
 });

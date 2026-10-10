@@ -18,6 +18,7 @@ import {
   type PantryTag,
 } from "@/lib/contracts";
 import { knownIngredientsFromHousehold, normalizeIngredientName, resolveIngredient } from "@/features/pantry/ingredients";
+import { aggregatePantry } from "@/features/pantry/stock-projection";
 import { pantryStockDisplay } from "@/features/pantry/stock-display";
 import { applyPantryImport, PantryImportError, preparePantryImport, resolvePantryImportRow, type PantryImportRow } from "@/features/pantry/import";
 
@@ -29,12 +30,16 @@ export function PantryPanel() {
 }
 
 function PantryContent() {
-  const { state, setPantry } = useHousehold();
+  const { state, dispatchPilot } = useHousehold();
+  const pantry = aggregatePantry(state.pantry, state.pilot?.stock);
   const [editor, setEditor] = useState<PantryItem | "new" | null>(null);
   const [filter, setFilter] = useState<"all" | "soon" | PantryCategory>("all");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [entryIntent, setEntryIntent] = useState<"set-total" | "add">("set-total");
+  const [manualQuantity, setManualQuantity] = useState("");
+  const [editorBasis, setEditorBasis] = useState("");
+  const [reviewBasis, setReviewBasis] = useState("");
   const [ambiguous, setAmbiguous] = useState<KnownIngredient[]>([]);
   const knownIngredients = knownIngredientsFromHousehold(state);
   const [bulkText, setBulkText] = useState("");
@@ -47,28 +52,35 @@ function PantryContent() {
   const [reviewRows, setReviewRows] = useState<PantryImportRow[]>([]);
   const [saving, setSaving] = useState(false);
   const stockFor = (item: PantryItem) => pantryStockDisplay(item, state.pilot?.stock);
-  const useSoon = state.pantry.filter((item) => { const stock = stockFor(item); return stock.useSoon && stock.onHand; });
-  const inStock = state.pantry.filter((item) => stockFor(item).onHand);
+  const useSoon = pantry.filter((item) => { const stock = stockFor(item); return stock.useSoon && stock.onHand; });
+  const inStock = pantry.filter((item) => stockFor(item).onHand);
   const shown =
     filter === "all"
-      ? state.pantry
+      ? pantry
       : filter === "soon"
         ? useSoon
-        : state.pantry.filter((item) => inferPantryCategory(item) === filter);
+        : pantry.filter((item) => inferPantryCategory(item) === filter);
   const editing = editor && editor !== "new" ? editor : null;
   const editingStock = editing ? stockFor(editing) : null;
+
+  const stockBasis = JSON.stringify([pantry, state.pilot?.stock]);
+  const editorStockBasis = (item: PantryItem) => JSON.stringify([pantry.find((entry) => entry.id === item.id && entry.unit === item.unit), state.pilot?.stock.find((entry) => entry.ingredientId === item.id && entry.unit === item.unit)]);
+  const editorConflict = Boolean(editing && editorBasis !== editorStockBasis(editing));
+  const reviewConflict = Boolean(reviewRows.length && reviewBasis !== stockBasis);
 
   function openEditor(item: PantryItem | "new") {
     setError(null);
     setMessage("");
     setEditor(item);
-    setEditingIndex(item === "new" ? null : state.pantry.indexOf(item));
+    setEntryIntent("set-total");
+    setManualQuantity(item === "new" ? "1" : String(stockFor(item).quantity ?? ""));
+    setEditorBasis(item === "new" ? "" : editorStockBasis(item));
     setAmbiguous([]);
   }
 
   async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || editorConflict) return;
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
     const unit = unitSchema.safeParse(form.get("unit"));
@@ -89,10 +101,13 @@ function PantryContent() {
         return;
       }
       id = resolution.ingredient.ingredientId;
-      const existing = state.pantry.find((item) => item.id === id && item.unit === unit.data);
+      const existing = pantry.find((item) => item.id === id && item.unit === unit.data);
       if (existing) {
+        const quantity = String(form.get("quantity") ?? "");
+        const intent = entryIntent;
         openEditor(existing);
-        setMessage("This ingredient is already in your pantry. Update its total amount below.");
+        setEntryIntent(intent); setManualQuantity(quantity);
+        setMessage("This ingredient is already in your pantry. Review its current stock and the entry meaning before saving.");
         return;
       }
     }
@@ -113,27 +128,16 @@ function PantryContent() {
       );
       return;
     }
-    if (!editing && state.pantry.length >= 200) {
+    if (!editing && pantry.length >= 200) {
       setError("This sample kitchen can hold up to 200 ingredients.");
       return;
     }
-    if (editing && editing.unit !== unit.data && state.pantry.some((item, index) => index !== editingIndex && item.id === id && item.unit === unit.data)) {
-      setError("This ingredient already has an entry in that unit. Edit that entry instead.");
-      return;
-    }
     setSaving(true);
-    const saved = await setPantry(
-      editing
-        ? state.pantry.map((item, index) =>
-            index === editingIndex ? result.data : item,
-          )
-        : [...state.pantry, result.data],
-      [{ ingredientId: result.data.id, unit: result.data.unit }],
-    );
+    const saved = await dispatchPilot({ type: "record_stock_entries", entries: [{ intent: entryIntent, item: result.data }] });
     setSaving(false);
     if (!saved.ok) { setError(saved.error ?? "The pantry change was not saved. Try again."); return; }
     setMessage(
-      `${result.data.name} ${editing ? "updated" : "added to your pantry"}.`,
+      `${result.data.name}: ${entryIntent === "add" ? "purchase recorded" : "current total saved"}.`,
     );
     setEditor(null);
   }
@@ -142,7 +146,8 @@ function PantryContent() {
     try {
       setReviewRows(preparePantryImport(source === "list" ? bulkText : receiptText, source, {
         quantity: defaultQuantity, unit: defaultUnit, location: defaultLocation, tag: defaultTag,
-      }, state.pantry, knownIngredients));
+      }, pantry, knownIngredients));
+      setReviewBasis(stockBasis);
       setError(null);
       setMessage("");
     } catch (reason) {
@@ -162,14 +167,12 @@ function PantryContent() {
   async function saveImport() {
     if (saving) return;
     try {
-      const uncertainMerge = reviewRows.find((row) => row.merge && state.pantry.some((item) => item.id === row.ingredientId && item.unit === row.unit && stockFor(item).uncertain));
-      if (uncertainMerge) throw new Error(`${uncertainMerge.name} has an unknown balance. Measure its current total before combining amounts, or record the purchase in Shopping.`);
-      const result = applyPantryImport(state.pantry, reviewRows, knownIngredients);
+      if (reviewConflict) throw new Error("Kitchen stock changed. Compare the current amounts and refresh the review before saving.");
+      const result = applyPantryImport(pantry, reviewRows, knownIngredients);
       setSaving(true);
-      const saved = await setPantry(result.pantry, reviewRows.flatMap((row) => row.ingredientId ? [{ ingredientId: row.ingredientId, unit: row.unit }] : []));
+      const saved = await dispatchPilot(result.operation);
       if (!saved.ok) { setError(saved.error ?? "The pantry import was not saved. Try again."); return; }
       setEditor(null);
-      setEditingIndex(null);
       setAmbiguous([]);
       setReviewRows([]); setBulkText(""); setReceiptText(""); setError(null);
       setMessage(`${result.added} added and ${result.updated} existing ${result.updated === 1 ? "item updated" : "items updated"}.`);
@@ -200,7 +203,7 @@ function PantryContent() {
         </div>
         <button
           className="button"
-          disabled={state.pantry.length >= 200}
+          disabled={pantry.length >= 200}
           onClick={() => openEditor("new")}
         >
           <Plus size={17} aria-hidden="true" /> Add ingredient
@@ -210,7 +213,7 @@ function PantryContent() {
       <section className="card pantry-import" aria-label="Add pantry items">
         <div>
           <h2><ClipboardPaste size={18} aria-hidden="true" /> Add a list</h2>
-          <p className="muted">Paste names separated by commas or new lines, then review before adding.</p>
+          <p className="muted">Paste names separated by commas or new lines, then review the current totals before saving.</p>
           <textarea aria-label="Ingredient names" value={bulkText} onChange={(event) => setBulkText(event.target.value)} placeholder="Apples, rice, black beans" rows={3} />
           <div className="import-defaults">
             <label className="field">Default amount<input type="number" min="0.01" max="100000" step="any" value={defaultQuantity} onChange={(event) => setDefaultQuantity(Number(event.target.value))} /></label>
@@ -220,7 +223,7 @@ function PantryContent() {
           </div>
           <button className="button secondary" onClick={() => prepareImport("list")}>Review list</button>
           <h3 className="receipt-title">Paste receipt text</h3>
-          <p className="muted">Paste or type receipt lines. Totals and common payment lines are filtered; check the preview.</p>
+          <p className="muted">Paste or type receipt lines. Totals and common payment lines are filtered; check the purchase amounts in the preview.</p>
           <textarea aria-label="Receipt text" value={receiptText} onChange={(event) => setReceiptText(event.target.value)} placeholder={'Milk  $3.49\nApples  $4.20'} rows={3} />
           <button className="button secondary" onClick={() => prepareImport("receipt")}>Review receipt items</button>
         </div>
@@ -237,27 +240,29 @@ function PantryContent() {
       {reviewRows.length > 0 ? <section className="card import-review" aria-labelledby="review-import-heading">
         <div className="section-heading"><div><p className="eyebrow">CHECK BEFORE SAVING</p><h2 id="review-import-heading">Review pantry items</h2></div><button className="icon-button" aria-label="Close import review" onClick={() => setReviewRows([])}><X size={20} /></button></div>
         {reviewRows.map((row, index) => {
-          const existing = state.pantry.find((item) => item.id === row.ingredientId && item.unit === row.unit);
+          const existing = pantry.find((item) => item.id === row.ingredientId && item.unit === row.unit);
           return <div className="import-review-row" key={index}>
-            <label className="field">Item name<input value={row.name} maxLength={80} onChange={(event) => updateImportRow(index, { name: event.target.value, ingredientId: null, candidates: [], merge: false })} onBlur={() => updateImportRow(index, {}, true)} /></label>
-            <label className="field">Amount<input type="number" min="0.01" max="100000" step="any" value={row.quantity} onChange={(event) => updateImportRow(index, { quantity: Number(event.target.value) })} /></label>
-            <label className="field">Unit<select value={row.unit} onChange={(event) => updateImportRow(index, { unit: event.target.value as PantryItem["unit"], ingredientId: null, candidates: [], merge: false }, true)}><option value="each">each</option><option value="g">g</option><option value="ml">ml</option></select></label>
+            <label className="field">Item name<input value={row.name} maxLength={80} onChange={(event) => updateImportRow(index, { name: event.target.value, ingredientId: null, candidates: [] })} onBlur={() => updateImportRow(index, {}, true)} /></label>
+            <label className="field">{row.intent === "add" ? "Amount purchased" : "Current total"}<input type="number" min={row.intent === "add" ? "0.001" : "0"} max="100000" step="any" value={row.quantity} onChange={(event) => updateImportRow(index, { quantity: Number(event.target.value) })} /></label>
+            <label className="field">Unit<select value={row.unit} onChange={(event) => updateImportRow(index, { unit: event.target.value as PantryItem["unit"], ingredientId: null, candidates: [] }, true)}><option value="each">each</option><option value="g">g</option><option value="ml">ml</option></select></label>
             <label className="field">Storage<select value={row.location} onChange={(event) => updateImportRow(index, { location: event.target.value as PantryItem["location"] })}>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
             <label className="field">Tag<select value={row.tag} onChange={(event) => updateImportRow(index, { tag: event.target.value as PantryTag })}><option value="staple">Staple</option><option value="seasonal">Seasonal</option><option value="special">Special</option></select></label>
             {row.candidates.length > 0 ? <label className="field">Match this ingredient
-              <select value={row.ingredientId ?? ""} onChange={(event) => updateImportRow(index, { ingredientId: event.target.value || null, merge: false })}>
+              <select value={row.ingredientId ?? ""} onChange={(event) => updateImportRow(index, { ingredientId: event.target.value || null })}>
                 <option value="">Choose an existing ingredient</option>
                 {row.candidates.map((candidate) => {
-                  const stock = state.pantry.find((item) => item.id === candidate.ingredientId && item.unit === candidate.unit);
+                  const stock = pantry.find((item) => item.id === candidate.ingredientId && item.unit === candidate.unit);
                   return <option key={candidate.ingredientId} value={candidate.ingredientId}>{candidate.name} · {stock ? `${stockFor(stock).label} in ${stock.location}` : `saved recipe (${candidate.unit})`}</option>;
                 })}
               </select>
             </label> : null}
-            {existing ? <label className="checkbox-label"><input type="checkbox" checked={row.merge} disabled={stockFor(existing).uncertain} onChange={(event) => updateImportRow(index, { merge: event.target.checked, ...(event.target.checked ? { tag: existing.tag } : {}) })} /> Add to existing {stockFor(existing).label} in {existing.location}{stockFor(existing).uncertain ? ". Measure the current total first." : ""}</label> : null}
+            <label className="field">Entry meaning<select value={row.intent} onChange={(event) => updateImportRow(index, { intent: event.target.value as PantryImportRow["intent"] })}><option value="set-total">Set current total</option><option value="add">Add a purchase</option></select></label>
+            {existing ? <p className="small muted">Current stock: {stockFor(existing).label}. {row.intent === "add" ? "This purchase adds stock; an unknown balance stays unknown." : "This amount replaces the combined total."}</p> : null}
             <button className="text-button" onClick={() => setReviewRows((rows) => rows.filter((_, i) => i !== index))}>Remove</button>
           </div>;
         })}
-        <div className="actions"><button className="button secondary" onClick={() => setReviewRows([])}>Cancel</button><button className="button" disabled={saving || !reviewRows.length} onClick={() => void saveImport()}>{saving ? "Saving…" : "Save reviewed items"}</button></div>
+        {reviewConflict ? <p className="error-message" role="alert">Kitchen stock changed while this review was open. Your entries are kept. Compare the current amounts above, then <button className="text-button" onClick={() => setReviewBasis(stockBasis)}>Refresh stock comparison</button>.</p> : null}
+        <div className="actions"><button className="button secondary" onClick={() => setReviewRows([])}>Cancel</button><button className="button" disabled={saving || reviewConflict || !reviewRows.length} onClick={() => void saveImport()}>{saving ? "Saving…" : "Save reviewed items"}</button></div>
       </section> : null}
       {error ? <p className="error-message" role="alert">{error}</p> : null}
       <p className="status-message" role="status">{message}</p>
@@ -320,8 +325,8 @@ function PantryContent() {
               <X size={20} />
             </button>
           </div>
-          {editingStock?.uncertain ? <p className="muted">Current stock: {editingStock.label}. Enter the exact total you measured to replace this uncertainty. <Link href="/shopping">Keep or edit a qualitative amount in Shopping.</Link></p> : null}
-          <form key={editing ? `${editing.id}:${editing.unit}:${editingIndex}` : "new"} onSubmit={(event) => void saveItem(event)}>
+          {editingStock?.uncertain ? <p className="muted">Current stock: {editingStock.label}. {entryIntent === "set-total" ? "Enter a measured total to replace this uncertainty." : "A purchase keeps the prior balance unknown."} <Link href="/shopping">Keep or edit a qualitative amount in Shopping.</Link></p> : null}
+          <form key={editing ? `${editing.id}:${editing.unit}:${editorBasis}` : "new"} onSubmit={(event) => void saveItem(event)}>
             <div className="ingredient-fields">
               <label className="field ingredient-name">
                 Ingredient name
@@ -348,21 +353,29 @@ function PantryContent() {
                 </datalist>
               </label>
               <label className="field">
-                {editingStock?.uncertain ? "Measured total amount" : "Amount"}
+                Entry meaning
+                <select value={entryIntent} onChange={(event) => { const intent = event.target.value as typeof entryIntent; setEntryIntent(intent); setManualQuantity(intent === "add" ? "" : String(editingStock?.quantity ?? "")); }}>
+                  <option value="set-total">Set current total</option><option value="add">Add a purchase</option>
+                </select>
+              </label>
+              <label className="field">
+                {entryIntent === "add" ? "Amount purchased" : "Measured total amount"}
                 <input
                   name="quantity"
                   type="number"
-                  min="0"
+                  min={entryIntent === "add" ? "0.001" : "0"}
                   max="100000"
                   step="any"
-                  defaultValue={editingStock ? editingStock.quantity ?? "" : 1}
-                  placeholder={editingStock?.uncertain ? "Enter a measured total" : undefined}
+                  value={manualQuantity}
+                  onChange={(event) => setManualQuantity(event.target.value)}
+                  placeholder={entryIntent === "add" ? "What you brought home" : "Enter a measured total"}
                   required
                 />
               </label>
               <label className="field">
                 Unit
-                <select name="unit" defaultValue={editing?.unit ?? "each"}>
+                {editing ? <input type="hidden" name="unit" value={editing.unit} /> : null}
+                <select name="unit" defaultValue={editing?.unit ?? "each"} disabled={Boolean(editing)}>
                   <option value="each">each</option>
                   <option value="g">grams (g)</option>
                   <option value="ml">milliliters (ml)</option>
@@ -414,6 +427,9 @@ function PantryContent() {
                 {ambiguous.map((item) => <option key={item.ingredientId} value={item.ingredientId}>{item.name} ({item.unit})</option>)}
               </select>
             </label> : null}
+            <p className="muted">{entryIntent === "add" ? "Adds what you bought and records purchase history. An unknown prior balance stays unknown." : "Replaces the combined amount for this ingredient and unit. Enter the total you measured, including any earlier entries."}</p>
+            {editing ? <p className="small muted">Add a separate entry to record stock in another unit.</p> : null}
+            {editorConflict ? <p className="error-message" role="alert">This stock changed while you were editing. Your draft is kept. <button type="button" className="text-button" onClick={() => { const current = pantry.find((item) => item.id === editing?.id && item.unit === editing?.unit); if (current) openEditor(current); }}>Load current stock</button></p> : null}
             <div className="form-footer">
               <label className="checkbox-label">
                 <input
@@ -431,7 +447,7 @@ function PantryContent() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="button" disabled={saving}>
+                <button type="submit" className="button" disabled={saving || editorConflict}>
                   {saving ? "Saving…" : editing ? "Save changes" : "Add to pantry"}
                 </button>
               </div>
@@ -447,7 +463,7 @@ function PantryContent() {
       <p className="status-message" role="status">
         {message}
       </p>
-      {state.pantry.length >= 200 ? (
+      {pantry.length >= 200 ? (
         <p className="footnote">
           Your sample kitchen holds up to 200 ingredients. You can still edit
           the ingredients below.
@@ -476,7 +492,7 @@ function PantryContent() {
               Use soon <span>{useSoon.length}</span>
             </button>
             {pantryCategories.map((category) => {
-              const count = state.pantry.filter(
+              const count = pantry.filter(
                 (item) => inferPantryCategory(item) === category.value,
               ).length;
               return (
@@ -512,7 +528,7 @@ function PantryContent() {
                 {shown.map((item) => {
                   const stock = stockFor(item);
                   return (
-                  <tr key={`${item.id}:${item.unit}:${state.pantry.indexOf(item)}`}>
+                  <tr key={`${item.id}:${item.unit}`}>
                     <td>
                       <span
                         className={`ingredient-dot ${stock.useSoon && stock.onHand ? "soon" : ""}`}
@@ -529,7 +545,7 @@ function PantryContent() {
                       </span>
                     </td>
                     <td>
-                      <span className="location-label">{item.location}</span>
+                      <span className="location-label">{[...new Set(state.pantry.filter((entry) => entry.id === item.id && entry.unit === item.unit).map((entry) => entry.location))].join(", ") || item.location}</span>
                     </td>
                     <td><span className={`pantry-tag tag-${item.tag}`}>{item.tag}</span></td>
                     <td>

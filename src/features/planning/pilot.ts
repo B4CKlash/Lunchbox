@@ -215,7 +215,7 @@ function setPantryBalance(state: PilotHousehold, ingredientId: string, name: str
   if (override?.status === "exact") override.quantity = round(quantity);
 }
 
-function applyChange(state: PilotHousehold, change: PilotChange, now: string, commandId: string, changeIndex: number) {
+function applyChange(state: PilotHousehold, change: PilotChange, now: string, commandId: string, changeIndex: number | string) {
   const pilot = state.pilot;
   switch (change.type) {
     case "set_coverage": {
@@ -264,6 +264,37 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string, co
       if (!check || check.fingerprint !== change.fingerprint) throw new PilotCommandError("conflict", "That stock requirement changed. Review the current check first.");
       pilot.stockChecks = pilot.stockChecks.filter((entry) => keyFor(entry.ingredientId, entry.unit) !== keyFor(change.ingredientId, change.unit));
       pilot.stockChecks.push({ ingredientId: change.ingredientId, unit: change.unit, fingerprint: change.fingerprint });
+      break;
+    }
+    case "record_stock_entries": {
+      const seen = new Map<string, "set-total" | "add">();
+      for (const entry of change.entries) {
+        const key = keyFor(entry.item.id, entry.item.unit);
+        const previous = seen.get(key);
+        if (previous && (previous === "set-total" || entry.intent === "set-total"))
+          fail(`Enter one current total for ${entry.item.name} (${entry.item.unit}), or record purchases separately.`);
+        seen.set(key, entry.intent);
+      }
+      for (const [index, entry] of change.entries.entries()) {
+        const { item } = entry;
+        if (entry.intent === "set-total") {
+          const previous = pilot.stock.find((stock) => keyFor(stock.ingredientId, stock.unit) === keyFor(item.id, item.unit));
+          applyChange(state, { type: "set_stock", stock: {
+            ...previous, ingredientId: item.id, name: item.name, unit: item.unit,
+            status: "exact", quantity: item.quantity, useSoon: item.useSoon,
+          } }, now, commandId, `${changeIndex}:entry:${index}`);
+        } else {
+          applyChange(state, { type: "record_purchase", items: [{
+            ingredientId: item.id, name: item.name, unit: item.unit, quantity: item.quantity,
+          }] }, now, commandId, `${changeIndex}:entry:${index}`);
+          const override = pilot.stock.find((stock) => keyFor(stock.ingredientId, stock.unit) === keyFor(item.id, item.unit));
+          if (override) override.useSoon = item.useSoon;
+        }
+        // Both underlying commands collapse the canonical balance. Keep the
+        // reviewed pantry details without treating a purchase as a measurement.
+        state.pantry = state.pantry.map((stock) => keyFor(stock.id, stock.unit) === keyFor(item.id, item.unit)
+          ? { ...item, quantity: stock.quantity } : stock);
+      }
       break;
     }
     case "record_purchase":
@@ -358,6 +389,11 @@ function summaryFor(operation: PilotOperation) {
     case "set_coverage": return `Marked ${operation.coverage.slot} on ${operation.coverage.date} as ${operation.coverage.reason.replaceAll("-", " ")}.`;
     case "create_batch": return `Planned ${operation.batch.yield} portions of ${operation.batch.recipe.name}.`;
     case "record_purchase": return `Recorded ${operation.items.length} purchased ingredient${operation.items.length === 1 ? "" : "s"}.`;
+    case "record_stock_entries": {
+      const totals = operation.entries.filter((entry) => entry.intent === "set-total").length;
+      const purchases = operation.entries.length - totals;
+      return `Saved ${totals} measured total${totals === 1 ? "" : "s"} and ${purchases} purchase${purchases === 1 ? "" : "s"}.`;
+    }
     case "cook_batch": return `Recorded cooking: ${operation.actualPortions} portions, including ${operation.freezerPortions} for the freezer.`;
     case "correct_prepared": return `Corrected prepared food: ${operation.produced} total portions, ${operation.freezerPortions} remaining in the freezer${operation.reopenAllocationIds.length ? `; reopened ${operation.reopenAllocationIds.length} meal${operation.reopenAllocationIds.length === 1 ? "" : "s"}` : ""}.`;
     case "record_feedback": return "Saved recipe feedback for future planning.";

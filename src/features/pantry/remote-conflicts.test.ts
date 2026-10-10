@@ -62,3 +62,12 @@ test("two queued snapshot edits cannot use fresh revisions to erase the earlier 
   assert.equal(refreshed.pantry[1].quantity, 444);
   assert.doesNotThrow(() => checkQueuedMutationRevision({ kind: "pilot", command: { id: "purchase", expectedRevision: 2, operation: { type: "record_purchase", items: [{ ingredientId: "rice", name: "Rice", unit: "g", quantity: 50 }] } } }, 1, 2));
 });
+
+test("reviewed stock entries require a current comparison even when all entries add purchases", () => {
+  const item = ensurePilot(createSampleHousehold()).pantry[0];
+  for (const intent of ["add", "set-total"] as const) {
+    const input = remoteCommandSchema.parse({ ...base, command: { kind: "pilot", command: { id: base.commandId, expectedRevision: 3, operation: { type: "record_stock_entries", entries: [{ intent, item }] } } } });
+    assert.equal(rebaseRemoteCommand(input, 4), null);
+    assert.throws(() => checkQueuedMutationRevision(input.command, 3, 4), /newer changes were kept/);
+  }
+});

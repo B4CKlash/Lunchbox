@@ -364,21 +364,25 @@ export function applyHouseholdAction(
     };
     if (action.type === "setPantry") {
       const confirmed = new Set((action.confirmedExactStock ?? []).map((item) => JSON.stringify([item.ingredientId, item.unit])));
+      const invalidated = new Set(confirmed);
       next.pilot.stock = next.pilot.stock.flatMap((stock) => {
         const key = JSON.stringify([stock.ingredientId, stock.unit]);
         const before = current.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
         const after = next.pantry.filter((item) => item.id === stock.ingredientId && item.unit === stock.unit);
-        const changed = confirmed.has(key) || JSON.stringify(before.map((item) => item.quantity)) !== JSON.stringify(after.map((item) => item.quantity));
+        if (JSON.stringify(before.map((item) => item.quantity)) !== JSON.stringify(after.map((item) => item.quantity))) invalidated.add(key);
         const useSoonChanged = JSON.stringify(before.map((item) => item.useSoon)) !== JSON.stringify(after.map((item) => item.useSoon));
         const metadata = { ...stock, ...(useSoonChanged ? { useSoon: after.some((item) => item.useSoon) } : {}) };
-        if (!changed) return [metadata];
-        confirmed.add(key);
         if (!after.length) return [];
+        // Legacy whole-list edits are not evidence of a new measurement. New
+        // stock entry uses validated total/purchase commands instead.
+        if (!confirmed.has(key)) return [stock.status === "exact"
+          ? { ...metadata, quantity: after.reduce((sum, item) => sum + item.quantity, 0) } : metadata];
+        if (after.length !== 1) throw new Error("Enter one measured total for each ingredient and unit.");
         // A fresh measurement changes certainty without erasing optional dates
         // or source details. Historical purchase lots are a separate record.
         return [{ ...metadata, status: "exact" as const, quantity: after.reduce((sum, item) => sum + item.quantity, 0), name: after[0].name }];
       });
-      next.pilot.stockChecks = next.pilot.stockChecks.filter((stock) => !confirmed.has(JSON.stringify([stock.ingredientId, stock.unit])));
+      next.pilot.stockChecks = next.pilot.stockChecks.filter((stock) => !invalidated.has(JSON.stringify([stock.ingredientId, stock.unit])));
     }
   }
   return householdStateSchema.parse(next);
