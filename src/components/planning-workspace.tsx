@@ -192,7 +192,7 @@ export function PlanningWorkspace() {
       let recipes: Recipe[] = [];
       let reply: string;
       let action: PilotOperation | undefined;
-      const fixtureContext = recommendationContextForMessage(buildRecommendationContext(state, actor), clean);
+      const fixtureContext = recommendationContextForMessage(buildRecommendationContext(state, actor ?? undefined), clean);
       const weekday = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.exec(clean)?.[1]?.toLowerCase();
       const requestedDate = weekday ? dates.find((date) => dateLabel(date, { weekday: "long" }).toLowerCase() === weekday) : focusDate;
       const requestedSlot: MealSlot = /dinner/i.test(clean) ? "dinner" : /breakfast/i.test(clean) ? "breakfast" : /snack/i.test(clean) ? "snack" : focusSlot;

@@ -309,3 +309,17 @@ test("demo chat keeps package counts as unresolved contents", async () => {
   assert.match(result.reply, /Check the current amount of Beans/);
   assert.doesNotMatch(result.reply, /200 g Beans|10 g|pantry covers all/);
 });
+
+test("ingredient search explains when the saved profile excludes every authored example", async () => {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  const value: ProfileFactValue = { kind: "food-dislike", scope: { kind: "household" }, target: { kind: "category", category: "vegetables" }, disliked: true };
+  state.pilot.profileFacts = [{ id: profileFactId(value), value,
+    source: { kind: "manual", sourceText: "We dislike vegetables", recordedAt: "2026-10-12T00:00:00.000Z", commandId: "setup" } }];
+  const request = { ...input("Recipes with rice"), recommendationContext: buildRecommendationContext(state) };
+  const before = structuredClone(request);
+  const result = await chatAboutMeals(request);
+  assert.deepEqual(result.recipes, []);
+  assert.match(result.reply, /No sample recipes fit the current food preferences/);
+  assert.doesNotMatch(result.reply, /haven’t applied those constraints/);
+  assert.deepEqual(request, before);
+});

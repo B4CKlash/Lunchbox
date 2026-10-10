@@ -178,6 +178,7 @@ export async function chatAboutMeals(
       preferences: { ...preferences, maxMinutes: 120 },
       recommendationContext: context ? { ...context, preferences: { ...preferences, maxMinutes: 120 } } : undefined,
     });
+    if (!catalog.recipes.length && context) return response("No sample recipes fit the current food preferences or kitchen equipment. Change the request or use Local AI to explore another recipe.");
     ingredientId = catalog.recipes
       .flatMap((recipe) => recipe.ingredients)
       .find((ingredient) =>
