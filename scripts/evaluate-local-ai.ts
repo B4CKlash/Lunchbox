@@ -29,6 +29,7 @@ const evaluationSources = [
   "src/features/pantry/natural-stock-entry.ts",
   "src/features/planning/profile.ts",
   "src/features/meals/recommendation-context.ts",
+  "src/features/meals/recommendation-constraints.ts",
   "src/features/meals/live-provider.ts",
   "src/features/meals/jobs.ts",
 ] as const;

@@ -13,6 +13,7 @@ import { chatMealsRequestSchema, type ChatMealsResponse } from "@/lib/contracts"
 import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
 import type { AiJob } from "@/features/meals/jobs";
 import { buildRecommendationContext, recommendationContextKey } from "@/features/meals/recommendation-context";
+import { planningUserMessageAuthor } from "@/features/meals/planning-message-author";
 
 const prompts = [
   "What can I make tonight?",
@@ -42,6 +43,7 @@ export function MealChatPanel({
     completeChatTurn,
     dispatchPilot,
     flushHouseholdChanges,
+    pendingChange,
     chatResetVersion,
     clearChat,
     clearRecipeFocus,
@@ -54,7 +56,7 @@ export function MealChatPanel({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<MealRequestWait | null>(null);
-  const [retrySave, setRetrySave] = useState<{ key: string; message: string } | null>(null);
+  const [retrySave, setRetrySave] = useState<{ key: string; message: string; jobId: string } | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
   const completedReply = useRef<{ key: string; message: string; result: ChatMealsResponse; jobId: string; actorMemberId: string; baseRevision: number } | null>(null);
   const latestCooldown = useRef({ until: workspace.aiCooldownUntil, deferAiRequests });
@@ -70,6 +72,7 @@ export function MealChatPanel({
   });
   const requestKey = JSON.stringify([householdId, currentMemberId, recommendationContextKey(state, currentMemberId ?? state.pilot?.members[0]?.id), context]);
   const loading = pending?.key === requestKey;
+  const replyAlreadySaved = Boolean(retrySave && workspace.chatMessages.some((message) => message.id === `job-${retrySave.jobId}-assistant`));
 
   useEffect(() => {
     latestCooldown.current = { until: workspace.aiCooldownUntil, deferAiRequests };
@@ -113,8 +116,15 @@ export function MealChatPanel({
     setWaiting(null);
     try {
       const response = await withMealRateLimitRecovery(async () => {
-        if (completedReply.current?.key === requestKey && completedReply.current.message === message) return completedReply.current;
         const snapshot = await flushHouseholdChanges();
+        const cached = completedReply.current;
+        if (cached?.key === requestKey && cached.message === message) {
+          if (!snapshot.workspace.chatMessages.some((entry) => entry.id === `job-${cached.jobId}-assistant`)
+            && snapshot.pilot?.revision === cached.baseRevision) return cached;
+          // A global retry may already have saved it, or a conflict may have
+          // superseded its revision. A new send needs a fresh authenticated job.
+          completedReply.current = null; setRetrySave(null);
+        }
         const actorMemberId = currentMemberId ?? snapshot.pilot?.members[0]?.id ?? "you";
         const input = chatMealsRequestSchema.parse({
           pantry: snapshot.pantry, preferences: snapshot.preferences,
@@ -153,7 +163,7 @@ export function MealChatPanel({
       activeRequest.current = null;
       if (state.pilot && (!householdId || (aiMode === "ai" && aiBackend === "local-worker"))) {
         completedReply.current = response;
-        setRetrySave({ key: response.key, message });
+        setRetrySave({ key: response.key, message, jobId: response.jobId });
         const saved = await dispatchPilot({ type: "receive_recipe_chat_result", baseRevision: response.baseRevision, jobId: response.jobId,
           request: message, actorMemberId: response.actorMemberId, result: response.result, submittedDraft: message });
         if (!saved.ok) throw new Error(saved.error ?? "The reply could not be saved. Your draft is kept; retry saving it.");
@@ -249,7 +259,7 @@ export function MealChatPanel({
           >
             <p className="eyebrow">
               {message.role === "user"
-                ? "YOU"
+                ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : state.pilot?.members[0]?.id, members: state.pilot?.members ?? [], shared: Boolean(householdId) })
                 : message.source === "ai"
                   ? "AI ASSISTANT"
                   : "DEMO ASSISTANT"}
@@ -338,10 +348,12 @@ export function MealChatPanel({
             <span>{loading ? waiting ? "Waiting…" : "Sending…" : cooldownActive ? "Please wait" : "Send"}</span>
           </button>
         </div>
-        {error ? (
+        {error && !replyAlreadySaved ? (
           <p className="error-message" role="alert">
             {error}
-            {retrySave?.key === requestKey ? <button type="button" className="text-button" onClick={() => void sendMessage(retrySave.message)}>Retry saving reply</button> : null}
+            {retrySave?.key === requestKey ? pendingChange
+              ? " Use Retry saving in the household notice above to retry the original save."
+              : <button type="button" className="text-button" onClick={() => void sendMessage(retrySave.message)}>Retry saving reply</button> : null}
           </p>
         ) : null}
         {!loading && cooldownActive ? (
