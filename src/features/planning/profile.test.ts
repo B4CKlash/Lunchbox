@@ -4,6 +4,8 @@ import { createSampleHousehold } from "@/features/pantry/seed";
 import { householdStateSchema, type ProfileFactChange } from "@/lib/contracts";
 import { applyPilotCommand, ensurePilot } from "./pilot";
 import { explicitProfileReply, extractExplicitProfileChanges, profileFactId } from "./profile";
+import { buildRecommendationContext } from "@/features/meals/recommendation-context";
+import { recipeFitsRecommendationContext } from "@/features/meals/recommendation-constraints";
 
 const state = () => ensurePilot(createSampleHousehold(), "2026-10-12");
 const extract = (message: string) => extractExplicitProfileChanges(state(), message, "you");
@@ -59,6 +61,76 @@ test("corrections replace one semantic fact, forgetting removes it, and duplicat
   ]);
   assert.deepEqual(extractExplicitProfileChanges(saved, "I like mushrooms. I dislike mushrooms.", "you"), []);
   assert.equal(initial.pilot.profileFacts.length, 0);
+});
+
+test("a newly known ingredient keeps an earlier unresolved dislike correctable and forgettable", () => {
+  const initial = state();
+  const dislike = extractExplicitProfileChanges(initial, "I dislike saffron.", "you")[0];
+  const saved = applyPilotCommand(initial, { id: "save-saffron", expectedRevision: 0, operation: dislike }).state;
+  assert.equal(saved.pilot.profileFacts[0].value.kind === "food-dislike" && saved.pilot.profileFacts[0].value.target.kind, "text");
+  const known = householdStateSchema.parse({ ...saved, pantry: [...saved.pantry,
+    { id: "new-saffron", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const recipe = { id: "saffron-rice", name: "Saffron rice", description: "An authored example", servings: 2, minutes: 20,
+    ingredients: [{ ingredientId: "new-saffron", name: "Saffron", quantity: 1, unit: "g" as const }], steps: ["Cook the rice with saffron."] };
+  assert.equal(recipeFitsRecommendationContext(recipe, buildRecommendationContext(known, "you")), false);
+  const correction = extractExplicitProfileChanges(known, "I no longer dislike saffron.", "you")[0];
+  assert.equal(correction.type, "upsert_profile_fact");
+  if (correction.type === "upsert_profile_fact") assert.equal(profileFactId(correction.value), saved.pilot.profileFacts[0].id);
+  const corrected = applyPilotCommand(known, { id: "correct-saffron", expectedRevision: 1, operation: correction }).state;
+  assert.equal(corrected.pilot.profileFacts.length, 1);
+  assert.equal(recipeFitsRecommendationContext(recipe, buildRecommendationContext(corrected, "you")), true);
+  for (const current of [known, corrected]) {
+    const forget = extractExplicitProfileChanges(current, "Forget that I dislike saffron.", "you");
+    assert.deepEqual(forget, [{ type: "remove_profile_fact", factId: saved.pilot.profileFacts[0].id, sourceText: "Forget that I dislike saffron." }]);
+    const forgotten = applyPilotCommand(current, { id: "forget-saffron", expectedRevision: current.pilot!.revision, operation: forget[0] }).state;
+    assert.deepEqual(forgotten.pilot.profileFacts, []);
+  }
+});
+
+test("remembered target matching stays within its scope and requires one exact prior fact", () => {
+  const initial = state();
+  const own = extractExplicitProfileChanges(initial, "I dislike saffron.", "you")[0];
+  const saved = applyPilotCommand(initial, { id: "own", expectedRevision: 0, operation: own }).state;
+  const partner = extractExplicitProfileChanges(saved, "I dislike saffron.", "partner")[0];
+  const both = applyPilotCommand(saved, { id: "partner", expectedRevision: 1, operation: partner }).state;
+  const known = householdStateSchema.parse({ ...both, pantry: [...both.pantry,
+    { id: "new-saffron", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const correction = extractExplicitProfileChanges(known, "I like saffron.", "you")[0];
+  assert.equal(correction.type, "upsert_profile_fact");
+  if (correction.type === "upsert_profile_fact") assert.equal(profileFactId(correction.value), saved.pilot.profileFacts[0].id);
+  const otherScope = upserts(extractExplicitProfileChanges(known, "We dislike saffron.", "you"))[0];
+  assert.deepEqual(otherScope, { kind: "food-dislike", scope: { kind: "household" }, target: { kind: "ingredient", ingredientId: "new-saffron", name: "Saffron" }, disliked: true });
+
+  const conflict = applyPilotCommand(known, { id: "conflicting-target", expectedRevision: 2, operation: {
+    type: "upsert_profile_fact", sourceText: "Earlier imported fact", value: { kind: "food-dislike", scope: { kind: "member", memberId: "you" },
+      target: { kind: "ingredient", ingredientId: "new-saffron", name: "Saffron" }, disliked: true },
+  } }).state;
+  assert.deepEqual(extractExplicitProfileChanges(conflict, "I no longer dislike saffron.", "you"), []);
+  assert.match(explicitProfileReply(conflict, "Forget that I dislike saffron.", "you") ?? "", /Please clarify/);
+});
+
+test("a known ingredient becoming ambiguous requires clarification before correction or forgetting", () => {
+  const initial = state();
+  const known = householdStateSchema.parse({ ...initial, pantry: [...initial.pantry,
+    { id: "saffron-1", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const dislike = extractExplicitProfileChanges(known, "I dislike saffron.", "you")[0];
+  const saved = applyPilotCommand(known, { id: "known-saffron", expectedRevision: 0, operation: dislike }).state;
+  const ambiguous = householdStateSchema.parse({ ...saved, pantry: [...saved.pantry,
+    { id: "saffron-2", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const before = structuredClone(ambiguous);
+  for (const message of ["I no longer dislike saffron.", "Forget that I dislike saffron.", "I like saffron. We don't have an oven."]) {
+    assert.deepEqual(extractExplicitProfileChanges(ambiguous, message, "you"), []);
+    assert.match(explicitProfileReply(ambiguous, message, "you") ?? "", /Which ingredient.*Please clarify/);
+    assert.deepEqual(ambiguous, before);
+  }
+  // Another person's broad wording cannot edit the earlier person's known fact.
+  assert.deepEqual(upserts(extractExplicitProfileChanges(ambiguous, "I dislike saffron.", "partner")), [
+    { kind: "food-dislike", scope: { kind: "member", memberId: "partner" }, target: { kind: "text", text: "saffron" }, disliked: true },
+  ]);
 });
 
 test("older snapshots and receipt inverses default profile facts without resetting household data", () => {

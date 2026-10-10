@@ -22,27 +22,53 @@ const equipmentAliases: Record<string, string> = {
 };
 const temporary = /\b(?:tonight|today|tomorrow|yesterday|this (?:week|weekend|month|meal|recipe|time|evening)|for now|right now|at the moment|currently|just|only|maybe|might|sometimes|occasionally|usually|mostly|used to|if|unless|except|when|while|for (?:dinner|lunch|breakfast)|on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i;
 
-function foodTarget(state: HouseholdState, wording: string): ProfileFoodTarget | null {
-  const text = normalizeIngredientName(wording.replace(/^(?:the|all) /i, ""));
-  // No clauses, quoted assertions, instructions, quantities, or pronouns masquerading as food.
-  if (!text || text.length > 80 || /[\d?!:;"“”`]|\b(?:i|we|you|they|he|she|my|our|your|not|because|please|can|could|should|would|prefer|want|avoid|remember|forget|dislike|like|hate|but|love|enjoy|are|is|have|has|for|with|without|then|than|until|before|after)\b/.test(text)) return null;
-  if (categories[text]) return { kind: "category", category: categories[text] };
+function matchingIngredients(state: HouseholdState, text: string) {
   const known = knownIngredientsFromHousehold(state);
   const catalog = ingredientCatalog.filter((item) => [item.name, ...item.aliases].some((name) => normalizeIngredientName(name) === text));
   const matches = new Map<string, { ingredientId: string; name: string }>();
   for (const item of catalog) matches.set(item.ingredientId, { ingredientId: item.ingredientId, name: item.name });
   for (const item of known) if (normalizeIngredientName(item.name) === text) matches.set(item.ingredientId, item);
+  return matches;
+}
+
+function foodTarget(state: HouseholdState, wording: string): ProfileFoodTarget | null {
+  const text = normalizeIngredientName(wording.replace(/^(?:the|all) /i, ""));
+  // No clauses, quoted assertions, instructions, quantities, or pronouns masquerading as food.
+  if (!text || text.length > 80 || /[\d?!:;"“”`]|\b(?:i|we|you|they|he|she|my|our|your|not|because|please|can|could|should|would|prefer|want|avoid|remember|forget|dislike|like|hate|but|love|enjoy|are|is|have|has|for|with|without|then|than|until|before|after)\b/.test(text)) return null;
+  if (categories[text]) return { kind: "category", category: categories[text] };
+  const matches = matchingIngredients(state, text);
   if (matches.size === 1) { const { ingredientId, name } = [...matches.values()][0]; return { kind: "ingredient", ingredientId, name }; }
   return { kind: "text", text };
+}
+
+/** A growing ingredient catalog must not change the identity of an existing fact. */
+function rememberedFoodTarget(state: HouseholdState, scope: ProfileScope, target: ProfileFoodTarget, wording: string): ProfileFoodTarget | null {
+  const text = normalizeIngredientName(wording.replace(/^(?:the|all) /i, ""));
+  const id = profileFactId({ kind: "food-dislike", scope, target, disliked: true });
+  const identities = target.kind === "text" ? matchingIngredients(state, text) : undefined;
+  let ambiguousKnownFact = false;
+  const matches = state.pilot?.profileFacts.flatMap((fact) => {
+    const value = fact.value;
+    if (value.kind !== "food-dislike" || value.scope.kind !== scope.kind
+      || (scope.kind === "member" && (value.scope.kind !== "member" || value.scope.memberId !== scope.memberId))) return [];
+    if (identities && identities.size > 1 && value.target.kind === "ingredient" && identities.has(value.target.ingredientId))
+      ambiguousKnownFact = true;
+    // Only literal prior wording can connect an unresolved fact to a newly
+    // known ingredient. Never choose a physical form from a name similarity.
+    return fact.id === id || (value.target.kind === "text" && normalizeIngredientName(value.target.text) === text)
+      ? [value.target] : [];
+  }) ?? [];
+  return ambiguousKnownFact || matches.length > 1 ? null : matches[0] ?? target;
 }
 
 function parseExplicitProfile(state: HouseholdState, message: string, actorMemberId: string) {
   if (!state.pilot?.members.some((member) => member.id === actorMemberId) || !message.trim() || message.length > 2000
     || message.trimStart().startsWith("[LunchBox context refresh]") || /["“”`]|^\s*>|\b(?:transcript|example|quotation|quoted|hypothetical(?:ly)?|pretend|role[- ]?play|fictional)\b|\b(?:quote|repeat|said|says|system|assistant|user):/im.test(message))
-    return { changes: [] as ProfileFactChange[], complete: false };
+    return { changes: [] as ProfileFactChange[], complete: false, clarification: null as string | null };
   const changes = new Map<string, ProfileFactChange>();
   let complete = true;
   let recognized = false;
+  let clarification: string | null = null;
   const clauses = message.trim().split(/(?<=[.!?])\s+|\n+|;\s*|\s+(?:and|but)\s+(?=(?:i|we|our kitchen)\b)/i);
   for (const sourceText of clauses.map((clause) => clause.trim()).filter(Boolean)) {
     // Prefixes must themselves be literal user assertions, not quotations or reported speech.
@@ -56,10 +82,15 @@ function parseExplicitProfile(state: HouseholdState, message: string, actorMembe
       const food = /^(i|we) (?:don't like|do not like|dislike|hate) (.+)$/i.exec(text)
         ?? /^(i|we) (?:no longer dislike|don't dislike|do not dislike|like) (.+?)(?: anymore| any more| now)?$/i.exec(text);
       if (food) {
-        const targets = food[2].split(/,\s*|\s+(?:and|or)\s+/i).map((value) => foodTarget(state, value));
+        const scope: ProfileScope = food[1].toLowerCase() === "we" ? { kind: "household" } : { kind: "member", memberId: actorMemberId };
+        const targets = food[2].split(/,\s*|\s+(?:and|or)\s+/i).map((wording) => {
+          const target = foodTarget(state, wording);
+          const remembered = target ? rememberedFoodTarget(state, scope, target, wording) : null;
+          if (target && !remembered) clarification ??= `Which ingredient or remembered preference do you mean by “${wording.trim()}”? More than one matches. Please clarify, or edit the exact fact in Remembered preferences.`;
+          return remembered;
+        });
         if (!targets.length || targets.length > 5 || targets.some((target) => !target)) { complete = false; continue; }
         recognized = true;
-        const scope: ProfileScope = food[1].toLowerCase() === "we" ? { kind: "household" } : { kind: "member", memberId: actorMemberId };
         const disliked = /^(?:i|we) (?:don't like|do not like|dislike|hate) /i.test(text);
         for (const target of targets) {
           const value: ProfileFactValue = { kind: "food-dislike", scope, target: target!, disliked };
@@ -90,10 +121,10 @@ function parseExplicitProfile(state: HouseholdState, message: string, actorMembe
     }
     complete = false;
   }
-  return { changes: [...changes.values()].filter((change) => {
+  return { changes: clarification ? [] : [...changes.values()].filter((change) => {
     const previous = state.pilot!.profileFacts.find((fact) => fact.id === (change.type === "remove_profile_fact" ? change.factId : profileFactId(change.value)));
     return change.type === "remove_profile_fact" ? Boolean(previous) : !previous || JSON.stringify(previous.value) !== JSON.stringify(change.value);
-  }).slice(0, 10), complete: complete && recognized };
+  }).slice(0, 10), complete: complete && recognized, clarification };
 }
 
 /** Durable authorization comes only from explicit first-person current-message phrases. */
@@ -104,6 +135,7 @@ export function extractExplicitProfileChanges(state: HouseholdState, message: st
 /** Pure memory requests need no model inference or unsupported action claims. */
 export function explicitProfileReply(state: HouseholdState, message: string, actorMemberId: string): string | null {
   const parsed = parseExplicitProfile(state, message, actorMemberId);
+  if (parsed.clarification) return parsed.clarification;
   return parsed.complete ? parsed.changes.length
     ? "Understood. Your food and equipment preferences will guide future meal ideas."
     : "Your current food and equipment preferences already reflect that." : null;
