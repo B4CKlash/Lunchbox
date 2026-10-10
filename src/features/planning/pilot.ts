@@ -372,10 +372,13 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string, co
       allocation.consumedAt = now;
       break;
     }
-    case "record_feedback":
+    case "record_feedback": {
+      const previous = pilot.feedback.find((entry) => entry.id === change.feedback.id);
+      if (previous && previous.memberId !== change.feedback.memberId) fail("That feedback ID belongs to another person or legacy household feedback. Keep each person's opinion separate.");
       pilot.feedback = pilot.feedback.filter((entry) => entry.id !== change.feedback.id);
       pilot.feedback.push(change.feedback);
       break;
+    }
     case "set_members":
       pilot.members = change.members;
       pilot.session.memberIds = pilot.session.memberIds.filter((id) => change.members.some((member) => member.id === id));
@@ -453,7 +456,7 @@ function invalidateRevisedPlanningProposals(pilot: PilotState, previousSession: 
 export function applyPilotCommand(
   state: HouseholdState,
   input: unknown,
-  { now = new Date().toISOString() }: { now?: string } = {},
+  { now = new Date().toISOString(), actorMemberId }: { now?: string; actorMemberId?: string } = {},
 ): { state: PilotHousehold; receipt: ActionReceipt; duplicate: boolean } {
   const parsed = pilotCommandSchema.safeParse(input);
   if (!parsed.success) throw new PilotCommandError("invalid", parsed.error.issues[0]?.message ?? "Invalid planning command.");
@@ -471,6 +474,17 @@ export function applyPilotCommand(
   const { receipts: oldReceipts, revision, ...data } = current.pilot;
   const inverse = { pantry: structuredClone(current.pantry), data: structuredClone(data) };
   const operation = command.operation;
+  // Authenticate newly authored feedback. Accepting an existing proposal keeps
+  // its original author and preserves legacy household opinions separately.
+  const attributeFeedback = (change: PilotChange) => {
+    if (change.type !== "record_feedback" || !actorMemberId) return;
+    if (!current.pilot.members.some((member) => member.id === actorMemberId)) fail("Choose the authenticated household member before saving feedback.");
+    if (change.feedback.memberId && change.feedback.memberId !== actorMemberId) fail("Recipe feedback must belong to the person making this request.");
+    change.feedback.memberId = actorMemberId;
+  };
+  if (operation.type === "record_feedback") attributeFeedback(operation);
+  if (operation.type === "propose") operation.changes.forEach(attributeFeedback);
+  if (operation.type === "receive_planning_result") operation.proposal?.changes.forEach(attributeFeedback);
   let changeIndex = 0;
   const apply = (target: PilotHousehold, change: PilotChange) => applyChange(target, change, now, command.id, changeIndex++);
   if (operation.type === "receive_planning_result" && operation.baseRevision !== revision) {
