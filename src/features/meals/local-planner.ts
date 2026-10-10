@@ -42,24 +42,25 @@ export type LocalPlanningResult = z.infer<typeof planningResultSchema>;
 
 /** Package commands come only from the current statement's deterministic
  * interpretation. The model cannot invent a package weight or purchase count. */
-export function reviewNaturalPackageRequest(state: HouseholdState, request: string, idFactory: () => string = randomUUID): LocalPlanningResult | null {
-  if (!/\b(?:cans?|bags?|jars?|box(?:es)?|bottles?)\b/i.test(request)
-    || /[,;\n]|\b(?:please|plan|recipe|cook|then|but)\b/i.test(request)) return null;
+export function reviewNaturalStockRequest(state: HouseholdState, request: string, idFactory: () => string = randomUUID): LocalPlanningResult | null {
+  if (/[,;\n]|\b(?:please|plan|recipe|cook|then|but)\b/i.test(request)) return null;
   if (!/^(?:(?:i|we)\s+(?:have|bought|purchased)|bought|purchased|\d|some\b|half\b|an?\b|opened\b|low\b|out\b|no\b)/i.test(request.trim())) return null;
   let draft;
   try { draft = prepareNaturalStockEntry(request, knownIngredientsFromHousehold(state)); }
   catch { return null; }
-  if (!draft.packageKind) return null;
-  if (!draft.operation) return planningResultSchema.parse({ reply: "Should this replace your current container total, or record a purchase to add?", recipes: [], operations: [] });
+  if (!draft.operation) return planningResultSchema.parse({ reply: "Should this replace your current stock total, or record a purchase to add?", recipes: [], operations: [] });
   if (!draft.ingredientId) return planningResultSchema.parse({ reply: `Which ingredient do you mean by ${draft.name}? Please give its specific form or name.`, recipes: [], operations: [] });
-  if (draft.operation === "add_purchase" && draft.status !== "exact") return planningResultSchema.parse({ reply: "How many whole containers did you buy? Opened or partial containers can instead be recorded as a current stock observation.", recipes: [], operations: [] });
+  if (draft.operation === "add_purchase" && draft.status !== "exact") return planningResultSchema.parse({ reply: "What exact amount did you buy? Opened or partial containers can instead be recorded as a current stock observation.", recipes: [], operations: [] });
   let operation: PilotOperation;
   try { operation = naturalStockEntryOperation(draft); }
   catch (error) { return planningResultSchema.parse({ reply: error instanceof Error ? error.message : "Please check the whole container count.", recipes: [], operations: [] }); }
   const current = ensurePilot(state);
   applyPilotCommand(current, { id: `review-${idFactory()}`, expectedRevision: current.pilot.revision, operation });
-  return planningResultSchema.parse({ reply: `Review this ${draft.operation === "add_purchase" ? "package purchase" : "current container stock"} update for ${draft.name}. Container contents remain unresolved.`, recipes: [], operations: [operation] });
+  return planningResultSchema.parse({ reply: `Review this ${draft.operation === "add_purchase" ? "purchase addition" : "current stock total"} for ${draft.name}.${draft.packageKind ? " Container contents remain unresolved." : ""}`, recipes: [], operations: [operation] });
 }
+
+// Retain the existing helper name for package-only callers and evaluation evidence.
+export const reviewNaturalPackageRequest = reviewNaturalStockRequest;
 
 /** Give each response intent only its relevant fields. A clarification has no
  * action field at all, and existing entities are a closed set of references. */
@@ -321,8 +322,8 @@ export async function runLocalPlanning(
   const profileChanges = extractExplicitProfileChanges(current, message, actorMemberId);
   const profileReply = explicitProfileReply(current, message, actorMemberId);
   if (profileReply) return { reply: profileReply, recipes: [], operations: [], ...(profileChanges.length ? { profileChanges } : {}) };
-  const packageEntry = reviewNaturalPackageRequest(current, message);
-  if (packageEntry) return packageEntry;
+  const stockEntry = reviewNaturalStockRequest(current, message);
+  if (stockEntry) return stockEntry;
   if (options.verify !== false) await verifyLocalModel(process.env, options.signal);
   const prompt = JSON.stringify({
     currentRequest: message,
