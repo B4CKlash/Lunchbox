@@ -13,12 +13,12 @@ function describe(fact: ProfileFact, names: Map<string, string>) {
 }
 
 export function ProfileMemory() {
-  const { state, currentMemberId, dispatchPilot } = useHousehold();
+  const { state, householdId, currentMemberId, dispatchPilot } = useHousehold();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const pilot = state.pilot;
   if (!pilot) return null;
-  const actor = currentMemberId ?? pilot.members[0].id;
+  const actor = householdId ? currentMemberId : pilot.members[0].id;
   const names = new Map(pilot.members.map((person) => [person.id, person.name]));
   const receipt = [...pilot.receipts].reverse().find((entry) => ["upsert_profile_fact", "remove_profile_fact"].includes(entry.operationType) || (["receive_planning_result", "receive_recipe_chat_result"].includes(entry.operationType) && entry.summary.includes("preference change")));
   const remembered = receipt ? pilot.profileFacts.filter((fact) => fact.source.commandId === receipt.commandId).map((fact) => describe(fact, names)) : [];

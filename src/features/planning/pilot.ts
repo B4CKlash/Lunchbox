@@ -245,14 +245,14 @@ function setPantryBalance(state: PilotHousehold, ingredientId: string, name: str
 }
 
 function applyChange(state: PilotHousehold, change: PilotChange, now: string, commandId: string, changeIndex: number | string,
-  profileSource?: { jobId: string; actorMemberId: string; messageId: string }) {
+  profileSource?: { jobId: string; actorMemberId: string; messageId: string }, manualActorMemberId?: string) {
   const pilot = state.pilot;
   switch (change.type) {
     case "upsert_profile_fact": {
       const id = profileFactId(change.value);
       const fact: ProfileFact = { id, value: structuredClone(change.value), source: {
         kind: profileSource ? "conversation" : "manual", sourceText: change.sourceText,
-        recordedAt: now, commandId, ...profileSource,
+        recordedAt: now, commandId, ...(manualActorMemberId ? { actorMemberId: manualActorMemberId } : {}), ...profileSource,
       } };
       pilot.profileFacts = [...pilot.profileFacts.filter((entry) => entry.id !== id), fact];
       break;
@@ -451,10 +451,13 @@ function applyChange(state: PilotHousehold, change: PilotChange, now: string, co
       allocation.consumedAt = now;
       break;
     }
-    case "record_feedback":
+    case "record_feedback": {
+      const previous = pilot.feedback.find((entry) => entry.id === change.feedback.id);
+      if (previous && previous.memberId !== change.feedback.memberId) fail("That feedback ID belongs to another person or legacy household feedback. Keep each person's opinion separate.");
       pilot.feedback = pilot.feedback.filter((entry) => entry.id !== change.feedback.id);
       pilot.feedback.push(change.feedback);
       break;
+    }
     case "set_members":
       pilot.members = change.members;
       pilot.session.memberIds = pilot.session.memberIds.filter((id) => change.members.some((member) => member.id === id));
@@ -555,19 +558,30 @@ export function applyPilotCommand(
   const { receipts: oldReceipts, revision, ...data } = current.pilot;
   const inverse = { pantry: structuredClone(current.pantry), data: structuredClone(data) };
   const operation = command.operation;
-  // Authenticate newly authored feedback, while keeping existing proposal
-  // authors and legacy unattributed feedback when a proposal is accepted.
-  const attributeFeedback = (change: PilotChange) => {
-    if (change.type !== "record_feedback" || !actorMemberId) return;
-    if (!current.pilot.members.some((member) => member.id === actorMemberId)) fail("Choose the authenticated household member before saving feedback.");
-    if (change.feedback.memberId && change.feedback.memberId !== actorMemberId) fail("Recipe feedback must belong to the person making this request.");
-    change.feedback.memberId = actorMemberId;
+  const authorizeProfileChange = (change: PilotChange) => {
+    if (!actorMemberId) return;
+    const value = change.type === "upsert_profile_fact" ? change.value
+      : change.type === "remove_profile_fact" ? current.pilot.profileFacts.find((fact) => fact.id === change.factId)?.value : undefined;
+    if (value?.kind === "food-dislike" && value.scope.kind === "member" && value.scope.memberId !== actorMemberId)
+      fail("Personal food preferences must belong to the person making this request.");
   };
-  if (operation.type === "record_feedback") attributeFeedback(operation);
-  if (operation.type === "propose") operation.changes.forEach(attributeFeedback);
-  if (operation.type === "receive_planning_result") operation.proposal?.changes.forEach(attributeFeedback);
+  // New authorship belongs to the authenticated person. Accepting an existing
+  // feedback proposal retains its author; completed conversation facts retain
+  // the original speaker through their separately validated profileSource.
+  const authorizeAuthoredChange = (change: PilotChange) => {
+    if (!actorMemberId || !["record_feedback", "upsert_profile_fact", "remove_profile_fact"].includes(change.type)) return;
+    if (!current.pilot.members.some((member) => member.id === actorMemberId)) fail("Choose the authenticated household member before saving preferences or feedback.");
+    authorizeProfileChange(change);
+    if (change.type === "record_feedback") {
+      if (change.feedback.memberId && change.feedback.memberId !== actorMemberId) fail("Recipe feedback must belong to the person making this request.");
+      change.feedback.memberId = actorMemberId;
+    }
+  };
+  if (operation.type === "record_feedback" || operation.type === "upsert_profile_fact" || operation.type === "remove_profile_fact") authorizeAuthoredChange(operation);
+  if (operation.type === "propose") operation.changes.forEach(authorizeAuthoredChange);
+  if (operation.type === "receive_planning_result") operation.proposal?.changes.forEach(authorizeAuthoredChange);
   let changeIndex = 0;
-  const apply = (target: PilotHousehold, change: PilotChange) => applyChange(target, change, now, command.id, changeIndex++);
+  const apply = (target: PilotHousehold, change: PilotChange) => applyChange(target, change, now, command.id, changeIndex++, undefined, actorMemberId);
   if ((operation.type === "receive_planning_result" || operation.type === "receive_recipe_chat_result") && operation.baseRevision !== revision) {
     throw new PilotCommandError("conflict", "The household changed after this assistant request. Refresh its suggestions before saving them.");
   }
@@ -665,6 +679,7 @@ export function applyPilotCommand(
     if (proposal.status !== "pending" || proposal.baseRevision !== revision) throw new PilotCommandError("stale-proposal", "The household changed after this proposal. Review a refreshed proposal before applying it.");
     if (proposal.legacyMeals) fail("Recovered drafts are preserved for review. Recreate their placements in the live calendar before applying them.");
     const selectedChanges = selectProposalChanges(proposal.changes, operation.selectedAllocationIds, operation.includeOtherChanges);
+    selectedChanges.forEach(authorizeProfileChange);
     for (const change of selectedChanges) { apply(current, change); validatePilot(current.pilot); }
     proposal.status = "applied";
   } else {

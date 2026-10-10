@@ -31,9 +31,10 @@ export function reduceRemoteCommand(current: RemoteHousehold, input: RemoteComma
       throw new HouseholdApiError(409, "conflict", "This action was prepared against an older household. Review it again.", current);
     const operation = input.command.command.operation;
     const changes = operation.type === "propose" ? operation.changes
-      : operation.type === "receive_planning_result" ? operation.proposal?.changes ?? [] : [operation];
-    if (changes.some((change) => change.type === "record_feedback") && !current.currentMemberId)
-      throw new HouseholdApiError(409, "actor_unavailable", "This account needs a household person before saving feedback.");
+      : operation.type === "receive_planning_result" ? operation.proposal?.changes ?? []
+      : operation.type === "apply_proposal" ? state.pilot.proposals.find((proposal) => proposal.id === operation.proposalId)?.changes ?? [] : [operation];
+    if (changes.some((change) => ["record_feedback", "upsert_profile_fact", "remove_profile_fact"].includes(change.type)) && !current.currentMemberId)
+      throw new HouseholdApiError(409, "actor_unavailable", "This account needs a household person before saving preferences or feedback.");
     const result = applyPilotCommand(state, input.command.command, { actorMemberId: current.currentMemberId });
     if (result.duplicate) throw new HouseholdApiError(409, "command_id_reused", "Retry this action using its original request identifier.");
     return { state: result.state, receipt: result.receipt };
