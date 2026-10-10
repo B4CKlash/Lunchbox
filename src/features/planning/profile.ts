@@ -36,6 +36,22 @@ function foodTarget(state: HouseholdState, wording: string): ProfileFoodTarget |
   return { kind: "text", text };
 }
 
+/** A growing ingredient catalog must not change the identity of an existing fact. */
+function rememberedFoodTarget(state: HouseholdState, scope: ProfileScope, target: ProfileFoodTarget, wording: string): ProfileFoodTarget | null {
+  const text = normalizeIngredientName(wording.replace(/^(?:the|all) /i, ""));
+  const id = profileFactId({ kind: "food-dislike", scope, target, disliked: true });
+  const matches = state.pilot?.profileFacts.flatMap((fact) => {
+    const value = fact.value;
+    if (value.kind !== "food-dislike" || value.scope.kind !== scope.kind
+      || (scope.kind === "member" && (value.scope.kind !== "member" || value.scope.memberId !== scope.memberId))) return [];
+    // Only literal prior wording can connect an unresolved fact to a newly
+    // known ingredient. Never choose a physical form from a name similarity.
+    return fact.id === id || (value.target.kind === "text" && normalizeIngredientName(value.target.text) === text)
+      ? [value.target] : [];
+  }) ?? [];
+  return matches.length > 1 ? null : matches[0] ?? target;
+}
+
 function parseExplicitProfile(state: HouseholdState, message: string, actorMemberId: string) {
   if (!state.pilot?.members.some((member) => member.id === actorMemberId) || !message.trim() || message.length > 2000
     || message.trimStart().startsWith("[LunchBox context refresh]") || /["“”`]|^\s*>|\b(?:transcript|example|quotation|quoted|hypothetical(?:ly)?|pretend|role[- ]?play|fictional)\b|\b(?:quote|repeat|said|says|system|assistant|user):/im.test(message))
@@ -56,10 +72,13 @@ function parseExplicitProfile(state: HouseholdState, message: string, actorMembe
       const food = /^(i|we) (?:don't like|do not like|dislike|hate) (.+)$/i.exec(text)
         ?? /^(i|we) (?:no longer dislike|don't dislike|do not dislike|like) (.+?)(?: anymore| any more| now)?$/i.exec(text);
       if (food) {
-        const targets = food[2].split(/,\s*|\s+(?:and|or)\s+/i).map((value) => foodTarget(state, value));
+        const scope: ProfileScope = food[1].toLowerCase() === "we" ? { kind: "household" } : { kind: "member", memberId: actorMemberId };
+        const targets = food[2].split(/,\s*|\s+(?:and|or)\s+/i).map((wording) => {
+          const target = foodTarget(state, wording);
+          return target ? rememberedFoodTarget(state, scope, target, wording) : null;
+        });
         if (!targets.length || targets.length > 5 || targets.some((target) => !target)) { complete = false; continue; }
         recognized = true;
-        const scope: ProfileScope = food[1].toLowerCase() === "we" ? { kind: "household" } : { kind: "member", memberId: actorMemberId };
         const disliked = /^(?:i|we) (?:don't like|do not like|dislike|hate) /i.test(text);
         for (const target of targets) {
           const value: ProfileFactValue = { kind: "food-dislike", scope, target: target!, disliked };

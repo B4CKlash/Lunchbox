@@ -61,6 +61,51 @@ test("corrections replace one semantic fact, forgetting removes it, and duplicat
   assert.equal(initial.pilot.profileFacts.length, 0);
 });
 
+test("a newly known ingredient keeps an earlier unresolved dislike correctable and forgettable", () => {
+  const initial = state();
+  const dislike = extractExplicitProfileChanges(initial, "I dislike saffron.", "you")[0];
+  const saved = applyPilotCommand(initial, { id: "save-saffron", expectedRevision: 0, operation: dislike }).state;
+  assert.equal(saved.pilot.profileFacts[0].value.kind === "food-dislike" && saved.pilot.profileFacts[0].value.target.kind, "text");
+  const known = householdStateSchema.parse({ ...saved, pantry: [...saved.pantry,
+    { id: "new-saffron", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const correction = extractExplicitProfileChanges(known, "I no longer dislike saffron.", "you")[0];
+  assert.equal(correction.type, "upsert_profile_fact");
+  if (correction.type === "upsert_profile_fact") assert.equal(profileFactId(correction.value), saved.pilot.profileFacts[0].id);
+  const corrected = applyPilotCommand(known, { id: "correct-saffron", expectedRevision: 1, operation: correction }).state;
+  assert.equal(corrected.pilot.profileFacts.length, 1);
+  assert.equal(corrected.pilot.profileFacts[0].value.kind === "food-dislike" && corrected.pilot.profileFacts[0].value.disliked, false);
+  for (const current of [known, corrected]) {
+    const forget = extractExplicitProfileChanges(current, "Forget that I dislike saffron.", "you");
+    assert.deepEqual(forget, [{ type: "remove_profile_fact", factId: saved.pilot.profileFacts[0].id, sourceText: "Forget that I dislike saffron." }]);
+    const forgotten = applyPilotCommand(current, { id: "forget-saffron", expectedRevision: current.pilot!.revision, operation: forget[0] }).state;
+    assert.deepEqual(forgotten.pilot.profileFacts, []);
+  }
+});
+
+test("remembered target matching stays within its scope and requires one exact prior fact", () => {
+  const initial = state();
+  const own = extractExplicitProfileChanges(initial, "I dislike saffron.", "you")[0];
+  const saved = applyPilotCommand(initial, { id: "own", expectedRevision: 0, operation: own }).state;
+  const partner = extractExplicitProfileChanges(saved, "I dislike saffron.", "partner")[0];
+  const both = applyPilotCommand(saved, { id: "partner", expectedRevision: 1, operation: partner }).state;
+  const known = householdStateSchema.parse({ ...both, pantry: [...both.pantry,
+    { id: "new-saffron", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const correction = extractExplicitProfileChanges(known, "I like saffron.", "you")[0];
+  assert.equal(correction.type, "upsert_profile_fact");
+  if (correction.type === "upsert_profile_fact") assert.equal(profileFactId(correction.value), saved.pilot.profileFacts[0].id);
+  const otherScope = upserts(extractExplicitProfileChanges(known, "We dislike saffron.", "you"))[0];
+  assert.deepEqual(otherScope, { kind: "food-dislike", scope: { kind: "household" }, target: { kind: "ingredient", ingredientId: "new-saffron", name: "Saffron" }, disliked: true });
+
+  const conflict = applyPilotCommand(known, { id: "conflicting-target", expectedRevision: 2, operation: {
+    type: "upsert_profile_fact", sourceText: "Earlier imported fact", value: { kind: "food-dislike", scope: { kind: "member", memberId: "you" },
+      target: { kind: "ingredient", ingredientId: "new-saffron", name: "Saffron" }, disliked: true },
+  } }).state;
+  assert.deepEqual(extractExplicitProfileChanges(conflict, "I no longer dislike saffron.", "you"), []);
+  assert.equal(explicitProfileReply(conflict, "Forget that I dislike saffron.", "you"), null);
+});
+
 test("older snapshots and receipt inverses default profile facts without resetting household data", () => {
   const initial = state();
   const changed = applyPilotCommand(initial, { id: "change", expectedRevision: 0, operation: { type: "set_shop_through", date: "2026-10-22" } }).state;
