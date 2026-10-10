@@ -327,6 +327,12 @@ export const planningSessionSchema = z.object({
   draft: z.string().max(2000).default(""),
   equipment: z.array(z.string().trim().min(1).max(80)).max(30),
 });
+export const stockEntrySchema = z.object({
+  intent: z.enum(["set-total", "add"]),
+  item: pantryItemSchema,
+}).refine((entry) => entry.intent !== "add" || entry.item.quantity > 0, {
+  message: "A purchase needs a positive amount.",
+});
 export const pilotChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_coverage"), coverage: mealCoverageSchema }),
   z.object({ type: z.literal("clear_coverage"), coverageId: pilotIdSchema }),
@@ -338,6 +344,7 @@ export const pilotChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_stock"), stock: flexibleStockSchema }),
   z.object({ type: z.literal("confirm_stock"), ...stockCheckSchema.shape }),
   z.object({ type: z.literal("record_purchase"), items: z.array(purchaseItemSchema).min(1).max(200) }),
+  z.object({ type: z.literal("record_stock_entries"), entries: z.array(stockEntrySchema).min(1).max(200) }),
   z.object({ type: z.literal("cook_batch"), batchId: pilotIdSchema, actualPortions: portionsSchema, freezerPortions: z.number().finite().nonnegative().max(1000) }),
   z.object({ type: z.literal("correct_prepared"), batchId: pilotIdSchema,
     produced: z.number().finite().nonnegative().max(1000), freezerPortions: z.number().finite().nonnegative().max(1000),

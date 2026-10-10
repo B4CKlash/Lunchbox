@@ -530,3 +530,31 @@ test("zero and qualitative-stock corrections preserve honest ingredient history 
   const tinyAllocation = run(before, allocation("tiny", "2026-10-13", "you", "batch", 0.0000001)).state;
   rejectsCode(() => applyPilotCommand(tinyAllocation, { id: "zero-tiny", expectedRevision: tinyAllocation.pilot.revision, operation: { type: "correct_prepared", batchId: "batch", produced: 0, freezerPortions: 0, reason: "A tiny pending meal is still a meal" } }), "invalid");
 });
+
+test("manual stock commands preserve details and undo an atomic mixed import including purchase history", () => {
+  const original = makeState(900);
+  original.pilot.stock = [{ ingredientId: "pasta", name: "Pasta", unit: "g", status: "some", sourceNote: "Opened packet", bestBefore: "2026-10-20" }];
+  const item = { ...original.pantry[0], quantity: 100, location: "Freezer" as const, useSoon: true, tag: "staple" as const, restockBelow: 50 };
+  const measured = run(original, { type: "record_stock_entries", entries: [{ intent: "set-total", item }] });
+  assert.equal(measured.state.pantry[0].quantity, 100);
+  assert.equal(measured.state.pilot.stock[0].sourceNote, "Opened packet");
+  assert.equal(measured.state.pilot.stock[0].bestBefore, "2026-10-20");
+  assert.equal(measured.state.pilot.stock[0].status, "exact");
+  assert.equal(measured.state.pantry[0].location, "Freezer");
+  assert.equal(measured.state.pilot.purchaseLots.length, 0);
+  const mixed = run(original, { type: "record_stock_entries", entries: [
+    { intent: "add", item },
+    { intent: "set-total", item: { ...item, id: "apples", name: "Apples", unit: "each", quantity: 10 } },
+  ] });
+  assert.equal(mixed.state.pilot.stock.find((stock) => stock.ingredientId === "pasta")?.status, "some");
+  assert.equal(mixed.state.pilot.stock.find((stock) => stock.ingredientId === "apples")?.quantity, 10);
+  assert.equal(mixed.state.pilot.purchaseLots.length, 1);
+  assert.equal(mixed.state.pilot.revision, 1);
+  const undone = run(mixed.state, { type: "undo", receiptId: mixed.receipt.id }).state;
+  assert.deepEqual(undone.pantry, original.pantry);
+  assert.deepEqual(undone.pilot.stock, original.pilot.stock);
+  assert.deepEqual(undone.pilot.purchaseLots, original.pilot.purchaseLots);
+  rejectsCode(() => run(original, { type: "record_stock_entries", entries: [{ intent: "add", item }, { intent: "set-total", item }] }), "invalid");
+  rejectsCode(() => run(original, { type: "record_stock_entries", entries: [{ intent: "add", item: { ...item, quantity: 0 } }] }), "invalid");
+  assert.equal(original.pantry[0].quantity, 900);
+});

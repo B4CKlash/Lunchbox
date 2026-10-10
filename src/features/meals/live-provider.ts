@@ -17,6 +17,7 @@ import {
   type SuggestMealsRequest,
 } from "@/lib/contracts";
 import { resolveIngredient } from "@/features/pantry/ingredients";
+import { pantryForModel } from "@/features/pantry/stock-projection";
 import { buildShoppingList } from "@/features/planning/shopping";
 import { buildPilotShoppingList } from "@/features/planning/pilot";
 import { AiRuntimeError, generateStructured } from "./ai-runtime";
@@ -49,22 +50,7 @@ const suggestionDraftSchema = z.object({
 type MealContext = ChatMealsRequest & { knownIngredients?: KnownIngredient[]; recentRecipeNames?: string[]; preferredIngredients?: KnownIngredient[] };
 export type LiveProviderOptions = { signal?: AbortSignal; model?: LanguageModel; householdContext?: HouseholdState };
 
-/** Historical exact balances must never masquerade as known current stock. */
-export function pantryForModel(pantry: MealContext["pantry"], household?: HouseholdState) {
-  const stock = household?.pilot?.stock ?? [];
-  const known = pantry.map((item) => {
-    const current = stock.find((entry) => entry.ingredientId === item.id && entry.unit === item.unit);
-    if (!current) return item;
-    const { quantity: _historical, ...identity } = item;
-    void _historical;
-    return { ...identity, status: current.status, ...(current.status === "exact" ? { quantity: current.quantity } : current.status === "out" ? { quantity: 0 } : { quantityKnown: false }) };
-  });
-  const extra = stock.filter((entry) => !pantry.some((item) => item.id === entry.ingredientId && item.unit === entry.unit)).map((entry) => ({
-    id: entry.ingredientId, name: entry.name, unit: entry.unit, status: entry.status,
-    ...(entry.status === "exact" ? { quantity: entry.quantity } : entry.status === "out" ? { quantity: 0 } : { quantityKnown: false }),
-  }));
-  return [...known, ...extra];
-}
+export { pantryForModel } from "@/features/pantry/stock-projection";
 
 
 function preferredPantryItems(context: Pick<MealContext, "pantry" | "preferredIngredients">) {
