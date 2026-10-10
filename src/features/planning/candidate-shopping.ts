@@ -31,8 +31,12 @@ export function previewCandidateShopping(state: HouseholdState, recipe: Recipe, 
   const scoped = { ...current, pilot: { ...current.pilot, shopThrough } };
   const baseline = buildPilotShoppingList(scoped);
   const hypothetical = buildPilotShoppingList({ ...scoped, pilot: { ...scoped.pilot, batches: [...scoped.pilot.batches, batch] } });
-  const candidateChecks = buildPilotShoppingList({ ...scoped, pilot: { ...scoped.pilot, batches: [batch] } }).checks;
-  const relevant = new Set(candidate.ingredients.map((ingredient) => keyFor(ingredient.ingredientId, ingredient.unit)));
+  const contributions = new Map<string, number>();
+  for (const ingredient of candidate.ingredients) {
+    const key = keyFor(ingredient.ingredientId, ingredient.unit);
+    contributions.set(key, (contributions.get(key) ?? 0) + ingredient.quantity * portions / candidate.servings);
+  }
+  const relevant = new Set(contributions.keys());
   const baselineShortages = new Map(baseline.shortages.map((item) => [keyFor(item.ingredientId, item.unit), item.quantity]));
   for (const item of hypothetical.shortages) {
     const key = keyFor(item.ingredientId, item.unit);
@@ -41,10 +45,10 @@ export function previewCandidateShopping(state: HouseholdState, recipe: Recipe, 
     if (quantity > 0) preview.shortages.push({ ingredientId: item.ingredientId, name: item.name, unit: item.unit, quantity });
   }
   for (const check of hypothetical.checks) {
-    const contribution = candidateChecks.find((candidateCheck) => keyFor(candidateCheck.ingredientId, candidateCheck.unit) === keyFor(check.ingredientId, check.unit));
-    if (contribution && contribution.required > 0) preview.checks.push({
+    const contribution = round(contributions.get(keyFor(check.ingredientId, check.unit)) ?? 0);
+    if (contribution > 0) preview.checks.push({
       ingredientId: check.ingredientId, name: check.name, unit: check.unit,
-      required: check.required, candidateRequired: contribution.required,
+      required: check.required, candidateRequired: contribution,
     });
   }
   return preview;
