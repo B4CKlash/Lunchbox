@@ -6,6 +6,7 @@ import { ensurePilot, applyPilotCommand } from "./pilot";
 import { extractExplicitProfileChanges } from "./profile";
 import { rebaseRemoteCommand } from "@/features/pantry/remote-conflicts";
 import { remoteCommandSchema } from "@/features/pantry/remote-protocol";
+import { applyHouseholdAction } from "@/features/meals/workspace-state";
 
 const jobId = "37c631af-22a3-455c-a598-eeb2a1d14ea2";
 const state = () => ensurePilot(createSampleHousehold(), "2026-10-12");
@@ -111,6 +112,25 @@ test("profile result and absolute fact edits cannot rebase over another device's
       command: { kind: "pilot", command: { id: jobId, expectedRevision: 0, operation } } });
     assert.equal(rebaseRemoteCommand(request, 1), null);
   }
+});
+
+test("typing, view changes and cooldowns preserve profile Undo and both transcripts", () => {
+  const initial = state();
+  initial.pilot.session.messages = [{ id: "planning-history", role: "user", text: "An earlier planning message", recipes: [], servings: 2 }];
+  const saved = run(initial, chatOperation(initial));
+  let current = saved.state;
+  for (const action of [
+    { type: "setChatDraft" as const, text: "Keep my next question" },
+    { type: "setWorkspaceMode" as const, mode: "suggestions" as const },
+    { type: "deferAiRequests" as const, until: Date.now() + 60000 },
+    { type: "setWorkspaceMode" as const, mode: "chat" as const },
+  ]) current = applyHouseholdAction(current, action) as typeof current;
+  assert.equal(current.pilot.receipts.find((receipt) => receipt.id === saved.receipt.id)?.undoRevision, current.pilot.revision);
+  const undone = run(current, { type: "undo", receiptId: saved.receipt.id }, "undo-after-typing").state;
+  assert.deepEqual(undone.pilot.profileFacts, []);
+  assert.deepEqual(undone.pilot.session.messages, initial.pilot.session.messages);
+  assert.deepEqual(undone.workspace.chatMessages, saved.state.workspace.chatMessages);
+  assert.equal(undone.workspace.chatDraft, "Keep my next question");
 });
 
 test("member removal cannot orphan a person-scoped profile fact", () => {

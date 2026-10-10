@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Bookmark, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, CookingPot, Leaf, MessageCircle, Plus, Send, ShoppingBasket, Snowflake, Star, Undo2, Users, Utensils } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
+import { ProfileMemory } from "@/components/profile-memory";
 import { LocalPlanningAssistant, type LocalAssistantHandle } from "@/components/local-planning-assistant";
 import { fixtureRecipeForRequest } from "@/features/meals/planning-fixtures";
 import { planningUserMessageAuthor } from "@/features/meals/planning-message-author";
+import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
 import { isPlanningRefresh, planningRefreshFingerprint, planningRefreshSummary, planningResponseChanges, planningResponseCandidates } from "@/features/meals/planning-refresh";
 import type { AiJob } from "@/features/meals/jobs";
 import { addDays, calendarDates } from "@/features/planning/calendar";
@@ -123,6 +125,7 @@ export function PlanningWorkspace() {
     // The transcript and its reviewable proposal are one validated mutation.
     // A rejected proposal must never leave a transcript marker that suppresses retry.
     return run({ type: "receive_planning_result", baseRevision: job.householdRevision, session: nextSession,
+      ...(!automatic && result.profileChanges?.length && job.actorMemberId ? { profileSource: { jobId: job.id, request: job.request.message, actorMemberId: job.actorMemberId, changes: result.profileChanges } } : {}),
       ...(direct && job.actorMemberId ? { directPlacement: { jobId: job.id, request: job.request.message, actorMemberId: job.actorMemberId, change: direct } }
         : changes.length ? { proposal: { id: `local-${job.id}`, title: "Local assistant proposal · review each change", changes } } : {}),
     });
@@ -169,6 +172,19 @@ export function PlanningWorkspace() {
     setBusy(true);
     try {
       const clean = text.trim().slice(0, 2000);
+      const actor = householdId ? currentMemberId : pilot.members[0]?.id;
+      const memoryReply = actor ? explicitProfileReply(state, clean, actor) : null;
+      const profileChanges = actor ? extractExplicitProfileChanges(state, clean, actor) : [];
+      if (memoryReply || profileChanges.length) {
+        if (householdId) { setNotice("Use Local AI to save preferences from this conversation with an authenticated response. Your draft is kept."); return; }
+        const jobId = id();
+        const saved = await run({ type: "receive_planning_result", baseRevision: pilot.revision,
+          session: { ...session, messages: [...session.messages, { id: `job-${jobId}-user`, role: "user", authorMemberId: actor!, text: clean, recipes: [], servings: state.preferences.servings }, { id: `job-${jobId}-assistant`, role: "assistant", source: "demo", text: memoryReply ?? "Your explicit preference can guide future meal ideas. Send your recipe request next.", recipes: [], servings: state.preferences.servings }].slice(-100) as PlanningSession["messages"] },
+          ...(profileChanges.length ? { profileSource: { jobId, request: clean, actorMemberId: actor!, changes: profileChanges } } : {}),
+        });
+        if (saved) clearSubmittedDraft(text);
+        return;
+      }
       let recipes: Recipe[] = [];
       let reply: string;
       let action: PilotOperation | undefined;
@@ -221,6 +237,7 @@ export function PlanningWorkspace() {
     </header>
     <div className={styles.statusBar}><div><div className={styles.statusLabel}><span className={styles.statusDot} /><strong>{assistantMode === "fixture" ? "Fixture planning helper · authored examples" : "Local AI · private Mac worker"}</strong></div><p>{assistantMode === "fixture" ? "Authored examples prove the workflow. Calendar, groceries, and actions are saved household changes." : "Requests run through your household’s Mac worker. Specific meal placements apply with undo; broader plans are reviewed first."}</p></div><div className={styles.modePicker} role="group" aria-label="Assistant mode"><button aria-pressed={assistantMode === "fixture"} onClick={() => setAssistantMode("fixture")}>Fixtures</button><button aria-pressed={assistantMode === "local"} onClick={() => setAssistantMode("local")}>Local AI</button></div></div>
     {notice ? <p className={styles.notice} role="alert">{notice}</p> : null}
+    <ProfileMemory />
     {latestReceipt ? <div className={styles.receipt} role="status"><span><Check size={16} />{latestReceipt.undoneBy ? "Undone: " : ""}{latestReceipt.summary}</span>{latestReceipt.inverse && !latestReceipt.undoneBy ? <button className={styles.smallButton} onClick={() => void run({ type: "undo", receiptId: latestReceipt.id })}><Undo2 size={13} />Undo</button> : null}</div> : null}
     <div className={styles.mobileNav} role="group" aria-label="Planning views">{([{ value: "conversation", label: "Conversation", Icon: MessageCircle }, { value: "calendar", label: "Calendar", Icon: CalendarDays }, { value: "context", label: "Food & shop", Icon: ShoppingBasket }] as const).map(({ value, label, Icon }) => <button key={value} aria-pressed={view === value} onClick={() => setView(value)}><Icon size={15} />{label}</button>)}</div>
     <div className={styles.columns}>

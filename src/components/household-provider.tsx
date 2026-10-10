@@ -24,6 +24,7 @@ type HouseholdContextValue = {
   planningComposer: PlanningComposer; setPlanningComposer: (patch: Partial<Pick<PlanningComposer, "draft" | "mode">>) => void;
   setProposalReview: (review: CachedProposalReview) => void;
   dispatchPilot: (operation: PilotOperation) => Promise<EditResult>;
+  flushHouseholdChanges: () => Promise<HouseholdState>;
   createSharedHousehold: (name: string) => Promise<EditResult>;
   joinHousehold: (token: string) => Promise<EditResult>;
   refreshHousehold: () => Promise<void>; retryPending: () => Promise<void>; discardPending: () => void;
@@ -286,7 +287,8 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     // The caller received this context method with this rendered snapshot. A
     // delayed UI closure must not bless its old full-session/pantry payload by
     // reading a newer mutable ref when it finally dispatches.
-    const originRevision = state.pilot?.revision ?? 0;
+    const originRevision = isPilot && (operation.type === "receive_recipe_chat_result" || operation.type === "receive_planning_result")
+      ? operation.baseRevision : state.pilot?.revision ?? 0;
     const work = queue.current.then(async (): Promise<EditResult> => {
       if (actionEpoch !== epoch.current) return { ok: false, error: "Account changed. Try your edit again." };
       if (pending.current) { const error = "Resolve the unsaved change before making another edit."; setUpdateError(error); return { ok: false, error }; }
@@ -303,6 +305,10 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
           return await sendPending({ householdId: remote.current.householdId, expectedRevision: remote.current.revision, commandId,
             command: mutation });
         }
+        // A local receipt is a saved receipt only after the storage adapter
+        // accepts the complete snapshot. Keep the old state/draft on failure.
+        try { saveHousehold(window.localStorage, next, { ownerId: owner.current, householdId: null, planningComposer: composer.current }); }
+        catch { const message = "This browser could not save the change. Your previous kitchen and draft are kept. Free browser storage, then retry."; setStorageError(message); throw new Error(message); }
         publish(next); setUpdateError(null); return { ok: true };
       } catch (error) { const message = messageFor(error); setUpdateError(message); return { ok: false, error: message }; }
     });
@@ -355,6 +361,13 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
       persist();
     },
     dispatchPilot: (operation) => edit(operation, true),
+    flushHouseholdChanges: async () => {
+      const startingEpoch = epoch.current;
+      await queue.current;
+      if (startingEpoch !== epoch.current || accountId !== owner.current || householdId !== (remote.current?.householdId ?? null)) throw new Error("The account or kitchen changed. Send your message again.");
+      if (pending.current || busy.current) throw new Error("Resolve the unsaved household change, then retry your message.");
+      return structuredClone(stateRef.current);
+    },
     createSharedHousehold: (name) => transition(() => createRemoteHousehold(name, stateRef.current)),
     joinHousehold: (token) => transition(() => joinRemoteHousehold(token)),
     refreshHousehold,
