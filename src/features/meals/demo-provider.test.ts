@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { suggestMealsResponseSchema } from "@/lib/contracts";
+import { suggestMealsResponseSchema, type ProfileFactValue } from "@/lib/contracts";
 import { createSampleHousehold } from "@/features/pantry/seed";
+import { ensurePilot } from "@/features/planning/pilot";
+import { profileFactId } from "@/features/planning/profile";
+import { buildRecommendationContext } from "./recommendation-context";
 import { suggestMeals } from "./demo-provider";
 
 test("sample provider returns structured recipes and prioritizes available use-soon ingredients", async () => {
@@ -94,4 +97,54 @@ test("pescatarian and flexitarian preferences remain compatible with plant-based
   const input = createSampleHousehold();
   input.preferences.dietaryNeeds = ["pescatarian", "flexitarian"];
   assert.equal((await suggestMeals(input)).recipes.length, 3);
+});
+
+function withFacts(...values: ProfileFactValue[]) {
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  state.pilot.profileFacts = values.map((value) => ({ id: profileFactId(value), value,
+    source: { kind: "manual", sourceText: "Authored preference", recordedAt: "2026-10-12T00:00:00.000Z", commandId: "setup" } }));
+  return state;
+}
+
+test("demo recommendations apply typed dislikes only to the selected people", async () => {
+  const state = withFacts();
+  const [first, second] = state.pilot.members;
+  state.pilot.session.memberIds = [first.id];
+  const value: ProfileFactValue = { kind: "food-dislike", scope: { kind: "member", memberId: second.id },
+    target: { kind: "ingredient", ingredientId: "tomatoes", name: "Tomatoes" }, disliked: true };
+  state.pilot.profileFacts = withFacts(value).pilot.profileFacts;
+  assert.ok((await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state, first.id) })).recipes.some((recipe) => recipe.id === "r1"));
+  state.pilot.session.memberIds.push(second.id);
+  assert.ok(!(await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state, first.id) })).recipes.some((recipe) => recipe.id === "r1"));
+  state.pilot.profileFacts = withFacts({ kind: "food-dislike", scope: { kind: "household" }, target: { kind: "category", category: "vegetables" }, disliked: true }).pilot.profileFacts;
+  assert.deepEqual((await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state, first.id) })).recipes, []);
+});
+
+test("typed corrections override only the same scope's legacy dislike and retain allergies", async () => {
+  const state = withFacts({ kind: "food-dislike", scope: { kind: "household" },
+    target: { kind: "ingredient", ingredientId: "tomatoes", name: "Tomatoes" }, disliked: false });
+  state.preferences.dislikedIngredients = ["tomatoes"];
+  assert.ok((await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state) })).recipes.some((recipe) => recipe.id === "r1"));
+  state.preferences.allergies = ["tomatoes"];
+  assert.ok(!(await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state) })).recipes.some((recipe) => recipe.id === "r1"));
+  state.preferences.allergies = [];
+  state.pilot.profileFacts[0].value = { ...state.pilot.profileFacts[0].value, scope: { kind: "member", memberId: state.pilot.members[0].id } } as ProfileFactValue;
+  assert.ok(!(await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state) })).recipes.some((recipe) => recipe.id === "r1"));
+});
+
+test("demo excludes unavailable oven recipes but leaves unknown equipment eligible", async () => {
+  const state = withFacts({ kind: "equipment", equipment: "oven", availability: "unavailable" });
+  assert.ok(!(await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state) })).recipes.some((recipe) => recipe.id === "r2"));
+  state.pilot.profileFacts = withFacts({ kind: "equipment", equipment: "oven", availability: "unknown" }).pilot.profileFacts;
+  assert.ok((await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state) })).recipes.some((recipe) => recipe.id === "r2"));
+});
+
+test("current stock projection replaces historical quantities in demo ranking", async () => {
+  const state = withFacts();
+  state.pantry = state.pantry.map((item) => ({ ...item, useSoon: item.id === "tomatoes" }));
+  assert.equal((await suggestMeals(state)).recipes[0].id, "r1");
+  state.pilot.stock = [{ ingredientId: "tomatoes", name: "Tomatoes", unit: "g", status: "some", useSoon: true }];
+  const before = structuredClone(state);
+  assert.equal((await suggestMeals({ ...state, recommendationContext: buildRecommendationContext(state) })).recipes[0].id, "r3");
+  assert.deepEqual(state, before);
 });

@@ -36,8 +36,8 @@ test("suggestion API rejects malformed and invalid input", async () => {
     ).status,
     400,
   );
-  assert.equal((await POST(request("x".repeat(100001)))).status, 413);
-  assert.equal((await POST(request("🌱".repeat(25001)))).status, 413);
+  assert.equal((await POST(request("x".repeat(1000001)))).status, 413);
+  assert.equal((await POST(request("🌱".repeat(250001)))).status, 413);
 });
 
 test("suggestion API passes known identities, pantry priorities, recent dishes, direction, and cancellation to the provider", async () => {

@@ -505,9 +505,34 @@ export const householdStateSchema = z.object({
   // Additive migration: existing v1 saves retain their kitchen and plan.
   workspace: recipeWorkspaceSchema.prefault({}),
 });
+// Food context crosses provider boundaries without household commands, source
+// provenance, receipts, purchase history, or conversation transcripts.
+export const recommendationPantryItemSchema = pantryItemSchema.omit({ quantity: true }).extend({
+  quantity: pantryItemSchema.shape.quantity.optional(),
+  status: z.enum(["exact", "some", "low", "out"]).optional(),
+  quantityKnown: z.literal(false).optional(),
+}).refine((item) => item.status === "some" || item.status === "low" ? item.quantity === undefined && item.quantityKnown === false
+  : item.status === "out" ? item.quantity === 0 : item.quantity !== undefined, { message: "Projected pantry quantities must preserve their current certainty." });
+export const recommendationContextSchema = z.object({
+  actorMemberId: pilotIdSchema.optional(),
+  audienceIds: z.array(pilotIdSchema).max(12),
+  members: z.array(householdMemberSchema).max(12),
+  preferences: preferencesSchema,
+  profileFacts: z.array(profileFactValueSchema).max(200),
+  equipment: z.array(z.string().trim().min(1).max(80)).max(30),
+  sessionConstraints: z.string().max(2000),
+  pantry: z.array(recommendationPantryItemSchema).max(400),
+  stock: z.array(flexibleStockSchema).max(200),
+  stockChecks: z.array(stockCheckSchema).max(200),
+  packageStock: z.array(packageStockSchema).max(1000),
+  feedback: z.array(recipeFeedbackSchema).max(1000),
+  favorites: z.array(recipeSchema).max(20),
+  rejectedRecipeIds: z.array(pilotIdSchema).max(1000),
+});
 export const suggestMealsRequestSchema = z.object({
   recommendationKey: z.string().max(200000).optional(),
   recommendationActorId: z.string().max(160).optional(),
+  recommendationContext: recommendationContextSchema.optional(),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   direction: directionSchema.optional(),
@@ -522,6 +547,7 @@ export const suggestMealsResponseSchema = z.object({
   explanation: z.string().min(1).max(2000).optional(),
 });
 export const chatMealsRequestSchema = z.object({
+  recommendationContext: recommendationContextSchema.optional(),
   pantry: z.array(pantryItemSchema).max(200),
   preferences: preferencesSchema,
   meals: z.array(plannedMealSchema).max(50),
@@ -610,6 +636,7 @@ export type ShoppingItem = {
 };
 
 export type HouseholdMember = z.infer<typeof householdMemberSchema>;
+export type RecommendationContext = z.infer<typeof recommendationContextSchema>;
 export type ProfileScope = z.infer<typeof profileScopeSchema>;
 export type ProfileFoodTarget = z.infer<typeof profileFoodTargetSchema>;
 export type ProfileFactValue = z.infer<typeof profileFactValueSchema>;
