@@ -29,7 +29,11 @@ HP aliases map to Linear's B4C identifiers below. Earlier PR #23 and local evide
 
 ## Release status
 
-The baseline is merged on main. Sequential follow-ups start with [PR #26](https://github.com/B4CKlash/Lunchbox/pull/26) (stock truth), [PR #27](https://github.com/B4CKlash/Lunchbox/pull/27) (shared context), and [PR #28](https://github.com/B4CKlash/Lunchbox/pull/28) (profile learning). The historical gate evidence below predates those follow-ups; their dated evidence is linked separately. No production household enablement is implied by a merged scaffold or passing local checks.
+The baseline is merged on main. Sequential follow-ups start with [PR #26](https://github.com/B4CKlash/Lunchbox/pull/26) (stock truth), [PR #27](https://github.com/B4CKlash/Lunchbox/pull/27) (shared context), [PR #28](https://github.com/B4CKlash/Lunchbox/pull/28) (profile learning), and [PR #29](https://github.com/B4CKlash/Lunchbox/pull/29) (package stock and complete context transport). The historical gate evidence below predates those follow-ups; their dated evidence is linked separately. No production household enablement is implied by a merged scaffold or passing local checks.
+
+The 2026-10-10 follow-up source passes 435 tests (one optional integration skip), the production build and 16 separate local database checks. Desktop/mobile natural entry, profile learning and Undo are verified; the expanded model gate passed 63/66 (95.5%) overall and 39/40 (97.5%) original scenarios, with zero accepted unsupported claims, invalid proposed changes or input mutations and 19 unchanged source hashes. Category-dislike generation was safely rejected in both runs; one no-date-consumption run was also rejected by the claim guard. These completion limits remain recorded. See [the dated follow-up evidence](FLEXIBLE_KITCHEN_KNOWLEDGE_VERIFICATION_2026-10-10.md). PR #29 source checks and both preview builds pass; the sequential PRs are ready for cross-owner review, with HP-10 unchanged.
+
+### Historical baseline evidence
 
 | Gate | Evidence / status |
 |---|---|
