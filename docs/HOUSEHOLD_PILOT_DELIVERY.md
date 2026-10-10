@@ -1,10 +1,10 @@
 # Household Pilot delivery tracker
 
-The accepted objective is [HOUSEHOLD_PILOT_OBJECTIVE.md](HOUSEHOLD_PILOT_OBJECTIVE.md). Work starts from remote main `7c9c759`; continuous recipe-feed PR #22 remains separate. This is an integration-owned change coordinating contracts, storage, planning, AI and frontend. Existing recipe imports, canonical ingredient resolution and provenance remain part of the app.
+The accepted objective is [HOUSEHOLD_PILOT_OBJECTIVE.md](HOUSEHOLD_PILOT_OBJECTIVE.md). The pilot, recipe feed and design work are merged through PR #25 at main `1622bda` (2026-10-10), including PRs #22–24. The profile/package follow-up coordinates contracts, storage, planning, AI and frontend. Existing recipe imports, canonical ingredient resolution and provenance remain part of the app.
 
 Linear project: [**LunchBox — Household Pilot**](https://linear.app/b4cklash/project/lunchbox-household-pilot-08e05d634540) (`P-B4C-4`, B4cklash team). Published and read back on 2026-10-09 after reauthentication: all five milestones, ten issues, 19 dependency links, and PR #23 attachments were verified. The accepted objective remains the original snapshot; its Linear blocker is now historical.
 
-HP aliases map to Linear's B4C identifiers below. Eight implemented and locally verified slices are **In Review** while PR #23 remains draft. HP-04 and HP-10 are **In Progress** for hosted setup and real household acceptance. Role ownership is recorded in each issue; actual assignees remain unassigned until confirmed. Dependencies preserve implementation/release sequencing even where dependent work has already been proved locally.
+HP aliases map to Linear's B4C identifiers below. Earlier PR #23 and local evidence are historical records of the merged baseline. Follow-up checklists remain on HP-06–HP-09; HP-10 retains the real household acceptance gate. Role ownership is recorded in each issue; actual assignees remain unassigned until confirmed. Dependencies preserve implementation/release sequencing even where dependent work has already been proved locally.
 
 | Milestone | Linear issues |
 |---|---|
@@ -29,7 +29,7 @@ HP aliases map to Linear's B4C identifiers below. Eight implemented and locally 
 
 ## Release status
 
-Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR #23](https://github.com/B4CKlash/Lunchbox/pull/23) coordinates the cross-owner integration. Every Linear issue above has this PR attached, role ownership, acceptance examples, evidence, and its dependencies. No production database migration or pilot enablement has occurred.
+The baseline is merged on main. Sequential follow-ups start with [PR #26](https://github.com/B4CKlash/Lunchbox/pull/26) (stock truth), [PR #27](https://github.com/B4CKlash/Lunchbox/pull/27) (shared context), and [PR #28](https://github.com/B4CKlash/Lunchbox/pull/28) (profile learning). The historical gate evidence below predates those follow-ups; their dated evidence is linked separately. No production household enablement is implied by a merged scaffold or passing local checks.
 
 | Gate | Evidence / status |
 |---|---|
@@ -42,7 +42,7 @@ Implementation is on `codex/household-pilot` in an isolated worktree; [draft PR 
 | Linear roadmap | Published and verified 2026-10-09: project P-B4C-4, five milestones, B4C-76–B4C-85, 19 dependency links and ten PR #23 attachments. Hosted setup and real-household acceptance remain open; publishing the roadmap does not complete those gates. |
 | Real household cycle | Pending household participation. Use [the pilot run guide](HOUSEHOLD_PILOT_RUN.md) after hosted development setup; this cannot be replaced by fixture tests. |
 
-Production stays gated until hosted verification and the requested real planning, shopping and cooking cycle are complete. The continuous recipe-feed PR remains independent.
+Production stays gated until hosted verification and the requested real planning, shopping and cooking cycle are complete. The continuous recipe feed is part of the merged baseline.
 
 ## Additional local browser evidence
 
