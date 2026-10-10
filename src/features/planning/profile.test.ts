@@ -128,6 +128,90 @@ test("a known ingredient becoming ambiguous requires clarification before correc
   ]);
 });
 
+test("known targets keep their identity after the last reference disappears and the same ID returns", () => {
+  for (const pronoun of ["I", "We"]) {
+    const initial = state();
+    const known = householdStateSchema.parse({ ...initial, pantry: [...initial.pantry,
+      { id: "saffron-1", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+    ] });
+    const dislike = extractExplicitProfileChanges(known, `${pronoun} dislike saffron.`, "you")[0];
+    const saved = applyPilotCommand(known, { id: "save-known", expectedRevision: 0, operation: dislike }).state;
+    const recipe = { id: "saved-saffron", name: "Saffron rice", description: "An authored example", servings: 2, minutes: 20,
+      ingredients: [{ ingredientId: "saffron-1", name: "Saffron", quantity: 1, unit: "g" as const }], steps: ["Cook the rice with saffron."] };
+    const recipeOnly = householdStateSchema.parse({ ...saved, pantry: saved.pantry.filter((item) => item.id !== "saffron-1"),
+      workspace: { ...saved.workspace, recipeBox: [{ recipe, source: "demo" }] } });
+    const unknown = householdStateSchema.parse({ ...recipeOnly, workspace: { ...recipeOnly.workspace, recipeBox: [] } });
+    const restored = householdStateSchema.parse({ ...unknown, pantry: known.pantry });
+    for (const current of [recipeOnly, unknown, restored]) {
+      const before = structuredClone(current);
+      const correction = extractExplicitProfileChanges(current, `${pronoun} no longer dislike the SAFFRON.`, "you")[0];
+      assert.equal(correction.type, "upsert_profile_fact");
+      if (correction.type === "upsert_profile_fact") assert.equal(profileFactId(correction.value), saved.pilot.profileFacts[0].id);
+      const corrected = applyPilotCommand(current, { id: "correct-known", expectedRevision: 1, operation: correction }).state;
+      assert.equal(corrected.pilot.profileFacts.length, 1);
+      assert.equal(corrected.pilot.profileFacts[0].value.kind === "food-dislike" && corrected.pilot.profileFacts[0].value.disliked, false);
+      const forget = extractExplicitProfileChanges(current, `Forget that ${pronoun.toLowerCase()} dislike saffron.`, "you");
+      assert.equal(forget.length, 1);
+      assert.equal(forget[0].type === "remove_profile_fact" && forget[0].factId, saved.pilot.profileFacts[0].id);
+      const forgotten = applyPilotCommand(current, { id: "forget-known", expectedRevision: 1, operation: forget[0] }).state;
+      assert.deepEqual(forgotten.pilot.profileFacts, []);
+      assert.deepEqual(current, before);
+    }
+  }
+});
+
+test("a different restored ID or multiple prior literal targets require clarification without guessing", () => {
+  for (const pronoun of ["I", "We"]) {
+    const initial = state();
+    const known = householdStateSchema.parse({ ...initial, pantry: [...initial.pantry,
+      { id: "saffron-1", name: "Saffron", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+    ] });
+    const dislike = extractExplicitProfileChanges(known, `${pronoun} dislike saffron.`, "you")[0];
+    const saved = applyPilotCommand(known, { id: "save-original", expectedRevision: 0, operation: dislike }).state;
+    const replaced = householdStateSchema.parse({ ...saved, pantry: saved.pantry.map((item) => item.id === "saffron-1" ? { ...item, id: "saffron-2" } : item) });
+    const scope = pronoun === "I" ? { kind: "member" as const, memberId: "you" } : { kind: "household" as const };
+    const multiple = applyPilotCommand(saved, { id: "second-old-target", expectedRevision: 1, operation: {
+      type: "upsert_profile_fact", sourceText: "Earlier explicitly selected target", value: { kind: "food-dislike", scope,
+        target: { kind: "ingredient", ingredientId: "saffron-2", name: "Saffron" }, disliked: true },
+    } }).state;
+    const lostMultiple = householdStateSchema.parse({ ...multiple, pantry: multiple.pantry.filter((item) => item.id !== "saffron-1") });
+    for (const current of [replaced, lostMultiple]) {
+      const before = structuredClone(current);
+      for (const message of [`${pronoun} dislike saffron.`, `${pronoun} no longer dislike saffron.`, `Forget that ${pronoun.toLowerCase()} dislike saffron.`]) {
+        assert.deepEqual(extractExplicitProfileChanges(current, message, "you"), []);
+        assert.match(explicitProfileReply(current, message, "you") ?? "", /Please clarify/);
+        assert.deepEqual(current, before);
+      }
+    }
+  }
+});
+
+test("literal recovery never guesses aliases or confuses food categories with similarly named ingredients", () => {
+  const initial = state();
+  const known = householdStateSchema.parse({ ...initial, pantry: [...initial.pantry,
+    { id: "saffron-threads", name: "Saffron threads", unit: "g", quantity: 1, location: "Cupboard", useSoon: false },
+  ] });
+  const dislike = extractExplicitProfileChanges(known, "I dislike saffron threads.", "you")[0];
+  const saved = applyPilotCommand(known, { id: "exact-name", expectedRevision: 0, operation: dislike }).state;
+  const lost = householdStateSchema.parse({ ...saved, pantry: saved.pantry.filter((item) => item.id !== "saffron-threads") });
+  assert.deepEqual(extractExplicitProfileChanges(lost, "Forget that I dislike saffron.", "you"), []);
+  assert.equal(extractExplicitProfileChanges(lost, "Forget that I dislike saffron threads.", "you")[0]?.type, "remove_profile_fact");
+  const mushroom = extractExplicitProfileChanges(lost, "I dislike mushrooms.", "you")[0];
+  const withMushroom = applyPilotCommand(lost, { id: "canonical-alias", expectedRevision: 1, operation: mushroom }).state;
+  assert.equal(extractExplicitProfileChanges(withMushroom, "Forget that I dislike mushroom.", "you")[0]?.type, "remove_profile_fact");
+
+  const withIngredient = applyPilotCommand(lost, { id: "named-fruit", expectedRevision: 1, operation: { type: "upsert_profile_fact", sourceText: "Explicit ingredient choice",
+    value: { kind: "food-dislike", scope: { kind: "member", memberId: "you" }, target: { kind: "ingredient", ingredientId: "custom-fruit", name: "Fruit" }, disliked: true },
+  } }).state;
+  const category = extractExplicitProfileChanges(withIngredient, "I dislike fruits.", "you")[0];
+  assert.equal(category.type === "upsert_profile_fact" && category.value.kind === "food-dislike" && category.value.target.kind, "category");
+  const both = applyPilotCommand(withIngredient, { id: "fruit-category", expectedRevision: 2, operation: category }).state;
+  const forgetCategory = extractExplicitProfileChanges(both, "Forget that I dislike fruit.", "you")[0];
+  const after = applyPilotCommand(both, { id: "forget-category", expectedRevision: 3, operation: forgetCategory }).state;
+  assert.ok(after.pilot.profileFacts.some((fact) => fact.value.kind === "food-dislike" && fact.value.target.kind === "ingredient" && fact.value.target.ingredientId === "custom-fruit"));
+  assert.ok(!after.pilot.profileFacts.some((fact) => fact.value.kind === "food-dislike" && fact.value.target.kind === "category"));
+});
+
 test("older snapshots and receipt inverses default profile facts without resetting household data", () => {
   const initial = state();
   const changed = applyPilotCommand(initial, { id: "change", expectedRevision: 0, operation: { type: "set_shop_through", date: "2026-10-22" } }).state;
