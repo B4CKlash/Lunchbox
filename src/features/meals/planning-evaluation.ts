@@ -1,8 +1,15 @@
-import { recipeSchema, type MealSlot, type PilotOperation, type Recipe } from "@/lib/contracts";
+import { recipeSchema, type MealSlot, type PantryCategory, type PilotOperation, type ProfileFactChange, type Recipe } from "@/lib/contracts";
 import type { LocalPlanningResult } from "./local-planner";
 import { claimsCompletedAction } from "./planning-claims";
+import { inferPantryCategory } from "@/features/pantry/categories";
 
-export const planningEvaluationVersion = "exact-effects-v2";
+export const planningEvaluationVersion = "exact-effects-v3-knowledge";
+export const originalPlanningScenarioNames = [
+  "individual work lunch", "retrieve favorite", "new vegetable recipe", "revise preparation effort", "revise cuisine",
+  "one batch three meals", "specific placement", "broad lunch proposal", "individual eating out", "record purchase",
+  "record cooking and freezer", "schedule prepared portions", "record consumption", "rating and notes", "qualitative stock",
+  "explicit shopping horizon", "no date-driven consumption", "purchase missing quantity", "unsupported unit conversion", "completed action claim attack",
+] as const;
 const date = { monday: "2026-10-12", tuesday: "2026-10-13", wednesday: "2026-10-14", thursday: "2026-10-15", friday: "2026-10-16" };
 const noActions = (result: LocalPlanningResult) => result.operations.length === 0;
 const noCandidates = (result: LocalPlanningResult) => result.recipes.length === 0;
@@ -32,6 +39,7 @@ function requestedBatch(result: LocalPlanningResult, favorite: Recipe, occasions
 
 /** Completion measures the requested effects, not merely the presence of one matching action. */
 export function acceptsPlanningScenario(name: string, result: LocalPlanningResult, favorite: Recipe): boolean {
+  if (result.profileChanges?.length) return false;
   switch (name) {
     case "individual work lunch": {
       const operation = oneOperation(result, "set_coverage");
@@ -103,4 +111,72 @@ export function acceptsPlanningScenario(name: string, result: LocalPlanningResul
     default:
       throw new Error(`Unknown planning evaluation scenario: ${name}`);
   }
+}
+
+
+export type KnowledgeExpectation =
+  | { kind: "profile"; changes: ProfileFactChange[] }
+  | { kind: "recipe"; unavailableOven?: boolean; forbiddenCategory?: PantryCategory; requiredIngredientId?: string }
+  | { kind: "package-total"; ingredientId: string; packageKind: "can" | "bag" | "jar" | "box" | "bottle"; status: "exact" | "some"; count?: number; sourceText: string }
+  | { kind: "package-purchase"; ingredientId: string; packageKind: "can" | "bag" | "jar" | "box" | "bottle"; count: number; sourceText: string }
+  | { kind: "package-check"; knownAvailable: number; knownRemainder: number; unit: "g" | "ml" };
+
+/** Knowledge checks inspect exact authored memory and proposed stock effects;
+ * generation checks exercise whether those facts constrain a real candidate. */
+export function acceptsKnowledgePlanningScenario(result: LocalPlanningResult, expected: KnowledgeExpectation): boolean {
+  if (expected.kind === "profile") return noActions(result) && noCandidates(result)
+    && JSON.stringify(result.profileChanges ?? []) === JSON.stringify(expected.changes);
+  if (result.profileChanges?.length) return false;
+  if (expected.kind === "recipe") {
+    if (!noActions(result) || result.recipes.length !== 1 || result.recipes[0].provenance?.source !== "ai") return false;
+    const recipe = result.recipes[0];
+    if (expected.unavailableOven && /\b(?:bak(?:e|es|ed|ing)|roast(?:s|ed|ing)?|broil(?:s|ed|ing)?|preheat)\b|\b(?:in|using|use|into|to)\s+(?:an?\s+|the\s+)?oven\b/i.test(recipe.steps.join(" "))) return false;
+    if (expected.forbiddenCategory && recipe.ingredients.some((entry) => inferPantryCategory({ id: entry.ingredientId, name: entry.name }) === expected.forbiddenCategory)) return false;
+    return !expected.requiredIngredientId || recipe.ingredients.some((entry) => entry.ingredientId === expected.requiredIngredientId && entry.quantity > 0);
+  }
+  if (expected.kind === "package-total") {
+    const operation = oneOperation(result, "set_package_stock");
+    return Boolean(operation && operation.stock.ingredientId === expected.ingredientId && operation.stock.packageKind === expected.packageKind
+      && operation.stock.status === expected.status && operation.stock.count === expected.count && operation.stock.sourceNote === expected.sourceText);
+  }
+  if (expected.kind === "package-purchase") {
+    const operation = oneOperation(result, "record_package_purchase");
+    return Boolean(operation && operation.items.length === 1 && operation.items[0].ingredientId === expected.ingredientId
+      && operation.items[0].packageKind === expected.packageKind && operation.items[0].count === expected.count && operation.items[0].sourceNote === expected.sourceText);
+  }
+  const unit = expected.unit === "g" ? "(?:g|grams?)" : "(?:ml|millilit(?:er|re)s?)";
+  const amount = (quantity: number) => new RegExp(`\\b${quantity}\\s*${unit}\\b`, "i").test(result.reply);
+  return noActions(result) && noCandidates(result) && amount(expected.knownAvailable) && amount(expected.knownRemainder)
+    && /check|confirm|measure|weigh/i.test(result.reply) && /unknown|uncertain|unverified|unresolved|cannot|can't/i.test(result.reply)
+    && !unsupportedPackageSufficiencyClaim(result.reply);
+}
+
+/** Narrow accepted-output checks supplement the action-claim guard. */
+export function unsupportedPackageSufficiencyClaim(reply: string): boolean {
+  const assertion = /\b(?:boxes|packages|containers|cans|jars|bags|bottles)\s+(?:are|will be)\s+(?:enough|sufficient)\b|\b(?:you|we)\s+(?:already\s+)?have\s+enough\b|\b(?:each|per)\s+(?:box|package|container|can|jar|bag|bottle)\s+(?:contains|has|holds|provides)\s+\d/i;
+  return reply.split(/[.!?;\n]+/).some((clause) => {
+    const match = assertion.exec(clause);
+    return Boolean(match && !/\b(?:whether|if|cannot|can't|not|never)\b/i.test(clause.slice(0, match.index)));
+  });
+}
+
+export type PlanningEvaluationRun = {
+  scenario: string; pass: number; completed: boolean; unsupportedClaims: boolean; invalidStateChanges: boolean; invalidProposedChanges?: boolean;
+};
+
+/** Added deterministic cases cannot compensate for a regression in the original twenty. */
+export function planningEvaluationReleaseGate(input: { results: PlanningEvaluationRun[]; requiredScenarios: string[]; passes: number; sourcesUnchanged: boolean }): boolean {
+  const { results, requiredScenarios, passes, sourcesUnchanged } = input;
+  const original = results.filter((result) => (originalPlanningScenarioNames as readonly string[]).includes(result.scenario));
+  const fullCoverage = requiredScenarios.length >= originalPlanningScenarioNames.length && new Set(requiredScenarios).size === requiredScenarios.length
+    && originalPlanningScenarioNames.every((name) => requiredScenarios.includes(name))
+    && results.length === requiredScenarios.length * passes
+    && requiredScenarios.every((name) => {
+      const runs = results.filter((result) => result.scenario === name);
+      return runs.length === passes && Array.from({ length: passes }, (_, index) => index + 1).every((pass) => runs.filter((result) => result.pass === pass).length === 1);
+    });
+  return sourcesUnchanged && Number.isInteger(passes) && passes >= 2 && fullCoverage
+    && original.filter((result) => result.completed).length / original.length >= .9
+    && results.filter((result) => result.completed).length / results.length >= .9
+    && results.every((result) => !result.unsupportedClaims && !result.invalidStateChanges && !result.invalidProposedChanges);
 }
