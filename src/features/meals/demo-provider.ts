@@ -109,6 +109,11 @@ const RECIPES: Recipe[] = [
   },
 ];
 
+/** Independent, honestly labeled examples for the manual planning workspace. */
+export function demoRecipeIdeas(): Recipe[] {
+  return RECIPES.map((recipe) => ({ ...structuredClone(recipe), provenance: { source: "demo" } }));
+}
+
 type RecipeProfile = {
   dietary: DietaryNeed[];
   goals: MealGoal[];

@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, CookingPot, Leaf, MessageCircle, Plus, Send, ShoppingBasket, Snowflake, Star, Undo2, Users, Utensils } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, CookingPot, Leaf, MessageCircle, RefreshCw, Send, ShoppingBasket, Snowflake, Star, Undo2, Users, Utensils } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { ProfileMemory } from "@/components/profile-memory";
 import { LocalPlanningAssistant, type LocalAssistantHandle } from "@/components/local-planning-assistant";
+import { RecipeServingPlan } from "@/components/recipe-serving-plan";
+import { buildRecipeIdeas, recipeIdeaFit } from "@/features/planning/recipe-ideas";
 import { fixtureRecipeForRequest } from "@/features/meals/planning-fixtures";
 import { buildRecommendationContext, recommendationContextForMessage } from "@/features/meals/recommendation-context";
+import { recipeFitsRecommendationContext } from "@/features/meals/recommendation-constraints";
 import { planningUserMessageAuthor } from "@/features/meals/planning-message-author";
 import { explicitProfileReply, extractExplicitProfileChanges } from "@/features/planning/profile";
 import { isPlanningRefresh, planningRefreshFingerprint, planningRefreshSummary, planningResponseChanges, planningResponseCandidates } from "@/features/meals/planning-refresh";
@@ -61,10 +64,24 @@ function describeChange(change: PilotChange, state: HouseholdState) {
 }
 
 export function PlanningWorkspace() {
-  const { state, dispatchPilot, saveRecipe, householdId, currentMemberId, planningComposer, setPlanningComposer, storageError } = useHousehold();
+  const { state, dispatchPilot, saveRecipe, householdId, currentMemberId, planningComposer, setPlanningComposer, storageError, inventoryExperiment } = useHousehold();
   const pilot = state.pilot!;
   const session = pilot.session;
-  const [view, setView] = useState<"conversation" | "calendar" | "context">("conversation");
+  const journey = planningComposer.journey ?? { stage: "ideas" as const, shortlist: [] };
+  const stage = journey.stage;
+  const stageContent = useRef<HTMLDivElement>(null);
+  const previousStage = useRef(stage);
+  const conversation = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (previousStage.current !== stage) {
+      previousStage.current = stage;
+      stageContent.current?.focus({ preventScroll: true });
+      stageContent.current?.scrollIntoView({ block: "start" });
+    }
+  }, [stage]);
+  const setStage = (next: typeof journey.stage) => setPlanningComposer((current) => ({ journey: { shortlist: current.journey?.shortlist ?? [], stage: next } }));
+  const setView = (next: "conversation" | "calendar" | "context") => setStage(next === "calendar" ? "calendar" : next === "context" ? "recipe" : "ideas");
+  const shortlist = journey.shortlist;
   const draft = planningComposer.draft;
   const draftRef = useRef(draft);
   useEffect(() => { draftRef.current = draft; }, [draft]);
@@ -72,7 +89,7 @@ export function PlanningWorkspace() {
   const clearSubmittedDraft = (submitted: string) => { if (draftRef.current === submitted) setDraft(""); };
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const assistantMode = planningComposer.mode;
+  const assistantMode = inventoryExperiment ? "fixture" : planningComposer.mode;
   const setAssistantMode = (mode: "fixture" | "local") => setPlanningComposer({ mode });
   const sending = useRef(false);
   const rejecting = useRef(false);
@@ -80,7 +97,20 @@ export function PlanningWorkspace() {
   const dates = calendarDates(session.startDate, session.days);
   const focusDate = session.focusDate ?? session.startDate;
   const focusSlot = session.focusSlot ?? "lunch";
-  const focusedRecipe = session.candidates.find((recipe) => recipe.id === session.focusedRecipeId && !session.rejectedRecipeIds.includes(recipe.id));
+  const focusedRecipe = session.candidates.find((recipe) => recipe.id === session.focusedRecipeId && !session.rejectedRecipeIds.includes(recipe.id))
+    ?? shortlist.find((recipe) => recipe.id === session.focusedRecipeId);
+  const ideas = buildRecipeIdeas(state, currentMemberId ?? undefined);
+  const currentContext = buildRecommendationContext(state, currentMemberId ?? undefined);
+  const focusedRecipeFits = !focusedRecipe || recipeFitsRecommendationContext(focusedRecipe, currentContext);
+  const toggleShortlist = (recipe: Recipe) => {
+    const included = shortlist.some((entry) => entry.id === recipe.id);
+    if (!included && shortlist.length >= 10) { setNotice("Keep up to 10 recipes here. Remove one before adding another."); return; }
+    setPlanningComposer((current) => {
+      const latest = current.journey ?? { stage: "ideas" as const, shortlist: [] };
+      const exists = latest.shortlist.some((entry) => entry.id === recipe.id);
+      return { journey: { ...latest, shortlist: exists ? latest.shortlist.filter((entry) => entry.id !== recipe.id) : latest.shortlist.length < 10 ? [...latest.shortlist, recipe] : latest.shortlist } };
+    });
+  };
   const recipeIsSaved = state.workspace.recipeBox.some((entry) => entry.recipe.id === focusedRecipe?.id);
   const focusCoverage = getMealCoverage(state, focusDate, focusSlot);
   const focusedMembers = pilot.members.filter((member) => session.memberIds.includes(member.id));
@@ -139,7 +169,7 @@ export function PlanningWorkspace() {
     const candidates = [...session.candidates.filter((entry) => entry.id !== recipe.id), recipe].slice(-30);
     if (await setSession({ candidates, focusedRecipeId: recipe.id, rejectedRecipeIds: session.rejectedRecipeIds.filter((recipeId) => recipeId !== recipe.id) })) {
       setView("context");
-      refreshIdeas(`you’re discussing ${recipe.name}`);
+      // Inspecting a snapshot must not immediately replace it with a refresh.
     }
   }
 
@@ -238,31 +268,33 @@ export function PlanningWorkspace() {
 
   return <div className={styles.workspace}>
     <header className={styles.heading}>
-      <div><span className={styles.eyebrow}>A LITTLE PLANNING. A GOOD WEEK.</span><h1>Let’s make room for good food.</h1><p>Talk it through, find something you love, and give every meal a place.</p></div>
-      <div className={styles.topActions}><span className={styles.savedPill}><Users size={14} />{pilot.members.map((member) => member.name).join(" + ")}</span><Link href="/recipes" className={styles.quietButton}><Bookmark size={15} />Recipe library</Link></div>
+      <div><span className={styles.eyebrow}>START WITH WHAT’S IN YOUR KITCHEN</span><h1>What sounds good?</h1><p>Find a few meals you love. Work out the cooking and the week from there.</p></div>
+      <div className={styles.topActions}><span className={styles.savedPill}><Users size={14} />{pilot.members.map((member) => member.name).join(" + ")}</span>{!inventoryExperiment ? <Link href="/recipes" className={styles.quietButton}><Bookmark size={15} />Recipe library</Link> : null}</div>
     </header>
-    <div className={styles.statusBar}><div><div className={styles.statusLabel}><span className={styles.statusDot} /><strong>{assistantMode === "fixture" ? "Fixture planning helper · authored examples" : "Local AI · private Mac worker"}</strong></div><p>{assistantMode === "fixture" ? "Authored examples prove the workflow. Calendar, groceries, and actions are saved household changes." : "Requests run through your household’s Mac worker. Specific meal placements apply with undo; broader plans are reviewed first."}</p></div><div className={styles.modePicker} role="group" aria-label="Assistant mode"><button aria-pressed={assistantMode === "fixture"} onClick={() => setAssistantMode("fixture")}>Fixtures</button><button aria-pressed={assistantMode === "local"} onClick={() => setAssistantMode("local")}>Local AI</button></div></div>
+    <div className={styles.statusBar}><div><div className={styles.statusLabel}><span className={styles.statusDot} /><strong>{assistantMode === "fixture" ? "Recipe examples · guided demo" : "Local AI · your kitchen context"}</strong></div><p>{inventoryExperiment ? "Fictional stock and authored recipes. This experiment never sends AI requests or changes your saved kitchen." : assistantMode === "fixture" ? "Examples are clearly labeled. Switch to Local AI to explore new meals with your kitchen context." : "Refine or reroll ideas using your kitchen preferences and stock. Choosing a recipe leaves your calendar and stock unchanged."}</p></div>{!inventoryExperiment ? <div className={styles.modePicker} role="group" aria-label="Assistant mode"><button aria-pressed={assistantMode === "fixture"} onClick={() => setAssistantMode("fixture")}>Examples</button><button aria-pressed={assistantMode === "local"} onClick={() => setAssistantMode("local")}>Local AI</button></div> : null}</div>
     {notice ? <p className={styles.notice} role="alert">{notice}</p> : null}
-    <ProfileMemory />
+    <details className={styles.profileDetails}><summary>Kitchen preferences & remembered facts</summary><ProfileMemory /></details>
     {latestReceipt ? <div className={styles.receipt} role="status"><span><Check size={16} />{latestReceipt.undoneBy ? "Undone: " : ""}{latestReceipt.summary}</span>{latestReceipt.inverse && !latestReceipt.undoneBy ? <button className={styles.smallButton} onClick={() => void run({ type: "undo", receiptId: latestReceipt.id })}><Undo2 size={13} />Undo</button> : null}</div> : null}
-    <div className={styles.mobileNav} role="group" aria-label="Planning views">{([{ value: "conversation", label: "Conversation", Icon: MessageCircle }, { value: "calendar", label: "Calendar", Icon: CalendarDays }, { value: "context", label: "Food & shop", Icon: ShoppingBasket }] as const).map(({ value, label, Icon }) => <button key={value} aria-pressed={view === value} onClick={() => setView(value)}><Icon size={15} />{label}</button>)}</div>
-    <div className={styles.columns}>
-      <section className={`${styles.panel} ${styles.conversation} ${view !== "conversation" ? styles.mobileHidden : ""}`} aria-label="Planning conversation">
-        <div className={styles.panelHeader}><div><h2><MessageCircle size={17} />At the kitchen table</h2><p>A conversation with your calendar in view.</p></div><Leaf size={19} /></div>
-        <div className={styles.messages} aria-live="polite">
-          {!session.messages.length ? <div className={styles.welcome}><div className={styles.welcomeIcon}><Leaf size={22} /></div><h3>What does your week need?</h3><p>Start with an occasion, a favorite, or the vegetables you’d like to use. We’ll keep the plan and grocery implications together.</p><button disabled={busy} className={styles.prompt} onClick={() => void send("Only my Tuesday lunch is covered by work")}>Only my Tuesday lunch is covered by work <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Find something from our favorites")}>Find something from our favorites <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Try a new vegetable-focused recipe")}>Use the vegetables we brought home <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Could one pasta batch cover three meals?")}>One pasta batch, three meals <ArrowRight size={12} /></button></div> : session.messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === "user" ? styles.userMessage : styles.assistantMessage}`}><div className={styles.messageAuthor}>{message.id.startsWith("job-") && message.id.endsWith("-context") ? "Context refresh" : message.role === "user" ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : pilot.members[0]?.id, members: pilot.members, shared: Boolean(householdId) }) : message.source === "ai" ? message.id.startsWith("job-") ? "Local assistant" : "AI assistant" : "Planning helper · fixture"}</div><p>{message.text}</p>{message.recipes.map((recipe) => <button key={recipe.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(recipe)}><Utensils size={14} /><span>{session.rejectedRecipeIds.includes(recipe.id) ? `Reconsider ${recipe.name}` : recipe.name}</span><ArrowRight size={12} /></button>)}</div>)}
+    <nav className={styles.journeyNav} aria-label="Meal planning journey">{([{ value: "ideas", label: "Find meals" }, { value: "recipe", label: "Make it yours" }, { value: "plan", label: "Cook & portion" }, { value: "calendar", label: "My week" }] as const).map(({ value, label }, index) => <button key={value} aria-current={stage === value ? "step" : undefined} disabled={(value === "recipe" || value === "plan") && !focusedRecipe} onClick={() => setStage(value)}><span>{index + 1}</span>{label}{value === "calendar" && pilot.batches.length ? ` · ${pilot.batches.length}` : ""}</button>)}</nav>
+    <div className={styles.columns} ref={stageContent} tabIndex={-1} aria-label="Current meal planning step">
+      <section className={`${styles.panel} ${styles.discovery}`} hidden={stage !== "ideas"} aria-label="Meal ideas from your kitchen">
+        <div className={styles.panelHeader}><div><h2><Leaf size={19} />Meals to start with</h2><p>Cooking for {focusedMembers.map((member) => member.name).join(" and ") || "your household"} · pantry fit for {state.preferences.servings} servings</p></div><div className={styles.buttonRow}><button className={styles.quietButton} onClick={() => conversation.current?.querySelector("textarea")?.focus()}><MessageCircle size={14} />Refine these ideas</button><button className={styles.quietButton} disabled={busy} onClick={() => void send("Suggest different meals using our current inventory first. Keep the ideas varied and explain anything we would need to check or buy. Ideas only, do not schedule or cook anything.")}><RefreshCw size={14} />{assistantMode === "local" ? "Reroll with AI" : "Explore an example"}</button></div></div>
+        <div className={styles.panelBody}>
+          {!state.pantry.length ? <p className={styles.notice}>Your pantry is empty. <Link href="/pantry">Add what you have</Link>, or <a href="/meals?sampleKitchen=random" target="_blank" rel="noopener noreferrer">try a fictional kitchen</a> to experiment.</p> : null}
+          <p className={styles.subtle}>{ideas.length} {ideas.length === 1 ? "idea" : "ideas"} · ranked by known stock after existing plans. Keep 1–3 favorites to explore; ask for more in the conversation below.</p>
+          <div className={styles.ideaGrid}>{ideas.map((recipe) => {
+            const fit = recipeIdeaFit(state, recipe);
+            const kept = shortlist.some((entry) => entry.id === recipe.id);
+            return <article className={`${styles.ideaCard} ${kept ? styles.keptIdea : ""}`} key={recipe.id}><span className={styles.recipeTag}>{recipe.provenance?.source === "ai" ? "AI idea" : recipe.provenance?.source === "import" ? "Imported recipe" : "Authored example"}</span><h3>{recipe.name}</h3><p>{recipe.description}</p><div className={styles.recipeMeta}><span><Clock3 size={13} />{recipe.minutes} min</span><span>{fit.portions} servings</span></div><p className={styles.fitLabel}>{fit.ready ? "Known stock covers this meal" : `${fit.checks ? `${fit.checks} stock ${fit.checks === 1 ? "check" : "checks"}` : ""}${fit.checks && fit.shortages ? " · " : ""}${fit.shortages ? `${fit.shortages} ${fit.shortages === 1 ? "ingredient" : "ingredients"} to buy` : ""}`}</p><div className={styles.buttonRow}><button className={styles.quietButton} onClick={() => void focusRecipe(recipe)}>Explore <ArrowRight size={13} /></button><button className={styles.smallButton} aria-pressed={kept} aria-label={`${kept ? "Remove from" : "Add to"} shortlist: ${recipe.name}`} onClick={() => toggleShortlist(recipe)}><Bookmark size={13} />{kept ? "Kept" : "Keep"}</button></div></article>;
+          })}</div>
+          {!ideas.length ? <div className={styles.empty}><Utensils size={27} /><h3>Let’s find something that fits.</h3><p>No current ideas fit your kitchen preferences. Describe what you want in the conversation below or adjust your kitchen preferences.</p></div> : null}
+          <div className={styles.shortlist}><h3>Your shortlist <span className={styles.count}>{shortlist.length}</span></h3><p className={styles.subtle}>{inventoryExperiment ? "Kept in this tab for this experiment." : "Kept on this device for this planning session."} Rerolling meal ideas leaves these recipes here.</p>{shortlist.length ? shortlist.map((recipe) => <div key={recipe.id} className={styles.shortlistRow}><button className={styles.textButton} onClick={() => void focusRecipe(recipe)}>{recipe.name}{!recipeFitsRecommendationContext(recipe, currentContext) ? " · review current preferences" : ""} <ArrowRight size={12} /></button><button className={styles.smallButton} aria-label={`Remove shortlisted ${recipe.name}`} onClick={() => toggleShortlist(recipe)}>Remove</button></div>) : <p className={styles.subtle}>Keep anything that catches your eye. You can decide when to cook later.</p>}</div>
+          {!inventoryExperiment ? <div className={styles.experimentLink}><span>Want to try a fuller pantry?</span><a href="/meals?sampleKitchen=1" target="_blank" rel="noopener noreferrer">Try sample inventory</a><a href="/meals?sampleKitchen=random" target="_blank" rel="noopener noreferrer">Try random inventory</a></div> : null}
         </div>
-        {assistantMode === "local" ? <LocalPlanningAssistant key={`${householdId}:${currentMemberId}:${session.id}`} householdId={householdId} actorMemberId={currentMemberId} revision={pilot.revision} session={session} contextFingerprint={planningRefreshFingerprint(state)} onResult={receiveLocalResult} requestRef={localAssistant} draft={draft} onDraftChange={setDraft} onDraftSubmitted={clearSubmittedDraft} storageError={storageError} /> : <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void send(draft); }}>
-          <div className={styles.focusPill}><CalendarDays size={12} />{dateLabel(focusDate, { weekday: "short", month: "short", day: "numeric" })} · {focusSlot}{focusedRecipe ? ` · ${focusedRecipe.name}` : " · choose a recipe"}</div>
-          <label className="sr-only" htmlFor="planning-message">Message the planning helper</label><textarea id="planning-message" className={styles.textarea} placeholder="What would make this week easier?" maxLength={2000} value={draft} onChange={(event) => setDraft(event.target.value)} />
-          <div className={styles.composerFooter}><span>{storageError ? "Draft is not saved" : "Draft saved on this device"}</span><button className={`${styles.quietButton} ${styles.primary}`} disabled={busy || !draft.trim()} type="submit"><Send size={14} />{busy ? "Saving…" : "Send"}</button></div>
-        </form>}
-        <SessionSettings session={session} members={pilot.members} onSave={setSession} />
-        <MemberSettings state={state} run={run} />
       </section>
-
-      <section className={`${styles.panel} ${view !== "calendar" ? styles.mobileHidden : ""}`} aria-label="Live meal calendar">
+      <section className={`${styles.panel} ${styles.calendarPanel}`} hidden={stage !== "calendar"} aria-label="Live meal calendar">
         <div className={styles.panelHeader}><div><h2><CalendarDays size={17} />Your live calendar</h2><p>{filled} of {target} person-meals covered · {target - filled} open</p></div><span className={styles.count}>{session.days}d</span></div>
+        {pilot.batches.length ? <div className={styles.panelBody}><h3>Cooking batches</h3><ul className={styles.ingredients}>{pilot.batches.map((batch) => <li key={batch.id}><span>{batch.recipe.name} · prepare {dateLabel(batch.prepareDate)}</span><strong>{batch.yield} portions · {batch.status === "cooked" ? "cooked" : `${batch.reservedExtra} reserved for later`}</strong></li>)}</ul><Link className={styles.quietButton} href="/shopping">Review groceries, cooking & leftovers <ArrowRight size={13} /></Link></div> : null}
         <div className={styles.calendarToolbar}><div className={styles.weekNav}><button className={styles.smallButton} aria-label="Previous week" onClick={() => void setSession({ startDate: addDays(session.startDate, -7) })}><ChevronLeft size={15} /></button><span className={styles.weekLabel}>{dateLabel(dates[0])} – {dateLabel(dates.at(-1)!)}</span><button className={styles.smallButton} aria-label="Next week" onClick={() => void setSession({ startDate: addDays(session.startDate, 7) })}><ChevronRight size={15} /></button></div><div className={styles.calendarLegend}><span><i className={styles.legendDot} />Planned or covered</span><span>○ Open for a person</span><span>Browsing keeps shopping dates</span></div></div>
         <div className={styles.calendar} style={{ "--slots": session.slots.length } as React.CSSProperties}>
           <div className={styles.calendarLabels} style={{ gridTemplateColumns: `38px repeat(${session.slots.length}, minmax(0, 1fr))` }}><span />{session.slots.map((slot) => <span key={slot}>{slot}</span>)}</div>
@@ -282,15 +314,29 @@ export function PlanningWorkspace() {
         </details> : null}
       </section>
 
-      <aside className={`${styles.context} ${view !== "context" ? styles.mobileHidden : ""}`} aria-label="Focused recipe and grocery preview">
+      <aside className={`${styles.context} ${styles.recipeStage}`} hidden={stage !== "recipe" && stage !== "plan"} aria-label="Focused recipe and grocery preview">
         <section className={styles.panel}>
-          <div className={styles.panelHeader}><div><h2><Utensils size={17} />On the table</h2><p>Explore first. Place when it fits.</p></div><span className={styles.count}>{session.candidates.length}</span></div>
+          <div className={styles.panelHeader}><div><h2><Utensils size={17} />{stage === "plan" ? "Make it work for your week" : "Make this meal yours"}</h2><p>Ingredients first. Cooking and portions when you’re ready.</p></div><span className={styles.count}>{session.candidates.length}</span></div>
           {session.candidates.length > 1 ? <div className={styles.panelBody}><div className={styles.recipeChooser}>{session.candidates.filter((recipe) => !session.rejectedRecipeIds.includes(recipe.id)).map((recipe) => <button className={`${styles.smallButton} ${recipe.id === focusedRecipe?.id ? styles.selectedChoice : ""}`} key={recipe.id} onClick={() => void focusRecipe(recipe)}>{recipe.name}</button>)}</div></div> : null}
-          {focusedRecipe ? <><div className={styles.recipeHero}><span className={styles.recipeTag}>{focusedRecipe.provenance?.source === "import" ? "Your imported recipe" : focusedRecipe.provenance?.source === "ai" ? recipeIsSaved ? "Saved AI recipe" : "AI recipe candidate" : "Authored example · fixture"}</span><h3>{focusedRecipe.name}</h3><div className={styles.recipeMeta}><span><Clock3 size={12} />{focusedRecipe.minutes} min</span><span><Users size={12} />{focusedRecipe.servings} base portions</span></div></div><div className={styles.panelBody}><p className={styles.recipeDescription}>{focusedRecipe.description}</p><div className={styles.buttonRow}><button className={styles.smallButton} onClick={() => void send("Make this quicker")}>Less effort</button><button className={styles.smallButton} onClick={() => void send("Change the cuisine to Mediterranean")}>Try another cuisine</button><button className={styles.smallButton} disabled={recipeIsSaved} onClick={() => saveRecipe(focusedRecipe, focusedRecipe.provenance?.source ?? "demo")}><Bookmark size={12} />{recipeIsSaved ? "Saved" : "Save"}</button></div><CandidatePlacement key={`${focusedRecipe.id}:${focusDate}:${focusSlot}`} recipe={focusedRecipe} state={state} focusDate={focusDate} focusSlot={focusSlot} run={run} /><button className={`${styles.quietButton} ${styles.fullWidth}`} onClick={() => void proposeBatch()}><CalendarDays size={14} />Review a batch across 3 meals</button><RecipeDetail recipe={focusedRecipe} /><button className={styles.textButton} onClick={() => void rejectRecipe(focusedRecipe)}>Not this one</button></div></> : <div className={styles.empty}><Utensils size={28} /><h3>A good meal starts with an idea.</h3><p>Ask about your favorites or explore a vegetable-focused example. Selected cards stay connected to the conversation.</p><button className={styles.quietButton} onClick={() => void send("Try a vegetable-focused recipe")}><Leaf size={14} />Explore an example</button></div>}
+          {focusedRecipe ? <><div className={styles.recipeHero}><span className={styles.recipeTag}>{focusedRecipe.provenance?.source === "import" ? "Your imported recipe" : focusedRecipe.provenance?.source === "ai" ? recipeIsSaved ? "Saved AI recipe" : "AI recipe candidate" : "Authored example · fixture"}</span><h3>{focusedRecipe.name}</h3><div className={styles.recipeMeta}><span><Clock3 size={12} />{focusedRecipe.minutes} min</span><span><Users size={12} />{focusedRecipe.servings} base portions</span></div></div><div className={styles.panelBody}><p className={styles.recipeDescription}>{focusedRecipe.description}</p>{!focusedRecipeFits ? <p className={styles.notice}>This kept recipe does not fit the current kitchen preferences. Ask for a revision before planning it.</p> : null}<div className={styles.buttonRow}><button className={styles.smallButton} onClick={() => void send("Make this quicker")}>Less effort</button><button className={styles.smallButton} onClick={() => void send("Change the cuisine to Mediterranean")}>Try another cuisine</button><button className={styles.smallButton} disabled={recipeIsSaved} onClick={() => saveRecipe(focusedRecipe, focusedRecipe.provenance?.source ?? "demo")}><Bookmark size={12} />{recipeIsSaved ? "Saved" : "Save"}</button></div><div hidden={stage !== "recipe"}><div className={styles.decisionActions}><button className={styles.quietButton} aria-pressed={shortlist.some((recipe) => recipe.id === focusedRecipe.id)} onClick={() => toggleShortlist(focusedRecipe)}><Bookmark size={14} />{shortlist.some((recipe) => recipe.id === focusedRecipe.id) ? "Remove from shortlist" : "Keep this recipe"}</button><button className={styles.quietButton} onClick={() => { setDraft(`Create a revised version of ${focusedRecipe.name} using what we have. I want to swap `); conversation.current?.querySelector("textarea")?.focus(); }}>Discuss an ingredient swap</button></div><CandidateGroceries state={state} recipe={focusedRecipe} portions={state.preferences.servings} prepareDate={session.startDate} /><RecipeDetail recipe={focusedRecipe} /><button className={`${styles.quietButton} ${styles.primary} ${styles.fullWidth}`} onClick={() => setStage("plan")}>This sounds good — when are we cooking? <ArrowRight size={14} /></button></div><div hidden={stage !== "plan"}><RecipeServingPlan key={focusedRecipe.id} recipe={focusedRecipe} state={state} run={run} onPlanned={() => setStage("calendar")} renderGroceries={(portions, prepareDate) => <CandidateGroceries state={state} recipe={focusedRecipe} portions={portions} prepareDate={prepareDate} />} /></div><button className={styles.textButton} onClick={() => void rejectRecipe(focusedRecipe)}>Not this one</button></div></> : <div className={styles.empty}><Utensils size={28} /><h3>A good meal starts with an idea.</h3><p>Ask about your favorites or explore a vegetable-focused example. Selected cards stay connected to the conversation.</p><button className={styles.quietButton} onClick={() => void send("Try a vegetable-focused recipe")}><Leaf size={14} />Explore an example</button></div>}
         </section>
         {pilot.unplacedMeals.length ? <section className={styles.panel}><div className={styles.panelHeader}><div><h2>Earlier undated meals</h2><p>Preserved from your previous plan. Choose a recipe to place it.</p></div></div><div className={styles.panelBody}>{pilot.unplacedMeals.map((meal) => <button key={meal.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(meal.recipe)}>{meal.recipe.name}<ArrowRight size={12} /></button>)}</div></section> : null}
-        <ShoppingPreview state={state} run={run} compact />
+        {pilot.batches.length ? <ShoppingPreview state={state} run={run} compact /> : null}
       </aside>
+      <section className={`${styles.panel} ${styles.conversation}`} ref={conversation} aria-label="Planning conversation">
+        <div className={styles.panelHeader}><div><h2><MessageCircle size={17} />Talk through the options</h2><p>{focusedRecipe ? `Discussing ${focusedRecipe.name}` : "More ideas, fewer ingredients, a different cuisine — start here."}</p></div><button className={styles.smallButton} onClick={() => { setStage("ideas"); stageContent.current?.scrollIntoView({ block: "start" }); }}><ArrowLeft size={13} />Meal ideas</button></div>
+        <div className={styles.messages} aria-live="polite">
+          {!session.messages.length ? <div className={styles.welcome}><div className={styles.welcomeIcon}><Leaf size={22} /></div><h3>What do you feel like eating?</h3><p>Ask for different meals, keep what sounds good, or talk through an ingredient swap. Your shortlist stays with you.</p><button disabled={busy} className={styles.prompt} onClick={() => void send("Suggest meals using what we have. Ideas only; do not schedule anything.")}>What can I make with what I have? <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Find something from our favorites")}>Find something from our favorites <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Try a new vegetable-focused recipe")}>Use the vegetables we brought home <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Make this quicker")}>Something quicker and easier <ArrowRight size={12} /></button></div> : session.messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === "user" ? styles.userMessage : styles.assistantMessage}`}><div className={styles.messageAuthor}>{message.id.startsWith("job-") && message.id.endsWith("-context") ? "Context refresh" : message.role === "user" ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : pilot.members[0]?.id, members: pilot.members, shared: Boolean(householdId) }) : message.source === "ai" ? message.id.startsWith("job-") ? "Local assistant" : "AI assistant" : "Planning helper · fixture"}</div><p>{message.text}</p>{message.recipes.map((recipe) => <button key={recipe.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(recipe)}><Utensils size={14} /><span>{session.rejectedRecipeIds.includes(recipe.id) ? `Reconsider ${recipe.name}` : recipe.name}</span><ArrowRight size={12} /></button>)}</div>)}
+        </div>
+        {assistantMode === "local" ? <LocalPlanningAssistant key={`${householdId}:${currentMemberId}:${session.id}`} householdId={householdId} actorMemberId={currentMemberId} revision={pilot.revision} session={session} contextFingerprint={planningRefreshFingerprint(state)} onResult={receiveLocalResult} requestRef={localAssistant} draft={draft} onDraftChange={setDraft} onDraftSubmitted={clearSubmittedDraft} storageError={storageError} /> : <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void send(draft); }}>
+          <div className={styles.focusPill}><CalendarDays size={12} />{dateLabel(focusDate, { weekday: "short", month: "short", day: "numeric" })} · {focusSlot}{focusedRecipe ? ` · ${focusedRecipe.name}` : " · choose a recipe"}</div>
+          <label className="sr-only" htmlFor="planning-message">Message the planning helper</label><textarea id="planning-message" className={styles.textarea} placeholder="What would make this week easier?" maxLength={2000} value={draft} onChange={(event) => setDraft(event.target.value)} />
+          <div className={styles.composerFooter}><span>{storageError ? "Draft is not saved" : inventoryExperiment ? "Draft stays in this experiment" : "Draft saved on this device"}</span><button className={`${styles.quietButton} ${styles.primary}`} disabled={busy || !draft.trim()} type="submit"><Send size={14} />{busy ? "Saving…" : "Send"}</button></div>
+        </form>}
+        <SessionSettings session={session} members={pilot.members} onSave={setSession} />
+        <MemberSettings state={state} run={run} />
+      </section>
+
     </div>
   </div>;
 }
@@ -406,29 +452,6 @@ function SessionSettings({ session, members, onSave }: { session: PlanningSessio
   </details>;
 }
 
-function CandidatePlacement({ recipe, state, focusDate, focusSlot, run }: { recipe: Recipe; state: HouseholdState; focusDate: string; focusSlot: MealSlot; run: RunCommand }) {
-  const [extra, setExtra] = useState(0);
-  const [prepareDate, setPrepareDate] = useState(focusDate);
-  const openMembers = getMealCoverage(state, focusDate, focusSlot).filter((entry) => state.pilot!.session.memberIds.includes(entry.member.id) && !entry.coverage && !entry.allocation);
-  // A newly reopened person is selected by default. Store explicit exclusions,
-  // rather than a one-time snapshot that becomes stale after removing a meal.
-  const [excluded, setExcluded] = useState<string[]>([]);
-  const selected = openMembers.filter((entry) => !excluded.includes(entry.member.id)).map((entry) => entry.member.id);
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  async function place(event: FormEvent) {
-    event.preventDefault();
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
-    const batchId = id();
-    try {
-      await run({ type: "create_batch", batch: { id: batchId, recipe, prepareDate, yield: selected.length + extra, reservedExtra: extra }, allocations: selected.map((memberId) => ({ id: id(), batchId, memberId, date: focusDate, slot: focusSlot, portions: 1 })) });
-    } finally { savingRef.current = false; setSaving(false); }
-  }
-  return <form className={styles.details} onSubmit={(event) => void place(event)}><p className={styles.subtle}>Place on <strong>{dateLabel(focusDate)} · {focusSlot}</strong></p>{openMembers.length ? openMembers.map(({ member }) => <label className={styles.allocationChoice} key={member.id}><input type="checkbox" checked={selected.includes(member.id)} onChange={(event) => setExcluded(event.target.checked ? excluded.filter((memberId) => memberId !== member.id) : [...excluded, member.id])} />{member.name} · 1 portion</label>) : <p className={styles.subtle}>Everyone is covered. Select an open occasion or prepare extra portions.</p>}<div className={styles.fieldRow}><label className={styles.field}>Prepare on<input className={styles.input} type="date" value={prepareDate} max={focusDate} required onChange={(event) => setPrepareDate(event.target.value)} /></label><label className={styles.field}>Reserve extra portions<input className={styles.input} type="number" min={0} max={30} step={1} value={extra} onChange={(event) => setExtra(Number(event.target.value))} /></label></div><CandidateGroceries state={state} recipe={recipe} portions={selected.length + extra} prepareDate={prepareDate} /><button className={`${styles.quietButton} ${styles.primary} ${styles.fullWidth}`} disabled={saving || (!selected.length && !extra)} type="submit"><Plus size={14} />{saving ? "Saving…" : `Plan ${selected.length + extra} ${selected.length + extra === 1 ? "portion" : "portions"}`}</button><p className={styles.formNotice}>Ingredients counted once for this batch. Pantry changes only when you record cooking.</p></form>;
-}
-
 function CandidateGroceries({ state, recipe, portions, prepareDate }: { state: HouseholdState; recipe: Recipe; portions: number; prepareDate: string }) {
   if (!Number.isFinite(portions) || portions <= 0 || portions > 1000 || !calendarDateSchema.safeParse(prepareDate).success) return <p className={styles.formNotice}>Choose a preparation date and people or extra portions to preview this recipe’s grocery needs.</p>;
   const preview = previewCandidateShopping(state, recipe, portions, prepareDate);
@@ -469,7 +492,7 @@ function MemberSettings({ state, run }: { state: HouseholdState; run: RunCommand
 }
 
 function RecipeDetail({ recipe }: { recipe: Recipe }) {
-  return <details className={styles.details}><summary>Ingredients & steps · {recipe.servings} portions</summary><ul className={styles.ingredients}>{recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.ingredientId}:${ingredient.unit}:${index}`}><span>{ingredient.name}</span><span>{amount(ingredient.quantity, ingredient.unit)}</span></li>)}</ul><ol className={styles.steps}>{recipe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>{recipe.provenance?.sourceUrl ? <a className={styles.textButton} href={recipe.provenance.sourceUrl} target="_blank" rel="noreferrer">Original recipe</a> : null}</details>;
+  return <details className={styles.details} open><summary>Ingredients & steps · {recipe.servings} portions</summary><ul className={styles.ingredients}>{recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.ingredientId}:${ingredient.unit}:${index}`}><span>{ingredient.name}</span><span>{amount(ingredient.quantity, ingredient.unit)}</span></li>)}</ul><ol className={styles.steps}>{recipe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>{recipe.provenance?.sourceUrl ? <a className={styles.textButton} href={recipe.provenance.sourceUrl} target="_blank" rel="noreferrer">Original recipe</a> : null}</details>;
 }
 
 function ShoppingPreview({ state, run, compact = false }: { state: HouseholdState; run: RunCommand; compact?: boolean }) {
@@ -501,7 +524,7 @@ export function PilotShoppingPanel() {
     try { const result = await dispatchPilot(operation); if (!result.ok) setNotice(result.error ?? "The change could not be saved."); return result.ok; }
     catch { setNotice("The change could not be saved. Check your connection and try again."); return false; }
   };
-  return <div className={styles.workspace}><header className={styles.heading}><div><span className={styles.eyebrow}>FROM A GOOD PLAN TO A GOOD MEAL</span><h1>Shop once. Cook with a plan.</h1><p>Bring food home, record what you cook, and give the extra portions somewhere to go.</p></div><Link href="/meals" className={styles.quietButton}><ArrowLeft size={14} />Back to planning</Link></header>{notice ? <p className={styles.notice} role="alert">{notice}</p> : null}{latestReceipt ? <div className={styles.receipt} role="status"><span><Check size={16} />{latestReceipt.summary}</span>{latestReceipt.inverse && !latestReceipt.undoneBy ? <button className={styles.smallButton} onClick={() => void run({ type: "undo", receiptId: latestReceipt.id })}><Undo2 size={13} />Undo</button> : null}</div> : null}<div className={styles.shoppingLayout}><div className={styles.context}><ShoppingPreview state={state} run={run} /><StockEditor state={state} run={run} /></div><section className={styles.panel} aria-label="Cooking and prepared food"><div className={styles.panelHeader}><div><h2><CookingPot size={18} />Cook once, enjoy again</h2><p>Food is only cooked or eaten when you record it.</p></div><span className={styles.count}>{pilot.batches.length}</span></div><div className={styles.panelBody}>{pilot.batches.length ? pilot.batches.map((batch) => <BatchControls key={`${batch.id}:${batch.yield}:${batch.status}`} batch={batch} state={state} run={run} />) : <div className={styles.empty}><CookingPot size={26} /><h3>Your next batch starts in the calendar.</h3><p>Plan a recipe and its portions, then return here when you’re ready to cook.</p><Link className={styles.quietButton} href="/meals">Plan a meal <ArrowRight size={13} /></Link></div>}</div></section></div></div>;
+  return <div className={styles.workspace}><header className={styles.heading}><div><span className={styles.eyebrow}>FROM A GOOD PLAN TO A GOOD MEAL</span><h1>Shop once. Cook with a plan.</h1><p>Bring food home, record what you cook, and give the extra portions somewhere to go.</p></div><Link href="/meals" className={styles.quietButton}><ArrowLeft size={14} />Back to planning</Link></header>{notice ? <p className={styles.notice} role="alert">{notice}</p> : null}{latestReceipt ? <div className={styles.receipt} role="status"><span><Check size={16} />{latestReceipt.summary}</span>{latestReceipt.inverse && !latestReceipt.undoneBy ? <button className={styles.smallButton} onClick={() => void run({ type: "undo", receiptId: latestReceipt.id })}><Undo2 size={13} />Undo</button> : null}</div> : null}<div className={styles.shoppingLayout}><div className={styles.context}><ShoppingPreview state={state} run={run} /><StockEditor state={state} run={run} /></div><section className={styles.panel} aria-label="Cooking and prepared food"><div className={styles.panelHeader}><div><h2><CookingPot size={18} />Cook once, enjoy again</h2><p>Food is only cooked or eaten when you record it.</p></div><span className={styles.count}>{pilot.batches.length}</span></div><div className={styles.panelBody}>{pilot.batches.length ? pilot.batches.map((batch) => <BatchControls key={`${batch.id}:${batch.yield}:${batch.status}`} batch={batch} state={state} run={run} />) : <div className={styles.empty}><CookingPot size={26} /><h3>Your next batch starts with a meal you love.</h3><p>Plan a recipe and its portions, then return here when you’re ready to cook.</p><Link className={styles.quietButton} href="/meals">Plan a meal <ArrowRight size={13} /></Link></div>}</div></section></div></div>;
 }
 
 function StockEditor({ state, run }: { state: HouseholdState; run: RunCommand }) {
@@ -546,7 +569,7 @@ function BatchControls({ batch, state, run }: { batch: CookingBatch; state: Hous
   const prepared = pilot.prepared.find((entry) => entry.batchId === batch.id);
   const allocations = pilot.allocations.filter((entry) => entry.batchId === batch.id);
   const [actual, setActual] = useState(batch.yield);
-  const [freezer, setFreezer] = useState(batch.reservedExtra);
+  const [freezer, setFreezer] = useState(0);
   const [saving, setSaving] = useState(false);
   const [laterDate, setLaterDate] = useState(addDays(batch.prepareDate, 7));
   const [laterSlot, setLaterSlot] = useState<MealSlot>("lunch");

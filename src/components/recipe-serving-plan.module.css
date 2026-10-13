@@ -1,0 +1,9 @@
+.fields { padding: 0; margin: 0; border: 0; min-width: 0; }
+.heading { font-size: 13px; font-weight: 700; margin: 0 0 12px; color: var(--ink); }
+.allocation { padding: 12px; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.allocation legend { color: var(--muted); padding: 0 5px; font-size: 11px; }
+.balance { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: var(--pale); border-radius: 8px; padding: 12px; margin-top: 14px; font-size: 12px; }
+.errors { color: #9d3d25; font-size: 12px; line-height: 1.6; padding-left: 18px; margin: 12px 0; }
+.review { padding: 14px; background: #f1f5e9; border: 1px solid var(--line); border-radius: 10px; margin: 16px 0; font-size: 12px; line-height: 1.6; }
+.review p { margin: 8px 0; }
+.review ul { padding-left: 18px; }

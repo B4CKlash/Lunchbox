@@ -1,6 +1,16 @@
 # Recipe journey: living design brief
 
-Last reviewed: **2026-10-09**. Design-review source baseline: **`7c9c759` on `main`**, before integrating the recipe feed and household pilot. See [the team handoff](TEAM_HANDOFF.md) for current application behavior; the baseline comparisons below retain their original review context.
+Last reviewed: **2026-10-13**. Original design-review source baseline: **`7c9c759` on `main`**, before integrating the recipe feed and household pilot. See [the team handoff](TEAM_HANDOFF.md) for current application behavior; the baseline comparisons below retain their original review context.
+
+## First desktop pilot feedback — 2026-10-13
+
+Nate completed his first solo desktop session and reported that the calendar-first layout and side conversation interrupt the useful flow. His requested sequence is pantry-supported meal ideas → conversational rerolls and a shortlist → ingredient revisions → cook tonight or plan ahead → total portions → meals over the week and portions for later/freezer. He also requested fictional inventory for experimentation. This is a usability follow-up within [HP-01](https://linear.app/b4cklash/issue/B4C-76), [HP-06](https://linear.app/b4cklash/issue/B4C-81), [HP-07](https://linear.app/b4cklash/issue/B4C-82) and [HP-10](https://linear.app/b4cklash/issue/B4C-85).
+
+Implementation branch **`codex/recipe-first-planning`** starts from merged main **`4667b6f`**. It implements a focused portion of J-02/J-03/J-04/J-06/J-07: up to ten current-context meal ideas, a temporary device/session shortlist, recipe inspection and conversation, then one recipe's total portions distributed before saving one cooking batch. The calendar follows these decisions. Seven labeled starter examples remain available as actual snapshots accumulate; this does not raise the reviewed AI limit of three recipes per response.
+
+Fictional sample/random kitchens use the existing household schema in tab memory. They use labeled authored recipes and never invoke AI or touch the signed-in kitchen. The real kitchen retains live AI. Unallocated planned portions are generic reserves; only cooking confirmation records actual frozen food. Draft distribution keeps the chosen total fixed. Existing cancellation/removal behavior for already-saved allocations is unchanged.
+
+This branch is **In progress**, with local checks and browser evidence in [the dated review](RECIPE_FIRST_REVIEW_2026-10-13.md). It does not complete in-recipe stock editing, a combined unscheduled multi-recipe preview, multi-recipe bulk scheduling, or community-testing claims. Production households remain disabled and HP-10 remains open for mobile, two-person, real-cycle and recovery acceptance.
 
 ## Purpose and design character
 
@@ -94,12 +104,12 @@ Keep stable IDs when wording changes. **Design status:** `Captured`, `Exploring`
 | ID / stage | Idea and user value | Design / delivery status | Owner role | Next question or action; evidence/date |
 | --- | --- | --- | --- | --- |
 | J-01 · Quick start | Skippable locally saved preferences get someone to useful ideas quickly. | Agreed / Not started | Frontend + meal workflow | Explore Q-01; user decision D-02, 2026-10-09. |
-| J-02 · Brainstorm | About 10 concise, diverse ideas reduce effort before detailed reading. | Agreed / Not started | Meal workflow + frontend | Explore Q-02; original idea captured 2026-10-09. |
-| J-03 · Shortlist | Keep roughly 1–3 temporary candidates without filling the recipe box. | Agreed / Not started | Frontend + meal workflow | Explore Q-03; original idea captured 2026-10-09. |
-| J-04 · Inspect | Shared recipe detail carries context between browsing, discussion, selection, and planning. | Agreed / Not started | Frontend | Sketch the handoffs with J-03/J-05; existing detail is baseline, connected journey captured 2026-10-09. |
+| J-02 · Brainstorm | About 10 concise, diverse ideas reduce effort before detailed reading. | Agreed / In progress | Meal workflow + frontend | Focused pilot branch ranks up to ten snapshots, with seven labeled starter examples and the existing three-recipe AI response limit; D-06 and dated review, 2026-10-13. |
+| J-03 · Shortlist | Keep roughly 1–3 temporary candidates without filling the recipe box. | Agreed / In progress | Frontend + meal workflow | Focused pilot branch keeps bounded device/session snapshots through rerolls and reload; D-06 and dated review, 2026-10-13. |
+| J-04 · Inspect | Shared recipe detail carries context between browsing, discussion, selection, and planning. | Agreed / In progress | Frontend | Focused pilot branch connects inspection, conversation, shortlist and portion decisions; in-recipe stock editing remains open; 2026-10-13. |
 | J-05 · Pantry discovery | Confirm stock within ingredients, including extras, to onboard through recipes. | Agreed / Not started | Pantry/storage + frontend | Explore Q-04/Q-05 using the five-can example; captured 2026-10-09. |
-| J-06 · Servings | Scale each selected recipe to total servings so people can choose quantities directly. | Agreed / Not started | Planning + frontend | Carry the total through J-07/J-08; clarified by user in D-04, 2026-10-09. |
-| J-07 · Allocation/calendar | Allocate servings across meals or freezer intentions; schedule one or several recipes smoothly. | Agreed / Not started | Planning + frontend | Explore Q-06; six-servings example and D-04, 2026-10-09. |
+| J-06 · Servings | Scale each selected recipe to total servings so people can choose quantities directly. | Agreed / In progress | Planning + frontend | Focused pilot branch scales one recipe to an explicit total before distribution; D-06 and dated review, 2026-10-13. |
+| J-07 · Allocation/calendar | Allocate servings across meals or freezer intentions; schedule one or several recipes smoothly. | Agreed / In progress | Planning + frontend | Focused pilot branch allocates one fixed total across people/dates/reserves; multi-recipe scheduling remains open; D-06 and dated review, 2026-10-13. |
 | J-08 · Groceries | Preview combined groceries before dates so first use produces an actionable result. | Agreed / Not started | Planning + pantry/storage + frontend | Explore Q-07; user decision D-03, 2026-10-09. |
 | J-09 · Equipment | Match ideas to available kitchenware, reducing unusable suggestions. | Captured / Not started | Meal workflow + frontend | Explore Q-08; original vision captured 2026-10-09. |
 | J-10 · Recipe confidence | Prefer recipes with credible community testing evidence. | Captured / Not started | Meal workflow + integration lead | Explore Q-09 before defining a claim or badge; original vision captured 2026-10-09. |
@@ -113,6 +123,8 @@ Keep stable IDs when wording changes. **Design status:** `Captured`, `Exploring`
 | D-03 | 2026-10-09 | A grocery preview is available from selected recipes and servings before dates. | Early value without compulsory scheduling; J-08. |
 | D-04 | 2026-10-09 | Scale a recipe to total servings, then allocate those servings. | User clarified that a cooking-session planner adds unwanted complexity: six servings can be one meal for six or six meals for one; J-06/J-07. |
 | D-05 | 2026-10-09 | Preserve the full vision and recommend phased delivery. | Keep equipment and community-tested recipes visible without making them prerequisites for the first useful journey; all ideas. |
+| D-06 | 2026-10-13 | Apply J-02/J-03/J-04/J-06/J-07 to the existing pilot after solo desktop feedback: ideas first, optional conversation and inspection, then cooking/portions, then calendar. | Nate's acceptance feedback identifies calendar-first placement as a usability blocker; this refines D-04 without introducing a separate planner. |
+| D-07 | 2026-10-13 | Offer fictional sample/random kitchens in tab memory with authored examples, while live AI continues in the saved kitchen. | Protect real household knowledge from experiment data. The authenticated worker rebuilds real household context, so sample inventory must not be sent through that transport. |
 
 Append revisions with the superseded decision ID and reason instead of silently erasing earlier reasoning.
 

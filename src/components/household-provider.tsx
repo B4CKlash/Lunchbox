@@ -8,6 +8,7 @@ import {
 } from "@/lib/contracts";
 import { applyHouseholdAction, type HouseholdAction } from "@/features/meals/workspace-state";
 import { createSampleHousehold } from "@/features/pantry/seed";
+import { createInventoryExperiment } from "@/features/pantry/sample-inventory";
 import { loadHousehold, saveHousehold, preserveHouseholdRecovery, readHouseholdCache, recoverHouseholdForOwner, readPlanningComposer, readProposalReview, type PlanningComposer, type CachedPlanningComposer, type CachedProposalReview } from "@/features/pantry/storage";
 import { ensurePilot, applyPilotCommand } from "@/features/planning/pilot";
 import { getAccountClient } from "@/features/accounts/client";
@@ -21,7 +22,8 @@ type HouseholdContextValue = {
   state: HouseholdState; ready: boolean; storageError: string | null; updateError: string | null;
   chatResetVersion: number; householdResetVersion: number;
   householdId: string | null; currentMemberId: string | null; syncStatus: string; pendingChange: boolean;
-  planningComposer: PlanningComposer; setPlanningComposer: (patch: Partial<Pick<PlanningComposer, "draft" | "mode">>) => void;
+  inventoryExperiment: boolean; rerollInventoryExperiment: () => void;
+  planningComposer: PlanningComposer; setPlanningComposer: (patch: Partial<Pick<PlanningComposer, "draft" | "mode" | "journey">> | ((current: PlanningComposer) => Partial<Pick<PlanningComposer, "draft" | "mode" | "journey">>)) => void;
   setProposalReview: (review: CachedProposalReview) => void;
   dispatchPilot: (operation: PilotOperation) => Promise<EditResult>;
   flushHouseholdChanges: () => Promise<HouseholdState>;
@@ -57,6 +59,8 @@ const messageFor = (error: unknown) => error instanceof Error ? error.message : 
 export function HouseholdProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(createSampleHousehold);
   const [ready, setReady] = useState(false);
+  const [inventoryExperiment, setInventoryExperiment] = useState(false);
+  const experiment = useRef(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [chatResetVersion, setChatResetVersion] = useState(0);
@@ -83,10 +87,11 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
 
   const publishComposer = useCallback((next: CachedPlanningComposer | undefined) => {
     composer.current = next;
-    setComposerState(next ? { draft: next.draft, mode: next.mode, ...(next.proposalReviews ? { proposalReviews: next.proposalReviews } : {}) } : { draft: "", mode: "fixture" });
+    setComposerState(next ? { draft: next.draft, mode: next.mode, ...(next.proposalReviews ? { proposalReviews: next.proposalReviews } : {}), ...(next.journey ? { journey: next.journey } : {}) } : { draft: "", mode: "fixture" });
   }, []);
 
   const persist = useCallback(() => {
+    if (experiment.current) return;
     try {
       saveHousehold(window.localStorage, stateRef.current, { ownerId: owner.current, householdId: remote.current?.householdId ?? null, pending: pending.current ?? undefined, planningComposer: composer.current });
       setStorageError(null);
@@ -110,7 +115,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   }, [publish, publishComposer]);
 
   const refreshHousehold = useCallback(async () => {
-    if (!owner.current || busy.current) return;
+    if (experiment.current || !owner.current || busy.current) return;
     const requestEpoch = epoch.current;
     try {
       const latest = await loadRemoteHousehold();
@@ -156,6 +161,21 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   }, [acceptRemote, publish, publishComposer]);
 
   useEffect(() => {
+    // A full-page sample entry never reads the account cache, subscribes to
+    // auth, or opens a remote household. Experimental edits stay in memory.
+    const sample = new URLSearchParams(window.location.search).get("sampleKitchen");
+    if (sample === "1" || sample === "random") {
+      experiment.current = true;
+      const initialize = window.setTimeout(() => {
+        setInventoryExperiment(true);
+        publishComposer(undefined);
+        publish(createInventoryExperiment(sample === "random"));
+        hydrated.current = true;
+        setReady(true);
+        setSyncStatus("Sample kitchen · changes stay in this tab");
+      }, 0);
+      return () => window.clearTimeout(initialize);
+    }
     const client = getAccountClient();
     let active = true;
     let authEvents = 0;
@@ -307,7 +327,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         }
         // A local receipt is a saved receipt only after the storage adapter
         // accepts the complete snapshot. Keep the old state/draft on failure.
-        try { saveHousehold(window.localStorage, next, { ownerId: owner.current, householdId: null, planningComposer: composer.current }); }
+        try { if (!experiment.current) saveHousehold(window.localStorage, next, { ownerId: owner.current, householdId: null, planningComposer: composer.current }); }
         catch { const message = "This browser could not save the change. Your previous kitchen and draft are kept. Free browser storage, then retry."; setStorageError(message); throw new Error(message); }
         publish(next); setUpdateError(null); return { ok: true };
       } catch (error) { const message = messageFor(error); setUpdateError(message); return { ok: false, error: message }; }
@@ -318,6 +338,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   const legacy = (action: HouseholdAction) => edit(action, false);
   const addCandidate = (recipe: Recipe, servings: number) => legacy({ type: "discussRecipe", recipe, servings });
   async function transition(action: () => Promise<RemoteHousehold>): Promise<EditResult> {
+    if (experiment.current) return { ok: false, error: "Return to your saved kitchen before sharing or joining a household." };
     if (accountId !== owner.current || householdId !== (remote.current?.householdId ?? null)) return { ok: false, error: "The signed-in account or household changed. Try again." };
     const startingEpoch = epoch.current;
     await queue.current;
@@ -337,13 +358,22 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   return <HouseholdContext.Provider value={{
     state, ready, storageError, updateError, chatResetVersion, householdResetVersion,
     householdId, currentMemberId, syncStatus, pendingChange,
+    inventoryExperiment,
+    rerollInventoryExperiment: () => {
+      if (!experiment.current || busy.current) return;
+      ++epoch.current;
+      publishComposer(undefined);
+      publish(createInventoryExperiment(true));
+      setHouseholdResetVersion((value) => value + 1);
+      setUpdateError(null);
+    },
     planningComposer,
     setPlanningComposer: (patch) => {
       if (accountId !== owner.current || householdId !== (remote.current?.householdId ?? null) || state.pilot?.session.id !== stateRef.current.pilot?.session.id) return;
       const sessionId = stateRef.current.pilot?.session.id;
       if (!sessionId) return;
       const previous = composer.current?.sessionId === sessionId ? composer.current : { sessionId, draft: "", mode: "fixture" as const };
-      const next = readPlanningComposer({ ...previous, ...patch }, sessionId, stateRef.current.pilot?.proposals);
+      const next = readPlanningComposer({ ...previous, ...(typeof patch === "function" ? patch(previous) : patch) }, sessionId, stateRef.current.pilot?.proposals);
       if (!next) return;
       publishComposer(next); persist();
     },
@@ -397,6 +427,10 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     completeChatTurn: (messages, submittedDraft) => legacy({ type: "completeChatTurn", messages, submittedDraft }),
     clearChat: () => { setChatResetVersion((value) => value + 1); legacy({ type: "clearChat" }); },
     reset: () => {
+      if (experiment.current) {
+        ++epoch.current; publishComposer(undefined); publish(createInventoryExperiment(false));
+        setHouseholdResetVersion((value) => value + 1); return;
+      }
       if (busy.current || pending.current) { setUpdateError("Finish or resolve the current household change before resetting."); return; }
       if (remote.current) { setUpdateError("A shared household cannot be reset to sample data."); return; }
       try { preserveHouseholdRecovery(window.localStorage, "Before sample reset"); }
