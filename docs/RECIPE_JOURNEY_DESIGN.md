@@ -10,7 +10,7 @@ Implementation branch **`codex/recipe-first-planning`** starts from merged main 
 
 Fictional sample/random kitchens use the existing household schema in tab memory. They use labeled authored recipes and never invoke AI or touch the signed-in kitchen. The real kitchen retains live AI. Unallocated planned portions are generic reserves; only cooking confirmation records actual frozen food. Draft distribution keeps the chosen total fixed. Existing cancellation/removal behavior for already-saved allocations is unchanged.
 
-This branch is **In progress**, with local checks and browser evidence in [the dated review](RECIPE_FIRST_REVIEW_2026-10-13.md). It does not complete in-recipe stock editing, a combined unscheduled multi-recipe preview, multi-recipe bulk scheduling, or community-testing claims. Production households remain disabled and HP-10 remains open for mobile, two-person, real-cycle and recovery acceptance.
+[PR #31](https://github.com/B4CKlash/Lunchbox/pull/31) implements this focused slice, with local checks and browser evidence in [the dated review](RECIPE_FIRST_REVIEW_2026-10-13.md). It does not complete in-recipe stock editing, a combined unscheduled multi-recipe preview, multi-recipe bulk scheduling, or community-testing claims. Production households remain disabled and HP-10 remains open for mobile, two-person, real-cycle and recovery acceptance.
 
 ## Purpose and design character
 

@@ -40,7 +40,13 @@ export function buildRecipeIdeas(state: HouseholdState, actorId?: string): Recip
   ];
   const examples = [
     ...demoRecipeIdeas(),
-    ...(["vegetables", "pasta", "quick", "cuisine"] as const).map((variation) => planningFixtureRecipe(state, variation)),
+    ...(["vegetables", "pasta", "quick", "cuisine"] as const).flatMap((variation) => {
+      // Legacy households can retain distinct IDs with the same authored alias.
+      // An example that cannot resolve its ingredients must not prevent access
+      // to the household's existing recipes or rewrite those ingredient IDs.
+      try { return [planningFixtureRecipe(state, variation)]; }
+      catch { return []; }
+    }),
   ];
   const unique = new Map<string, Recipe>();
   for (const recipe of [...actual, ...examples]) if (!unique.has(recipe.id) && recipeFitsIdeaContext(recipe, context)) unique.set(recipe.id, recipe);

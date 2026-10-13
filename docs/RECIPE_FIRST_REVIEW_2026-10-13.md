@@ -17,7 +17,7 @@ Branch `codex/recipe-first-planning` starts from merged main `4667b6f18a66c774fc
 
 ## Verification
 
-Pinned tools: Node **24.21.0**, npm **11.19.0**, committed lockfile; fresh `npm ci` passed. `npm run check` passed **471 tests**, with one existing optional database integration test skipped; lint and type checking passed. `npm run build` passed.
+Pinned tools: Node **24.21.0**, npm **11.19.0**, committed lockfile; fresh `npm ci` passed. `npm run check` passed **473 tests**, with one existing optional database integration test skipped; lint and type checking passed. `npm run build` passed.
 
 Local browser verification used `localhost:3100`, desktop **1265 × 712** and phone viewport **390 × 844**. Phone viewport testing is not a physical mobile-device acceptance pass. Local authentication was unconfigured; no real participant account was used and no hosted inference or two-person sync is claimed by these checks.
 
@@ -46,3 +46,17 @@ All **19 frozen model-source hashes** match `evaluations/local-ai-qwen35-27b-mer
 Sample experimentation uses authored examples, not live AI against fictional inventory. The saved kitchen retains its existing authenticated AI behavior. Shortlists are device/session-local, not partner-synced. In-recipe stock editing, combined unscheduled multi-recipe previews, bulk scheduling, package conversion and changes to cancellation of saved allocations remain outside this focused follow-up.
 
 Nate's desktop report is valuable participant evidence, but not a checklist-wide pass. Rerun the revised desktop flow, then use the same account on a physical phone, then test two distinct people, actual planning/shopping/cooking and recovery. **Production household enablement stays off until HP-10 passes and release is reviewed.** Read-only canonical production `/api/household` inspection on October 13 returned **HTTP 503 `household_unconfigured`**. No production flags, credentials, invitations or deployed pilot source were changed by this follow-up.
+
+
+## Independent merge review — 2026-10-13
+
+Three independent reviews covered persistence/authentication/sample isolation, serving/allocation/domain rules, and the staged conversation journey. Two blockers were reproduced and fixed before merge:
+
+- Valid legacy stock IDs sharing ingredient aliases could make starter-recipe construction throw during `/meals` rendering. Each authored fixture now resolves independently; unresolved examples are omitted while saved recipes and stock identities remain intact. Two focused regressions cover tomato and spinach ambiguity.
+- Conversation proposals could remain hidden in the calendar stage. A pending/stale review banner now stays visible outside the calendar, and **Review proposed plan** opens and focuses the actual review controls. Preserved earlier undated meals are also reachable without first selecting a new idea.
+
+A fresh pinned-runtime dependency install, check and build pass with **473 tests** and the existing one optional database skip. The 19 frozen model-source hashes remain unchanged. Local browser recheck covered blank-total validation and recovery, six total portions with one allocated/five reserved, one saved batch, proposal creation, the visible handoff from Find meals and direct focus on review controls. No hosted inference or participant acceptance is claimed.
+
+![Proposal handoff visible from discovery](evidence/recipe-first-2026-10-13/merge-review.jpg)
+
+Production `/api/household` returned **HTTP 503 `household_unconfigured`** before merge. Merging this UI does not enable shared households; keep HP-10 open for the revised desktop, physical mobile and two-person real-cycle/recovery run.

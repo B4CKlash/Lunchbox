@@ -4,7 +4,7 @@ import { createInventoryExperiment } from "@/features/pantry/sample-inventory";
 import { buildRecommendationContext } from "@/features/meals/recommendation-context";
 import { buildRecipeIdeas, recipeFitsIdeaContext, recipeIdeaFit } from "./recipe-ideas";
 import { profileFactId } from "./profile";
-import type { ProfileFactValue } from "@/lib/contracts";
+import { householdStateSchema, type ProfileFactValue } from "@/lib/contracts";
 
 test("discovery ranks known-stock recipes before shortages, without changing household state", () => {
   const state = createInventoryExperiment(false);
@@ -32,6 +32,29 @@ test("exploring a starter recipe preserves the other discovery options", () => {
   state.pilot!.session.candidates = [original[0]];
   state.pilot!.session.focusedRecipeId = original[0].id;
   assert.deepEqual(new Set(buildRecipeIdeas(state).map((recipe) => recipe.id)), new Set(original.map((recipe) => recipe.id)));
+});
+
+test("ambiguous legacy ingredient aliases do not crash discovery or rewrite saved identities", () => {
+  const state = createInventoryExperiment(false);
+  const saved = { ...buildRecipeIdeas(state)[0], id: "saved-legacy-tomatoes", ingredients: [
+    { ingredientId: "legacy-tomato", name: "Roma tomatoes", quantity: 100, unit: "g" as const },
+  ] };
+  state.pantry.push({ id: "legacy-tomato", name: "Roma tomatoes", quantity: 300, unit: "g", location: "Fridge", useSoon: false, tag: "special" });
+  state.workspace.recipeBox = [{ recipe: saved, source: "demo" }];
+  assert.equal(householdStateSchema.safeParse(state).success, true);
+  const before = structuredClone(state);
+  const ideas = buildRecipeIdeas(state);
+  assert.deepEqual(ideas.find((recipe) => recipe.id === saved.id)?.ingredients, saved.ingredients);
+  assert.ok(ideas.some((recipe) => recipe.id === "r1"));
+  assert.deepEqual(state, before);
+});
+
+test("one ambiguous starter leaves other resolvable starter variations available", () => {
+  const state = createInventoryExperiment(false);
+  state.pantry.push({ id: "legacy-spinach", name: "Baby spinach", quantity: 200, unit: "g", location: "Fridge", useSoon: false, tag: "special" });
+  const ideas = buildRecipeIdeas(state);
+  assert.ok(!ideas.some((recipe) => recipe.id === "pilot-fixture-quick"));
+  for (const variation of ["vegetables", "pasta", "cuisine"]) assert.ok(ideas.some((recipe) => recipe.id === `pilot-fixture-${variation}`));
 });
 
 test("saved ideas are deduplicated and passed-over recipes stay excluded", () => {
