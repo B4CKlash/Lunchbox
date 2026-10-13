@@ -8,7 +8,7 @@ Branch `codex/recipe-first-planning` starts from merged main `4667b6f18a66c774fc
 
 ## Behavior
 
-- `/meals` starts with up to ten ranked snapshots. Current audience/preferences and equipment filter candidates; current stock, existing cooking commitments and package checks determine the displayed fit. Source labels distinguish AI, imports and authored examples. Seven starter examples supplement the growing library; one AI response still has the existing three-recipe limit.
+- `/meals` starts with up to ten ranked snapshots. Current audience preferences, equipment, time limit and declared ingredient exclusions filter candidates; current stock, existing cooking commitments and package checks determine the displayed fit. Source labels distinguish AI, imports and authored examples. Seven starter examples supplement the growing library; one AI response still has the existing three-recipe limit.
 - Keep roughly one to three recipes in a temporary shortlist, bounded to ten. It uses the existing device/account/session composer cache, survives rerolls and navigation/reload, and retains full recipe snapshots. An asynchronous focus/save cannot overwrite newer shortlist edits. Kept recipes that no longer fit current preferences receive a review label.
 - The full-width conversation stays mounted through all four stages. Direct refinement/return controls avoid manual scrolling. Ingredient details open during inspection; explicit revision requests use the existing AI transport and source-faithful imports remain unchanged.
 - Cooking intent precedes total portions. Allocate that fixed total across people, dates and meals; unallocated portions remain generic reserves for later/freezer. Review revalidates against current membership, coverage, stock and plans. Save issues one existing `create_batch` command. Planning never deducts stock or creates prepared food. Successful save resets the form so another batch of the same recipe can be planned.
@@ -17,7 +17,7 @@ Branch `codex/recipe-first-planning` starts from merged main `4667b6f18a66c774fc
 
 ## Verification
 
-Pinned tools: Node **24.21.0**, npm **11.19.0**, committed lockfile; fresh `npm ci` passed. `npm run check` passed **469 tests**, with one existing optional database integration test skipped; lint and type checking passed. `npm run build` passed.
+Pinned tools: Node **24.21.0**, npm **11.19.0**, committed lockfile; fresh `npm ci` passed. `npm run check` passed **471 tests**, with one existing optional database integration test skipped; lint and type checking passed. `npm run build` passed.
 
 Local browser verification used `localhost:3100`, desktop **1265 × 712** and phone viewport **390 × 844**. Phone viewport testing is not a physical mobile-device acceptance pass. Local authentication was unconfigured; no real participant account was used and no hosted inference or two-person sync is claimed by these checks.
 
@@ -33,7 +33,7 @@ Local browser verification used `localhost:3100`, desktop **1265 × 712** and ph
 | Sample isolation | Sample `/recipes` showed the example planner, account navigation blocked account forms, randomization produced nineteen pantry rows, and sample plans stayed in the tab. Returning restored identical visible saved-pantry content, including existing package observations. Browser API does not expose storage inspection; byte-for-byte cache preservation is supported by static boundary review, not claimed as a browser measurement. |
 | Requests/logs | Local server logs showed page requests, with no `/api/household` command/job or AI endpoint requests during sample experiments. Browser console had no application errors; a development Fast Refresh warning occurred during edits. |
 
-Cross-owner reviews covered pantry/cache isolation, AI transport mounting, planning commands and serving validation. Fixed review findings: asynchronous shortlist overwrite; reusing an already-saved batch ID; implicit freezer quantity. The browser walkthrough also caught disappearing starter options after exploration; a regression test now keeps those alternatives available. No remaining code blocker was reported.
+Cross-owner reviews covered pantry/cache isolation, AI transport mounting, planning commands and serving validation. Fixed review findings: asynchronous shortlist overwrite; reusing an already-saved batch ID; implicit freezer quantity. The browser walkthrough also caught disappearing starter options after exploration; a regression test now keeps those alternatives available. Final review also caught saved snapshots bypassing the time limit and declared ingredient exclusions. Discovery and kept-recipe warnings now share a local eligibility helper, with focused starter/saved-recipe regressions. This matches declared ingredient wording/identities and does not claim comprehensive dietary or allergen screening. No remaining code blocker was reported after these fixes.
 
 ![Desktop meal discovery](evidence/recipe-first-2026-10-13/desktop.jpg)
 

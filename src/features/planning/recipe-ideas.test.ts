@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createInventoryExperiment } from "@/features/pantry/sample-inventory";
-import { buildRecipeIdeas, recipeIdeaFit } from "./recipe-ideas";
+import { buildRecommendationContext } from "@/features/meals/recommendation-context";
+import { buildRecipeIdeas, recipeFitsIdeaContext, recipeIdeaFit } from "./recipe-ideas";
 import { profileFactId } from "./profile";
 import type { ProfileFactValue } from "@/lib/contracts";
 
@@ -58,4 +59,48 @@ test("discovery follows current audience dislikes and unavailable equipment", ()
   assert.equal(buildRecipeIdeas(state, first.id).length, 0);
   setFact({ kind: "equipment", equipment: "oven", availability: "unavailable" });
   assert.ok(buildRecipeIdeas(state).every((recipe) => !recipe.steps.some((step) => /\b(oven|roast|bake)\b/i.test(step))));
+});
+
+test("current time limits filter starter examples and previously saved or generated snapshots", () => {
+  const state = createInventoryExperiment(false);
+  const original = buildRecipeIdeas(state)[0];
+  const quick = { ...original, id: "saved-quick", minutes: 10, provenance: { source: "ai" as const } };
+  const slow = { ...original, id: "saved-slow", minutes: 45, provenance: { source: "ai" as const } };
+  state.workspace.recipeBox = [{ recipe: quick, source: "ai" }, { recipe: slow, source: "ai" }];
+  state.pilot!.session.candidates = [{ ...slow, id: "earlier-generated" }];
+  state.preferences.maxMinutes = 10;
+  const before = structuredClone(state);
+  assert.deepEqual(buildRecipeIdeas(state).map((recipe) => recipe.id), [quick.id]);
+  assert.equal(recipeFitsIdeaContext(slow, buildRecommendationContext(state)), false);
+  assert.equal(recipeFitsIdeaContext(quick, buildRecommendationContext(state)), true);
+  assert.deepEqual(state, before);
+
+  state.workspace.recipeBox = [];
+  state.pilot!.session.candidates = [];
+  assert.deepEqual(buildRecipeIdeas(state), []);
+});
+
+test("declared ingredient exclusions filter starters and saved snapshots using wording and canonical aliases", () => {
+  const state = createInventoryExperiment(false);
+  const original = buildRecipeIdeas(state)[0];
+  state.preferences.allergies = ["tomato"];
+  const starters = buildRecipeIdeas(state);
+  assert.ok(starters.length > 0);
+  assert.ok(starters.every((recipe) => !recipe.ingredients.some((ingredient) => ingredient.ingredientId === "tomatoes")));
+
+  const peanut = { ...original, id: "saved-peanut", provenance: { source: "ai" as const },
+    ingredients: [{ ingredientId: "custom-peanut-butter", name: "Peanut butter", quantity: 100, unit: "g" as const }] };
+  state.workspace.recipeBox = [{ recipe: peanut, source: "ai" }];
+  state.preferences.allergies = ["PEANUT"];
+  assert.ok(!buildRecipeIdeas(state).some((recipe) => recipe.id === peanut.id));
+  assert.equal(recipeFitsIdeaContext(peanut, buildRecommendationContext(state)), false);
+  assert.deepEqual(state.workspace.recipeBox[0].recipe, peanut);
+
+  const courgette = { ...original, id: "saved-zucchini", ingredients: [
+    { ingredientId: "zucchini", name: "Green summer squash", quantity: 1, unit: "each" as const },
+  ] };
+  state.preferences.allergies = ["courgette"];
+  assert.equal(recipeFitsIdeaContext(courgette, buildRecommendationContext(state)), false);
+  state.preferences.allergies = [];
+  assert.equal(recipeFitsIdeaContext(courgette, buildRecommendationContext(state)), true);
 });
