@@ -34,7 +34,7 @@ const navigation = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { ready, storageError, updateError, reset, householdId, syncStatus, pendingChange, retryPending, discardPending } = useHousehold();
+  const { ready, storageError, updateError, reset, householdId, syncStatus, pendingChange, retryPending, discardPending, inventoryExperiment, rerollInventoryExperiment } = useHousehold();
   const active = navigation.find((item) => item.href === pathname);
   return (
     <div className="app-shell">
@@ -97,7 +97,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="household-badge">
             <span className="status-dot" />
-            {householdId ? "Shared household" : "Browser kitchen"}<span className="avatar">LB</span>
+            {inventoryExperiment ? "Sample kitchen" : householdId ? "Shared household" : "Browser kitchen"}<span className="avatar">LB</span>
           </div>
         </header>
         <main id="main-content" className="page-content">
@@ -105,6 +105,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="status-dot" />Household pilot{" "}
             <span>{syncStatus}</span>
           </div>
+          {inventoryExperiment ? <section className="storage-warning" aria-label="Sample kitchen experiment">
+            <strong>Sample kitchen · fictional inventory</strong>
+            <p>Experiment freely with clearly labeled recipe examples. Changes stay in this tab; your saved kitchen is untouched. Leaving or reloading discards this experiment.</p>
+            <div className="actions"><button className="button secondary" onClick={rerollInventoryExperiment}>Randomize inventory</button><a className="button secondary" href="/meals">Return to my kitchen</a></div>
+          </section> : null}
           {storageError && (
             <p className="storage-warning" role="alert">
               {storageError}
@@ -121,7 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button className="text-button" onClick={discardPending}>Discard unsaved change</button></div>
           </div>}
           {ready ? (
-            children
+            inventoryExperiment && pathname === "/account" ? <p>Return to your saved kitchen to manage your account. <a href="/account">Open my account</a></p> : children
           ) : (
             <div className="loading-state" role="status">
               Opening your kitchen…

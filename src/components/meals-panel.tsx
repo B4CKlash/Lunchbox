@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { ProfileMemory } from "@/components/profile-memory";
+import { PlanningWorkspace } from "@/components/planning-workspace";
 import { MealChatPanel } from "@/components/meal-chat-panel";
 import { MealPlanPanel } from "@/components/meal-plan-panel";
 import { RecipeCard } from "@/components/recipe-card";
@@ -32,7 +33,14 @@ const modes = [
   { id: "plan", label: "Calendar", icon: CalendarDays },
 ] as const;
 
-export function MealsPanel({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" | "ai"; aiBackend?: "gateway" | "local-worker" }) {
+export function MealsPanel(props: { aiMode: "demo" | "ai"; aiBackend?: "gateway" | "local-worker" }) {
+  const { inventoryExperiment } = useHousehold();
+  // Worker transports rebuild authenticated household context. Experiments
+  // use authored examples locally rather than accidentally reading real stock.
+  return inventoryExperiment ? <PlanningWorkspace /> : <RecipeLibrary {...props} />;
+}
+
+function RecipeLibrary({ aiMode, aiBackend = "gateway" }: { aiMode: "demo" | "ai"; aiBackend?: "gateway" | "local-worker" }) {
   const { state, currentMemberId, setPreferences, setWorkspaceMode, householdResetVersion, appendSuggestionBlock, setSuggestionDirection, setSuggestionStreamEnabled, deferAiRequests } = useHousehold();
   const [collection, setCollection] = useState<"suggested" | "saved">(
     "suggested",

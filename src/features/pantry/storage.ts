@@ -1,11 +1,12 @@
-import { householdStateSchema, type HouseholdState, type PlanningProposal } from "@/lib/contracts";
+import { householdStateSchema, recipeSchema, type HouseholdState, type PlanningProposal, type Recipe } from "@/lib/contracts";
 
 export const HOUSEHOLD_STORAGE_KEY = "lunchbox.household.v1";
 // Recovery archive only. The active household still has one storage key/adapter.
 export const HOUSEHOLD_RECOVERY_KEY = "lunchbox.household.recovery.v1";
 export type ProposalReviewSelection = { excludedAllocationIds: string[]; includeOtherChanges: boolean };
 export type CachedProposalReview = ProposalReviewSelection & { proposalId: string; fingerprint: string };
-export type PlanningComposer = { draft: string; mode: "fixture" | "local"; proposalReviews?: CachedProposalReview[] };
+export type PlanningJourney = { stage: "ideas" | "recipe" | "plan" | "calendar"; shortlist: Recipe[] };
+export type PlanningComposer = { draft: string; mode: "fixture" | "local"; proposalReviews?: CachedProposalReview[]; journey?: PlanningJourney };
 export type CachedPlanningComposer = PlanningComposer & { sessionId: string };
 export type HouseholdCache = { ownerId: string | null; householdId: string | null; pending?: unknown; planningComposer?: CachedPlanningComposer };
 
@@ -27,6 +28,24 @@ export function readProposalReview(value: unknown, proposal: PlanningProposal): 
   return { proposalId: proposal.id, fingerprint: value.fingerprint, excludedAllocationIds: [...value.excludedAllocationIds], includeOtherChanges: value.includeOtherChanges };
 }
 
+/** Shortlist snapshots belong to this device's session, separate from AI candidates.
+ * Invalid optional UI data cannot discard the saved conversation draft.
+ */
+function readPlanningJourney(value: unknown): PlanningJourney | undefined {
+  if (!value || typeof value !== "object" || !("stage" in value)
+    || (value.stage !== "ideas" && value.stage !== "recipe" && value.stage !== "plan" && value.stage !== "calendar")
+    || !("shortlist" in value) || !Array.isArray(value.shortlist) || value.shortlist.length > 10) return undefined;
+  const shortlist: Recipe[] = [];
+  const ids = new Set<string>();
+  for (const snapshot of value.shortlist) {
+    const recipe = recipeSchema.safeParse(snapshot);
+    if (!recipe.success || ids.has(recipe.data.id)) return undefined;
+    ids.add(recipe.data.id);
+    shortlist.push(recipe.data);
+  }
+  return { stage: value.stage, shortlist };
+}
+
 export function readPlanningComposer(value: unknown, sessionId: string, proposals: readonly PlanningProposal[] = []): CachedPlanningComposer | undefined {
   if (!value || typeof value !== "object" || !("sessionId" in value) || value.sessionId !== sessionId || !("draft" in value) || typeof value.draft !== "string" || value.draft.length > 2000 || !("mode" in value) || (value.mode !== "fixture" && value.mode !== "local")) return undefined;
   const reviews = "proposalReviews" in value && Array.isArray(value.proposalReviews) ? value.proposalReviews.slice(0, 100) : [];
@@ -34,7 +53,8 @@ export function readPlanningComposer(value: unknown, sessionId: string, proposal
     const review = readProposalReview(reviews.find((entry) => entry?.proposalId === proposal.id), proposal);
     return review ? [review] : [];
   });
-  return { sessionId, draft: value.draft, mode: value.mode, ...(proposalReviews.length ? { proposalReviews } : {}) };
+  const journey = "journey" in value ? readPlanningJourney(value.journey) : undefined;
+  return { sessionId, draft: value.draft, mode: value.mode, ...(proposalReviews.length ? { proposalReviews } : {}), ...(journey ? { journey } : {}) };
 }
 
 /** Save the original bytes before migration, importing, or changing accounts.

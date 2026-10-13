@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, type ChangeEvent, type FormEvent } from "react";
-import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, X } from "lucide-react";
+import { ArrowRight, Camera, ClipboardPaste, Leaf, Package, Plus, Shuffle, X } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { NaturalStockEntry } from "@/components/natural-stock-entry";
 import {
@@ -31,7 +31,7 @@ export function PantryPanel() {
 }
 
 function PantryContent() {
-  const { state, dispatchPilot } = useHousehold();
+  const { state, dispatchPilot, inventoryExperiment, rerollInventoryExperiment } = useHousehold();
   const pantry = aggregatePantry(state.pantry, state.pilot?.stock);
   const [editor, setEditor] = useState<PantryItem | "new" | null>(null);
   const [filter, setFilter] = useState<"all" | "soon" | PantryCategory>("all");
@@ -210,6 +210,28 @@ function PantryContent() {
           <Plus size={17} aria-hidden="true" /> Add ingredient
         </button>
       </header>
+
+      <section className="card" aria-labelledby="sample-inventory-heading">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">{inventoryExperiment ? "FICTIONAL INVENTORY" : "TRY A DIFFERENT KITCHEN"}</p>
+            <h2 id="sample-inventory-heading">{inventoryExperiment ? "Your sample pantry" : "Experiment with sample ingredients"}</h2>
+            <p className="muted">{inventoryExperiment
+              ? "This kitchen is kept in memory for this tab. Reloading or leaving the experiment discards its edits and plans."
+              : "Open a separate sample session to explore meals with fictional stock. Your saved kitchen stays intact."}</p>
+          </div>
+        </div>
+        <div className="actions">
+          {inventoryExperiment ? <>
+            <button className="button secondary" onClick={rerollInventoryExperiment}><Shuffle size={16} aria-hidden="true" /> Randomize sample pantry</button>
+            <Link className="button" href="/meals">Explore meals <ArrowRight size={16} aria-hidden="true" /></Link>
+            <a className="text-button" href="/meals">Return to saved kitchen</a>
+          </> : <>
+            <a className="button secondary" href="/meals?sampleKitchen=1" target="_blank" rel="noopener noreferrer">Try sample pantry</a>
+            <a className="button secondary" href="/meals?sampleKitchen=random" target="_blank" rel="noopener noreferrer"><Shuffle size={16} aria-hidden="true" /> Try random pantry</a>
+          </>}
+        </div>
+      </section>
 
       <section className="card pantry-import" aria-label="Add pantry items">
         <div>

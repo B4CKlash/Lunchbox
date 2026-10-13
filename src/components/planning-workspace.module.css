@@ -1,4 +1,5 @@
 .workspace { color: var(--ink); }
+.workspace [hidden] { display: none !important; }
 .heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin: 10px 0 24px; }
 .heading h1 { font-size: clamp(29px, 3vw, 43px); letter-spacing: -1.8px; line-height: 1.1; margin: 6px 0 12px; }
 .heading p { color: var(--muted); margin-bottom: 0; max-width: 590px; }
@@ -15,7 +16,46 @@
 .statusDot { width: 7px; height: 7px; border-radius: 50%; background: #a67243; }
 .statusBar p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .mobileNav { display: none; }
-.columns { display: grid; grid-template-columns: minmax(290px, .9fr) minmax(340px, 1.25fr) minmax(255px, .8fr); align-items: start; gap: 16px; }
+.columns { display: flex; flex-direction: column; align-items: stretch; gap: 22px; max-width: 1120px; margin: 0 auto; }
+.journeyNav { display: flex; gap: 7px; padding: 5px; margin: 22px 0; border: 1px solid var(--line); border-radius: 13px; background: #f0f2e9; }
+.journeyNav button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 9px; background: transparent; color: var(--muted); padding: 12px 9px; border-radius: 9px; font: inherit; font-size: 13px; }
+.journeyNav button span { width: 23px; height: 23px; border: 1px solid #cdd6bf; border-radius: 50%; display: grid; place-items: center; font-size: 11px; }
+.journeyNav button[aria-current="step"] { background: var(--white); color: var(--green); font-weight: 700; box-shadow: 0 2px 6px #193f3509; }
+.journeyNav button[aria-current="step"] span { background: var(--green); color: white; border-color: var(--green); }
+.journeyNav button:disabled { opacity: .5; cursor: default; }
+.ideaGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.ideaCard { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 13px; padding: 18px; background: #fffefa; min-width: 0; }
+.ideaCard h3 { font-size: 21px; line-height: 1.2; letter-spacing: -.6px; margin: 15px 0 10px; }
+.ideaCard > p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.ideaCard .buttonRow { margin-top: auto; padding-top: 7px; }
+.keptIdea { border-color: #8ba968; background: #f5f8ec; }
+.fitLabel { margin-top: 12px; color: var(--green) !important; font-weight: 650; }
+.shortlist { border-top: 1px solid var(--line); padding-top: 22px; margin-top: 24px; }
+.shortlist h3 { display: flex; align-items: center; gap: 9px; font-size: 20px; }
+.shortlistRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
+.experimentLink { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 25px; padding: 14px 0 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.experimentLink a { color: var(--green); text-underline-offset: 3px; }
+.profileDetails { margin: 12px 0; font-size: 12px; }
+.profileDetails > summary { cursor: pointer; color: var(--muted); padding: 5px 0; }
+.decisionActions { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+.recipeStage { display: block !important; }
+.recipeStage > section { margin-bottom: 18px; }
+.recipeStage .recipeHero h3 { font-size: 32px; }
+.recipeStage .recipeDescription { font-size: 15px; }
+.recipeStage .ingredients li, .recipeStage .steps { font-size: 14px; }
+.recipeStage .steps li { margin-bottom: 12px; }
+.conversation .messages { min-height: 0; max-height: 300px; }
+.conversation .welcome { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 13px; }
+.conversation .welcomeIcon { display: none; }
+.conversation .welcome h3, .conversation .welcome p { grid-column: 1 / -1; }
+.conversation .welcome p { margin-bottom: 3px; }
+.conversation .message { font-size: 14px; }
+.conversation .textarea { min-height: 75px; font-size: 14px; }
+.calendarPanel .day { min-height: 82px; }
+.calendarPanel .occasionTitle { font-size: 13px; }
+.calendarPanel .person { font-size: 11px; }
+@media (max-width: 1000px) { .ideaGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .ideaGrid { grid-template-columns: 1fr; } .journeyNav { gap: 2px; } .journeyNav button { flex-direction: column; gap: 5px; padding: 9px 3px; font-size: 11px; } .discovery .panelHeader { flex-direction: column; } .conversation .welcome { grid-template-columns: 1fr; } .recipeStage .recipeHero h3 { font-size: 26px; } }
 .panel { min-width: 0; background: var(--white); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 .panelHeader { padding: 18px 18px 15px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .panelHeader h2 { font-size: 16px; letter-spacing: -.4px; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -149,7 +189,7 @@
 .jobStatus p { font-size: 11px; color: var(--muted); margin: 7px 0 10px; }
 @media (max-width: 1450px) { .columns { grid-template-columns: minmax(270px, .9fr) minmax(340px, 1.25fr); } .context { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; align-items: start; } .context > :only-child { grid-column: 1 / -1; } }
 @media (max-width: 1000px) { .heading { flex-direction: column; gap: 13px; } .columns { gap: 12px; grid-template-columns: minmax(260px, .9fr) minmax(290px, 1fr); } .calendar { padding-left: 8px; padding-right: 8px; } .occasion { padding: 7px; } .calendarLabels, .day { grid-template-columns: 30px repeat(2, minmax(0, 1fr)); gap: 5px; } .shoppingLayout { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .heading { margin-top: 0; } .heading h1 { font-size: 32px; } .topActions { width: 100%; justify-content: space-between; } .statusBar { align-items: flex-start; padding: 11px 12px; } .statusBar > .savedPill { display: none; } .mobileNav { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); background: #f0f2e9; border-radius: 11px; padding: 4px; gap: 4px; margin-bottom: 13px; } .mobileNav button { display: flex; align-items: center; justify-content: center; gap: 6px; background: transparent; color: var(--muted); border-radius: 7px; font-size: 12px; padding: 10px 4px; } .mobileNav button[aria-pressed="true"] { background: var(--white); box-shadow: 0 2px 4px #193f3508; color: var(--ink); font-weight: 700; } .columns { display: block; } .mobileHidden { display: none !important; } .context { display: flex; } .messages { min-height: 250px; max-height: 46vh; } .calendarLabels, .day { grid-template-columns: 38px repeat(2, minmax(0, 1fr)); gap: 7px; } .occasion { min-height: 85px; } .occasionTitle { font-size: 11px; } .person { font-size: 10px; } .receipt { font-size: 11px; } .panelHeader { padding: 15px; } }
+@media (max-width: 760px) { .heading { margin-top: 0; } .heading h1 { font-size: 32px; } .topActions { width: 100%; justify-content: space-between; } .statusBar { align-items: flex-start; padding: 11px 12px; } .statusBar > .savedPill { display: none; } .mobileNav { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); background: #f0f2e9; border-radius: 11px; padding: 4px; gap: 4px; margin-bottom: 13px; } .mobileNav button { display: flex; align-items: center; justify-content: center; gap: 6px; background: transparent; color: var(--muted); border-radius: 7px; font-size: 12px; padding: 10px 4px; } .mobileNav button[aria-pressed="true"] { background: var(--white); box-shadow: 0 2px 4px #193f3508; color: var(--ink); font-weight: 700; } .columns { display: flex; } .mobileHidden { display: none !important; } .context { display: flex; } .messages { min-height: 250px; max-height: 46vh; } .calendarLabels, .day { grid-template-columns: 38px repeat(2, minmax(0, 1fr)); gap: 7px; } .occasion { min-height: 85px; } .occasionTitle { font-size: 11px; } .person { font-size: 10px; } .receipt { font-size: 11px; } .panelHeader { padding: 15px; } }
 @media (prefers-reduced-motion: reduce) { .workspace * { scroll-behavior: auto; transition: none; } }
 @media (max-width: 760px) {
   /* The wider grid's start alignment must not shrink-wrap mobile flex panels. */
