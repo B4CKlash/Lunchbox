@@ -1,8 +1,8 @@
 .recipes { display: grid; gap: 0; margin-bottom: 18px; }
-.recipe { display: grid; grid-template-columns: minmax(0, 1fr) 100px; align-items: center; gap: 10px 18px; padding: 16px 0; border-bottom: 1px solid var(--line); min-width: 0; }
-.recipeName { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+.recipe { display: grid; grid-template-columns: minmax(0, 1fr) 100px auto; align-items: center; gap: 10px 18px; padding: 16px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.recipeName { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; text-align: left; justify-self: start; }
 .portions { margin: 0; }
-.recipeActions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.recipeActions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .recipeNotice { grid-column: 1 / -1; display: grid; justify-items: start; gap: 9px; margin: 0; }
 .recipeNotice p { margin: 0; }
 .scope { margin: 18px 0; }
@@ -20,5 +20,5 @@
 .stockForm button { flex-shrink: 0; }
 .validation { grid-column: 1 / -1; margin: 0; font-size: 12px; color: #a33131; }
 .previewNote { padding-top: 15px; }
-@media (max-width: 700px) { .columns { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+@media (max-width: 700px) { .recipe { grid-template-columns: minmax(0, 1fr) 100px; } .recipeActions { grid-column: 1 / -1; } .columns { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
 @media (max-width: 380px) { .recipe { grid-template-columns: minmax(0, 1fr) 82px; gap: 10px; } .removeLabel { display: none; } .stockForm button { width: 100%; } }
