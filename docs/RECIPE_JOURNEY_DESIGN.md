@@ -80,6 +80,10 @@ Example: two recipes require 300 g and 200 g of rice. With 400 g recorded on han
 
 Keep the preview's recipe set visible and distinguish it from the confirmed plan's shopping list. Do not silently replace confirmed meals when someone explores candidates. Current Shopping also includes pantry staple restock reminders; keep those distinguishable from recipe shortages. The exact preview-to-confirmed-list handoff is an open design question.
 
+## October 19 implementation follow-up
+
+The [chat-first Meals & Plan implementation record](CHAT_FIRST_MEALS_2026-10-19.md) documents locally verified work on `codex/chat-first-meal-planning` for B4C-96/97: conversation-first discovery with suitable saved recipes prominent, retained portion drafts, combined groceries before dates, and transfer of selected demand into saved plans. It is pending integration and household acceptance. The older inspected-source table below is historical context; use the dated record and current `main` when scoping the next slice.
+
 ## Current source baseline
 
 The following describes inspected source at `7c9c759`, not a claim that every path was verified in production. Refresh this baseline against current `main` before scoping implementation. Work in open pull requests is not part of this baseline.
@@ -110,7 +114,7 @@ Keep stable IDs when wording changes. **Design status:** `Captured`, `Exploring`
 | J-05 · Pantry discovery | Confirm stock within ingredients, including extras, to onboard through recipes. | Agreed / Not started | Pantry/storage + frontend | Explore Q-04/Q-05 using the five-can example; captured 2026-10-09. |
 | J-06 · Servings | Scale each selected recipe to total servings so people can choose quantities directly. | Agreed / In progress | Planning + frontend | Focused pilot branch scales one recipe to an explicit total before distribution; D-06 and dated review, 2026-10-13. |
 | J-07 · Allocation/calendar | Allocate servings across meals or freezer intentions; schedule one or several recipes smoothly. | Agreed / In progress | Planning + frontend | Focused pilot branch allocates one fixed total across people/dates/reserves; multi-recipe scheduling remains open; D-06 and dated review, 2026-10-13. |
-| J-08 · Groceries | Preview combined groceries before dates so first use produces an actionable result. | Agreed / Not started | Planning + pantry/storage + frontend | Explore Q-07; user decision D-03, 2026-10-09. |
+| J-08 · Groceries | Preview combined groceries before dates so first use produces an actionable result. | Agreed / In progress | Planning + pantry/storage + frontend | B4C-97 branch combines selected totals and existing commitments, with local arithmetic/browser proof; pending integration and household acceptance. See October 19 implementation record. |
 | J-09 · Equipment | Match ideas to available kitchenware, reducing unusable suggestions. | Captured / Not started | Meal workflow + frontend | Explore Q-08; original vision captured 2026-10-09. |
 | J-10 · Recipe confidence | Prefer recipes with credible community testing evidence. | Captured / Not started | Meal workflow + integration lead | Explore Q-09 before defining a claim or badge; original vision captured 2026-10-09. |
 

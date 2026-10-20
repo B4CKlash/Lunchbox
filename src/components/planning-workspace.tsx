@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, CookingPot, Leaf, MessageCircle, RefreshCw, Send, ShoppingBasket, Snowflake, Star, Undo2, Users, Utensils } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { ArrowLeft, ArrowRight, Bookmark, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3, CookingPot, Leaf, Send, ShoppingBasket, Snowflake, Star, Undo2, Users, Utensils } from "lucide-react";
 import { useHousehold } from "@/components/household-provider";
 import { ProfileMemory } from "@/components/profile-memory";
 import { LocalPlanningAssistant, type LocalAssistantHandle } from "@/components/local-planning-assistant";
 import { RecipeServingPlan } from "@/components/recipe-serving-plan";
+import { SelectedMealGroceries } from "@/components/selected-meal-groceries";
 import { buildRecipeIdeas, recipeIdeaFit, recipeFitsIdeaContext } from "@/features/planning/recipe-ideas";
 import { fixtureRecipeForRequest } from "@/features/meals/planning-fixtures";
 import { buildRecommendationContext, recommendationContextForMessage } from "@/features/meals/recommendation-context";
@@ -17,6 +18,7 @@ import type { AiJob } from "@/features/meals/jobs";
 import { addDays, calendarDates } from "@/features/planning/calendar";
 import { buildPilotShoppingList, getMealCoverage } from "@/features/planning/pilot";
 import { previewCandidateShopping } from "@/features/planning/candidate-shopping";
+import { reconcileScheduledSelections, scheduledBatchesForOperation } from "@/features/planning/selected-recipes";
 import { directPlacementForRequest } from "@/features/planning/direct-placement";
 import { createSettingsDraft, resolveSettingsDraft } from "@/features/planning/settings-draft";
 import { packageStockLabel } from "@/features/pantry/natural-stock-entry";
@@ -82,9 +84,14 @@ export function PlanningWorkspace() {
       target?.scrollIntoView({ block: "start" });
     }
   }, [stage]);
-  const setStage = (next: typeof journey.stage) => setPlanningComposer((current) => ({ journey: { shortlist: current.journey?.shortlist ?? [], stage: next } }));
+  const setStage = (next: typeof journey.stage) => setPlanningComposer((current) => ({ journey: { ...current.journey, shortlist: current.journey?.shortlist ?? [], stage: next } }));
   const setView = (next: "conversation" | "calendar" | "context") => setStage(next === "calendar" ? "calendar" : next === "context" ? "recipe" : "ideas");
   const shortlist = journey.shortlist;
+  const portionDrafts = Object.fromEntries(shortlist.map((recipe) => [recipe.id, journey.portionDrafts?.[recipe.id] ?? String(state.preferences.servings)]));
+  const [recipeReturnStage, setRecipeReturnStage] = useState<"ideas" | "groceries">("ideas");
+  const selectionGenerations = useRef<Record<string, number>>({});
+  const inspectionScope = JSON.stringify([householdId, currentMemberId, session.id]);
+  const [inspection, setInspection] = useState<{ scope: string; recipe: Recipe } | null>(null);
   const draft = planningComposer.draft;
   const draftRef = useRef(draft);
   useEffect(() => { draftRef.current = draft; }, [draft]);
@@ -100,20 +107,52 @@ export function PlanningWorkspace() {
   const dates = calendarDates(session.startDate, session.days);
   const focusDate = session.focusDate ?? session.startDate;
   const focusSlot = session.focusSlot ?? "lunch";
-  const focusedRecipe = session.candidates.find((recipe) => recipe.id === session.focusedRecipeId && !session.rejectedRecipeIds.includes(recipe.id))
-    ?? shortlist.find((recipe) => recipe.id === session.focusedRecipeId);
-  const ideas = buildRecipeIdeas(state, currentMemberId ?? undefined);
-  const currentContext = buildRecommendationContext(state, currentMemberId ?? undefined);
+  const focusedRecipe = inspection?.scope === inspectionScope && inspection.recipe.id === session.focusedRecipeId ? inspection.recipe
+    : shortlist.find((recipe) => recipe.id === session.focusedRecipeId)
+      ?? session.candidates.find((recipe) => recipe.id === session.focusedRecipeId && !session.rejectedRecipeIds.includes(recipe.id));
+  const ideas = useMemo(() => buildRecipeIdeas(state, currentMemberId ?? undefined), [state, currentMemberId]);
+  const currentContext = useMemo(() => buildRecommendationContext(state, currentMemberId ?? undefined), [state, currentMemberId]);
   const focusedRecipeFits = !focusedRecipe || recipeFitsIdeaContext(focusedRecipe, currentContext);
+  const keptVersion = shortlist.find((recipe) => recipe.id === focusedRecipe?.id);
+  const inspectingDifferentVersion = keptVersion && focusedRecipe && JSON.stringify(keptVersion) !== JSON.stringify(focusedRecipe);
+  const updatedRecipes = Object.fromEntries(shortlist.flatMap((recipe) => {
+    const current = session.candidates.findLast((entry) => entry.id === recipe.id);
+    return current && JSON.stringify(current) !== JSON.stringify(recipe) ? [[recipe.id, current]] : [];
+  }));
+  const selectionWarnings = Object.fromEntries(shortlist.map((recipe) => [recipe.id, [
+    !recipeFitsIdeaContext(recipe, currentContext) ? "This kept recipe conflicts with a current time limit or kitchen preference. Review it before planning." : "",
+    updatedRecipes[recipe.id] ? "You kept an earlier version. Its ingredients are used here until you choose the updated recipe." : "",
+  ].filter(Boolean).join(" ")]));
   const toggleShortlist = (recipe: Recipe) => {
     const included = shortlist.some((entry) => entry.id === recipe.id);
     if (!included && shortlist.length >= 10) { setNotice("Keep up to 10 recipes here. Remove one before adding another."); return; }
+    selectionGenerations.current[recipe.id] = (selectionGenerations.current[recipe.id] ?? 0) + 1;
     setPlanningComposer((current) => {
       const latest = current.journey ?? { stage: "ideas" as const, shortlist: [] };
       const exists = latest.shortlist.some((entry) => entry.id === recipe.id);
-      return { journey: { ...latest, shortlist: exists ? latest.shortlist.filter((entry) => entry.id !== recipe.id) : latest.shortlist.length < 10 ? [...latest.shortlist, recipe] : latest.shortlist } };
+      const portions = { ...latest.portionDrafts };
+      if (exists) delete portions[recipe.id];
+      else portions[recipe.id] = String(state.preferences.servings);
+      return { journey: { ...latest, portionDrafts: portions, shortlist: exists ? latest.shortlist.filter((entry) => entry.id !== recipe.id) : latest.shortlist.length < 10 ? [...latest.shortlist, recipe] : latest.shortlist } };
     });
   };
+  function updatePortions(recipeId: string, value: string) {
+    selectionGenerations.current[recipeId] = (selectionGenerations.current[recipeId] ?? 0) + 1;
+    setPlanningComposer((current) => {
+      const latest = current.journey;
+      if (!latest?.shortlist.some((recipe) => recipe.id === recipeId)) return {};
+      return { journey: { ...latest, portionDrafts: { ...latest.portionDrafts, [recipeId]: value.slice(0, 32) } } };
+    });
+  }
+  const selectedPortions = (recipe: Recipe) => {
+    const raw = portionDrafts[recipe.id] ?? String(state.preferences.servings);
+    const value = Number(raw);
+    return raw.trim() && Number.isFinite(value) && value >= 0.001 && value <= 1000 ? value : undefined;
+  };
+  function replaceSelectedRecipe(recipe: Recipe) {
+    selectionGenerations.current[recipe.id] = (selectionGenerations.current[recipe.id] ?? 0) + 1;
+    setPlanningComposer((current) => current.journey ? { journey: { ...current.journey, shortlist: current.journey.shortlist.map((entry) => entry.id === recipe.id ? recipe : entry) } } : {});
+  }
   const recipeIsSaved = state.workspace.recipeBox.some((entry) => entry.recipe.id === focusedRecipe?.id);
   const focusCoverage = getMealCoverage(state, focusDate, focusSlot);
   const focusedMembers = pilot.members.filter((member) => session.memberIds.includes(member.id));
@@ -123,11 +162,24 @@ export function PlanningWorkspace() {
   const appliedProposals = pilot.proposals.filter((proposal) => proposal.status === "applied");
   const filled = dates.reduce((total, date) => total + session.slots.reduce((slots, slot) => slots + getMealCoverage(state, date, slot).filter((entry) => session.memberIds.includes(entry.member.id) && (entry.coverage || entry.allocation)).length, 0), 0);
   const target = dates.length * session.slots.length * focusedMembers.length;
+  const conversationTurns = session.messages.filter((message) => message.role === "user").length;
+  const latestAssistantMessage = session.messages.findLast((message) => message.role === "assistant");
 
   const run: RunCommand = async (operation) => {
     setNotice(null);
     try {
+      const scheduled = scheduledBatchesForOperation(state, operation);
+      const captured = { ...journey, portionDrafts: { ...portionDrafts } };
+      const generations = { ...selectionGenerations.current };
       const result = await dispatchPilot(operation);
+      if (result.ok && scheduled.length) {
+        const unchanged = captured.shortlist.filter((recipe) => (selectionGenerations.current[recipe.id] ?? 0) === (generations[recipe.id] ?? 0));
+        if (unchanged.length !== captured.shortlist.length) setNotice("Your plan was saved. Newer selection edits are kept in groceries for you to review.");
+        setPlanningComposer((current) => current.journey ? { journey: reconcileScheduledSelections(
+          { ...current.journey, portionDrafts: Object.fromEntries(current.journey.shortlist.map((recipe) => [recipe.id, current.journey?.portionDrafts?.[recipe.id] ?? String(state.preferences.servings)])) },
+          { ...captured, shortlist: unchanged }, scheduled,
+        ) } : {});
+      }
       if (!result.ok) setNotice(result.error ?? "This change could not be saved. Try again.");
       return result.ok;
     } catch {
@@ -169,19 +221,38 @@ export function PlanningWorkspace() {
     });
   }
 
-  async function focusRecipe(recipe: Recipe) {
-    const candidates = [...session.candidates.filter((entry) => entry.id !== recipe.id), recipe].slice(-30);
+  async function focusRecipe(recipe: Recipe, nextStage: "recipe" | "plan" = "recipe", returnStage: "ideas" | "groceries" = "ideas", reconsider = false) {
+    if (session.rejectedRecipeIds.includes(recipe.id) && !reconsider) { setNotice("You passed on this recipe. Choose Reconsider in the conversation if you want to return to it."); return; }
+    const candidates = session.candidates.some((entry) => entry.id === recipe.id) ? session.candidates : [...session.candidates, recipe].slice(-30);
     if (await setSession({ candidates, focusedRecipeId: recipe.id, rejectedRecipeIds: session.rejectedRecipeIds.filter((recipeId) => recipeId !== recipe.id) })) {
-      setView("context");
+      setInspection({ scope: inspectionScope, recipe });
+      setRecipeReturnStage(returnStage);
+      setStage(nextStage);
       // Inspecting a snapshot must not immediately replace it with a refresh.
     }
+  }
+
+  function finishSelectedPlan() {
+    // Successful batch operations reconcile demand centrally, including chat and proposals.
+    setPlanningComposer((current) => current.journey ? { journey: { ...current.journey, stage: current.journey.shortlist.length ? "groceries" : "calendar" } } : {});
   }
 
   async function rejectRecipe(recipe: Recipe) {
     if (rejecting.current) return;
     rejecting.current = true;
+    const generation = selectionGenerations.current[recipe.id] ?? 0;
     try {
-      if (await setSession({ rejectedRecipeIds: [...new Set([...session.rejectedRecipeIds, recipe.id])].slice(-200), focusedRecipeId: null })) refreshIdeas(`you passed on ${recipe.name} and would like another idea`);
+      if (await setSession({ rejectedRecipeIds: [...new Set([...session.rejectedRecipeIds, recipe.id])].slice(-200), focusedRecipeId: null })) {
+        if ((selectionGenerations.current[recipe.id] ?? 0) !== generation) { setNotice("This recipe was passed over. Your newer kept selection is preserved; review it before continuing."); return; }
+        selectionGenerations.current[recipe.id] = generation + 1;
+        setPlanningComposer((current) => {
+          if (!current.journey) return {};
+          const portions = { ...current.journey.portionDrafts };
+          delete portions[recipe.id];
+          return { journey: { ...current.journey, stage: "ideas", shortlist: current.journey.shortlist.filter((entry) => entry.id !== recipe.id), portionDrafts: portions } };
+        });
+        refreshIdeas(`you passed on ${recipe.name} and would like another idea`);
+      }
     } finally { rejecting.current = false; }
   }
 
@@ -272,31 +343,59 @@ export function PlanningWorkspace() {
 
   return <div className={styles.workspace}>
     <header className={styles.heading}>
-      <div><span className={styles.eyebrow}>START WITH WHAT’S IN YOUR KITCHEN</span><h1>What sounds good?</h1><p>Find a few meals you love. Work out the cooking and the week from there.</p></div>
-      <div className={styles.topActions}><span className={styles.savedPill}><Users size={14} />{pilot.members.map((member) => member.name).join(" + ")}</span>{!inventoryExperiment ? <Link href="/recipes" className={styles.quietButton}><Bookmark size={15} />Recipe library</Link> : null}</div>
+      <div><h1>What sounds good this week?</h1><p>A few good meals. A little less to figure out.</p></div>
+      <div className={styles.topActions}>
+        {!inventoryExperiment ? <Link href="/recipes" className={styles.quietButton}><Bookmark size={15} />Recipe library</Link> : null}
+        <button className={styles.quietButton} onClick={() => setStage("calendar")}><CalendarDays size={15} />My week{pilot.batches.length ? ` · ${pilot.batches.length}` : ""}</button>
+      </div>
     </header>
-    <div className={styles.statusBar}><div><div className={styles.statusLabel}><span className={styles.statusDot} /><strong>{assistantMode === "fixture" ? "Recipe examples · guided demo" : "Local AI · your kitchen context"}</strong></div><p>{inventoryExperiment ? "Fictional stock and authored recipes. This experiment never sends AI requests or changes your saved kitchen." : assistantMode === "fixture" ? "Examples are clearly labeled. Switch to Local AI to explore new meals with your kitchen context." : "Refine or reroll ideas using your kitchen preferences and stock. Choosing a recipe leaves your calendar and stock unchanged."}</p></div>{!inventoryExperiment ? <div className={styles.modePicker} role="group" aria-label="Assistant mode"><button aria-pressed={assistantMode === "fixture"} onClick={() => setAssistantMode("fixture")}>Examples</button><button aria-pressed={assistantMode === "local"} onClick={() => setAssistantMode("local")}>Local AI</button></div> : null}</div>
+    <section className={`${styles.panel} ${styles.conversation}`} ref={conversation} aria-label="Planning conversation">
+      <div className={styles.conversationHeading}>
+        <h2>Tell me what you’re craving</h2>
+        <details className={styles.assistantOptions}>
+          <summary>{assistantMode === "fixture" ? "Example replies" : "Private AI"}</summary>
+          <p className={styles.subtle}>{inventoryExperiment ? "Fictional stock and authored recipe examples. Your saved kitchen is untouched." : assistantMode === "fixture" ? "This guided demo uses authored examples. Private AI uses your connected household and its worker." : "Your connected household’s private assistant responds with current kitchen context. There is no paid fallback."}</p>
+          {!inventoryExperiment ? <div className={styles.modePicker} role="group" aria-label="Assistant mode"><button aria-pressed={assistantMode === "fixture"} onClick={() => setAssistantMode("fixture")}>Examples</button><button aria-pressed={assistantMode === "local"} onClick={() => setAssistantMode("local")}>Private AI</button></div> : null}
+        </details>
+      </div>
+      {assistantMode === "local" ? <LocalPlanningAssistant key={`${householdId}:${currentMemberId}:${session.id}`} householdId={householdId} actorMemberId={currentMemberId} revision={pilot.revision} session={session} contextFingerprint={planningRefreshFingerprint(state)} onResult={receiveLocalResult} requestRef={localAssistant} draft={draft} onDraftChange={setDraft} onDraftSubmitted={clearSubmittedDraft} storageError={storageError} /> : <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void send(draft); }} aria-busy={busy}>
+        {focusedRecipe ? <div className={styles.focusPill}><span>Discussing {focusedRecipe.name}</span><button type="button" className={styles.textButton} onClick={() => void setSession({ focusedRecipeId: null })}>Clear focus</button></div> : null}
+        <label className="sr-only" htmlFor="planning-message">Tell me what you’re craving</label>
+        <textarea id="planning-message" className={styles.textarea} placeholder="Fall, but fresh and easy. What can I make with what I have?" maxLength={2000} value={draft} onChange={(event) => setDraft(event.target.value)} />
+        <div className={styles.composerFooter}>
+          <div className={styles.conversationPrompts}><button type="button" disabled={busy} onClick={() => void send("Suggest meals using what we have. Ideas only; do not schedule anything.")}>Use what I have</button><button type="button" disabled={busy} onClick={() => void send("Find something from our favorites")}>Find a saved favorite</button></div>
+          <button className={`${styles.quietButton} ${styles.primary}`} disabled={busy || !draft.trim()} type="submit"><Send size={14} />{busy ? "Saving…" : "Send"}</button>
+        </div>
+        {storageError ? <p className={styles.formNotice} role="status">Your draft is kept in this session but could not be saved on this device.</p> : null}
+      </form>}
+      <div className={styles.latestReply} aria-live="polite">
+        {latestAssistantMessage ? <PlanningMessage message={latestAssistantMessage} state={state} householdId={householdId} currentMemberId={currentMemberId} onRecipe={(recipe) => focusRecipe(recipe, "recipe", "ideas", true)} compact /> : <p>Start with a saved favorite, or discover a new possibility. Keep what sounds good; dates can wait.</p>}
+      </div>
+      {session.messages.length ? <details className={styles.transcript}><summary>Conversation · {conversationTurns} {conversationTurns === 1 ? "turn" : "turns"}</summary><div className={styles.messages}>{session.messages.map((message) => <PlanningMessage key={message.id} message={message} state={state} householdId={householdId} currentMemberId={currentMemberId} onRecipe={(recipe) => focusRecipe(recipe, "recipe", "ideas", true)} />)}</div></details> : null}
+    </section>
     {notice ? <p className={styles.notice} role="alert">{notice}</p> : null}
-    <details className={styles.profileDetails}><summary>Kitchen preferences & remembered facts</summary><ProfileMemory /></details>
     {latestReceipt ? <div className={styles.receipt} role="status"><span><Check size={16} />{latestReceipt.undoneBy ? "Undone: " : ""}{latestReceipt.summary}</span>{latestReceipt.inverse && !latestReceipt.undoneBy ? <button className={styles.smallButton} onClick={() => void run({ type: "undo", receiptId: latestReceipt.id })}><Undo2 size={13} />Undo</button> : null}</div> : null}
     {proposals.length && stage !== "calendar" ? <div className={styles.receipt} role="status"><span>{pendingProposalCount ? `${pendingProposalCount} proposed ${pendingProposalCount === 1 ? "plan is" : "plans are"} ready for review. Changes are saved only when you accept them.` : "An earlier proposal needs a fresh review before its changes can be saved."}</span><button className={styles.smallButton} onClick={() => { focusProposalReviews.current = true; setStage("calendar"); }}>Review proposed {proposals.length === 1 ? "plan" : "plans"}<ArrowRight size={13} /></button></div> : null}
-    {pilot.unplacedMeals.length ? <details className={styles.profileDetails}><summary>Earlier undated meals · {pilot.unplacedMeals.length}</summary><p className={styles.subtle}>Preserved from your previous plan. Open a recipe to review its ingredients, cooking date and portions.</p>{pilot.unplacedMeals.map((meal) => <button key={meal.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(meal.recipe)}>{meal.recipe.name}<ArrowRight size={12} /></button>)}</details> : null}
-    <nav className={styles.journeyNav} aria-label="Meal planning journey">{([{ value: "ideas", label: "Find meals" }, { value: "recipe", label: "Make it yours" }, { value: "plan", label: "Cook & portion" }, { value: "calendar", label: "My week" }] as const).map(({ value, label }, index) => <button key={value} aria-current={stage === value ? "step" : undefined} disabled={(value === "recipe" || value === "plan") && !focusedRecipe} onClick={() => setStage(value)}><span>{index + 1}</span>{label}{value === "calendar" && pilot.batches.length ? ` · ${pilot.batches.length}` : ""}</button>)}</nav>
-    <div className={styles.columns} ref={stageContent} tabIndex={-1} aria-label="Current meal planning step">
-      <section className={`${styles.panel} ${styles.discovery}`} hidden={stage !== "ideas"} aria-label="Meal ideas from your kitchen">
-        <div className={styles.panelHeader}><div><h2><Leaf size={19} />Meals to start with</h2><p>Cooking for {focusedMembers.map((member) => member.name).join(" and ") || "your household"} · pantry fit for {state.preferences.servings} servings</p></div><div className={styles.buttonRow}><button className={styles.quietButton} onClick={() => conversation.current?.querySelector("textarea")?.focus()}><MessageCircle size={14} />Refine these ideas</button><button className={styles.quietButton} disabled={busy} onClick={() => void send("Suggest different meals using our current inventory first. Keep the ideas varied and explain anything we would need to check or buy. Ideas only, do not schedule or cook anything.")}><RefreshCw size={14} />{assistantMode === "local" ? "Reroll with AI" : "Explore an example"}</button></div></div>
-        <div className={styles.panelBody}>
-          {!state.pantry.length ? <p className={styles.notice}>Your pantry is empty. <Link href="/pantry">Add what you have</Link>, or <a href="/meals?sampleKitchen=random" target="_blank" rel="noopener noreferrer">try a fictional kitchen</a> to experiment.</p> : null}
-          <p className={styles.subtle}>{ideas.length} {ideas.length === 1 ? "idea" : "ideas"} · ranked by known stock after existing plans. Keep 1–3 favorites to explore; ask for more in the conversation below.</p>
-          <div className={styles.ideaGrid}>{ideas.map((recipe) => {
-            const fit = recipeIdeaFit(state, recipe);
-            const kept = shortlist.some((entry) => entry.id === recipe.id);
-            return <article className={`${styles.ideaCard} ${kept ? styles.keptIdea : ""}`} key={recipe.id}><span className={styles.recipeTag}>{recipe.provenance?.source === "ai" ? "AI idea" : recipe.provenance?.source === "import" ? "Imported recipe" : "Authored example"}</span><h3>{recipe.name}</h3><p>{recipe.description}</p><div className={styles.recipeMeta}><span><Clock3 size={13} />{recipe.minutes} min</span><span>{fit.portions} servings</span></div><p className={styles.fitLabel}>{fit.ready ? "Known stock covers this meal" : `${fit.checks ? `${fit.checks} stock ${fit.checks === 1 ? "check" : "checks"}` : ""}${fit.checks && fit.shortages ? " · " : ""}${fit.shortages ? `${fit.shortages} ${fit.shortages === 1 ? "ingredient" : "ingredients"} to buy` : ""}`}</p><div className={styles.buttonRow}><button className={styles.quietButton} onClick={() => void focusRecipe(recipe)}>Explore <ArrowRight size={13} /></button><button className={styles.smallButton} aria-pressed={kept} aria-label={`${kept ? "Remove from" : "Add to"} shortlist: ${recipe.name}`} onClick={() => toggleShortlist(recipe)}><Bookmark size={13} />{kept ? "Kept" : "Keep"}</button></div></article>;
-          })}</div>
-          {!ideas.length ? <div className={styles.empty}><Utensils size={27} /><h3>Let’s find something that fits.</h3><p>No current ideas fit your kitchen preferences. Describe what you want in the conversation below or adjust your kitchen preferences.</p></div> : null}
-          <div className={styles.shortlist}><h3>Your shortlist <span className={styles.count}>{shortlist.length}</span></h3><p className={styles.subtle}>{inventoryExperiment ? "Kept in this tab for this experiment." : "Kept on this device for this planning session."} Rerolling meal ideas leaves these recipes here.</p>{shortlist.length ? shortlist.map((recipe) => <div key={recipe.id} className={styles.shortlistRow}><button className={styles.textButton} onClick={() => void focusRecipe(recipe)}>{recipe.name}{!recipeFitsIdeaContext(recipe, currentContext) ? " · review current preferences" : ""} <ArrowRight size={12} /></button><button className={styles.smallButton} aria-label={`Remove shortlisted ${recipe.name}`} onClick={() => toggleShortlist(recipe)}>Remove</button></div>) : <p className={styles.subtle}>Keep anything that catches your eye. You can decide when to cook later.</p>}</div>
-          {!inventoryExperiment ? <div className={styles.experimentLink}><span>Want to try a fuller pantry?</span><a href="/meals?sampleKitchen=1" target="_blank" rel="noopener noreferrer">Try sample inventory</a><a href="/meals?sampleKitchen=random" target="_blank" rel="noopener noreferrer">Try random inventory</a></div> : null}
-        </div>
+    <div className={styles.columns} ref={stageContent} tabIndex={-1} aria-label="Meal ideas and planning details">
+      {stage !== "ideas" ? <div className={styles.contextNavigation}><button className={styles.textButton} onClick={() => setStage(stage === "recipe" || stage === "plan" ? recipeReturnStage : "ideas")}><ArrowLeft size={14} />{(stage === "recipe" || stage === "plan") && recipeReturnStage === "groceries" ? "Back to groceries" : "Back to ideas"}</button>{shortlist.length && stage !== "groceries" ? <button className={styles.quietButton} onClick={() => setStage("groceries")}><ShoppingBasket size={14} />See combined groceries</button> : null}</div> : null}
+      <section className={styles.discovery} hidden={stage !== "ideas"} aria-label="Meal ideas from your kitchen">
+        {shortlist.length ? <section className={styles.selectionTray} aria-label="Kept recipes"><div className={styles.selectionHeading}><h2>{shortlist.length} {shortlist.length === 1 ? "recipe" : "recipes"} kept</h2><button className={`${styles.quietButton} ${styles.primary}`} onClick={() => setStage("groceries")}>See groceries <ArrowRight size={14} /></button></div><div className={styles.keptRecipes}>{shortlist.map((recipe) => <span key={recipe.id}><button className={styles.textButton} onClick={() => void focusRecipe(recipe)}>{recipe.name}{!recipeFitsIdeaContext(recipe, currentContext) ? " · review preferences" : ""}</button><button className={styles.removeSelection} aria-label={`Remove kept ${recipe.name}`} onClick={() => toggleShortlist(recipe)}>×</button></span>)}</div><p className={styles.subtle}>{inventoryExperiment ? "Kept in this experiment." : "Kept on this device for this session."} Choose total portions and review groceries before dates.</p></section> : null}
+        <div className={styles.discoveryHeading}><h2>Ideas for you</h2><p>{ideas.length} {ideas.length === 1 ? "option" : "options"} · suitable saved recipes favored</p></div>
+        <p className={styles.subtle}>Cooking for {focusedMembers.map((member) => member.name).join(" and ") || "your household"} · pantry fit for {state.preferences.servings} servings, after existing plans.</p>
+        {!state.pantry.length ? <p className={styles.notice}>Your pantry is empty. Ideas can still have ingredients to buy. <Link href="/pantry">Add what you have</Link> when you’re ready.</p> : null}
+        <div className={styles.ideaGrid}>{ideas.map((recipe) => {
+          const fit = recipeIdeaFit(state, recipe);
+          const kept = shortlist.some((entry) => entry.id === recipe.id);
+          const saved = state.workspace.recipeBox.some((entry) => entry.recipe.id === recipe.id);
+          return <article className={`${styles.ideaCard} ${kept ? styles.keptIdea : ""}`} key={recipe.id}>
+            <div className={styles.ideaContent}><div className={styles.ideaSource}><span>{saved ? "Saved recipe" : recipe.provenance?.source === "ai" ? "AI idea" : recipe.provenance?.source === "import" ? "Imported recipe" : "Authored example"}</span><span>· {recipe.minutes} min</span></div><h3><button className={styles.ideaTitle} onClick={() => void focusRecipe(recipe)}>{recipe.name}</button></h3><p className={styles.fitLabel}>{fit.ready ? "Known stock covers this meal" : `${fit.checks ? `${fit.checks} stock ${fit.checks === 1 ? "check" : "checks"}` : ""}${fit.checks && fit.shortages ? " · " : ""}${fit.shortages ? `${fit.shortages} ${fit.shortages === 1 ? "ingredient" : "ingredients"} to buy` : ""}`}</p></div>
+            <button className={styles.smallButton} aria-pressed={kept} aria-label={`${kept ? "Remove from" : "Add to"} shortlist: ${recipe.name}`} onClick={() => toggleShortlist(recipe)}><Bookmark size={13} />{kept ? "Kept" : "Keep"}</button>
+          </article>;
+        })}</div>
+        {!ideas.length ? <div className={styles.empty}><Utensils size={27} /><h3>Let’s find something that fits.</h3><p>No current ideas fit your time limit or kitchen preferences. Your kept recipes stay here. Adjust your preferences or describe another direction in the conversation.</p><button className={styles.quietButton} onClick={() => conversation.current?.querySelector("textarea")?.focus()}>Adjust in conversation</button></div> : null}
+      </section>
+      <section hidden={stage !== "groceries"} aria-label="Combined groceries before scheduling">
+        <SelectedMealGroceries state={state} recipes={shortlist} portionDrafts={portionDrafts} warnings={selectionWarnings} updatedRecipes={updatedRecipes} onUseUpdated={replaceSelectedRecipe} onPortionsChange={updatePortions} onRemove={toggleShortlist} onInspect={(recipe) => void focusRecipe(recipe, "recipe", "groceries")} onSchedule={(recipe) => void focusRecipe(recipe, "plan", "groceries")} onBack={() => setStage("ideas")} run={run} />
       </section>
       <section className={`${styles.panel} ${styles.calendarPanel}`} hidden={stage !== "calendar"} aria-label="Live meal calendar">
         <div className={styles.panelHeader}><div><h2><CalendarDays size={17} />Your live calendar</h2><p>{filled} of {target} person-meals covered · {target - filled} open</p></div><span className={styles.count}>{session.days}d</span></div>
@@ -320,30 +419,52 @@ export function PlanningWorkspace() {
         </details> : null}
       </section>
 
-      <aside className={`${styles.context} ${styles.recipeStage}`} hidden={stage !== "recipe" && stage !== "plan"} aria-label="Focused recipe and grocery preview">
+      <aside className={`${styles.context} ${styles.recipeStage}`} hidden={stage !== "recipe" && stage !== "plan"} aria-label="Focused recipe and optional cooking plan">
         <section className={styles.panel}>
-          <div className={styles.panelHeader}><div><h2><Utensils size={17} />{stage === "plan" ? "Make it work for your week" : "Make this meal yours"}</h2><p>Ingredients first. Cooking and portions when you’re ready.</p></div><span className={styles.count}>{session.candidates.length}</span></div>
-          {session.candidates.length > 1 ? <div className={styles.panelBody}><div className={styles.recipeChooser}>{session.candidates.filter((recipe) => !session.rejectedRecipeIds.includes(recipe.id)).map((recipe) => <button className={`${styles.smallButton} ${recipe.id === focusedRecipe?.id ? styles.selectedChoice : ""}`} key={recipe.id} onClick={() => void focusRecipe(recipe)}>{recipe.name}</button>)}</div></div> : null}
-          {focusedRecipe ? <><div className={styles.recipeHero}><span className={styles.recipeTag}>{focusedRecipe.provenance?.source === "import" ? "Your imported recipe" : focusedRecipe.provenance?.source === "ai" ? recipeIsSaved ? "Saved AI recipe" : "AI recipe candidate" : "Authored example · fixture"}</span><h3>{focusedRecipe.name}</h3><div className={styles.recipeMeta}><span><Clock3 size={12} />{focusedRecipe.minutes} min</span><span><Users size={12} />{focusedRecipe.servings} base portions</span></div></div><div className={styles.panelBody}><p className={styles.recipeDescription}>{focusedRecipe.description}</p>{!focusedRecipeFits ? <p className={styles.notice}>This kept recipe conflicts with the current time limit or a recorded kitchen preference. Ask for a revision before planning it.</p> : null}<div className={styles.buttonRow}><button className={styles.smallButton} onClick={() => void send("Make this quicker")}>Less effort</button><button className={styles.smallButton} onClick={() => void send("Change the cuisine to Mediterranean")}>Try another cuisine</button><button className={styles.smallButton} disabled={recipeIsSaved} onClick={() => saveRecipe(focusedRecipe, focusedRecipe.provenance?.source ?? "demo")}><Bookmark size={12} />{recipeIsSaved ? "Saved" : "Save"}</button></div><div hidden={stage !== "recipe"}><div className={styles.decisionActions}><button className={styles.quietButton} aria-pressed={shortlist.some((recipe) => recipe.id === focusedRecipe.id)} onClick={() => toggleShortlist(focusedRecipe)}><Bookmark size={14} />{shortlist.some((recipe) => recipe.id === focusedRecipe.id) ? "Remove from shortlist" : "Keep this recipe"}</button><button className={styles.quietButton} onClick={() => { setDraft(`Create a revised version of ${focusedRecipe.name} using what we have. I want to swap `); conversation.current?.querySelector("textarea")?.focus(); }}>Discuss an ingredient swap</button></div><CandidateGroceries state={state} recipe={focusedRecipe} portions={state.preferences.servings} prepareDate={session.startDate} /><RecipeDetail recipe={focusedRecipe} /><button className={`${styles.quietButton} ${styles.primary} ${styles.fullWidth}`} onClick={() => setStage("plan")}>This sounds good — when are we cooking? <ArrowRight size={14} /></button></div><div hidden={stage !== "plan"}><RecipeServingPlan key={focusedRecipe.id} recipe={focusedRecipe} state={state} run={run} onPlanned={() => setStage("calendar")} renderGroceries={(portions, prepareDate) => <CandidateGroceries state={state} recipe={focusedRecipe} portions={portions} prepareDate={prepareDate} />} /></div><button className={styles.textButton} onClick={() => void rejectRecipe(focusedRecipe)}>Not this one</button></div></> : <div className={styles.empty}><Utensils size={28} /><h3>A good meal starts with an idea.</h3><p>Ask about your favorites or explore a vegetable-focused example. Selected cards stay connected to the conversation.</p><button className={styles.quietButton} onClick={() => void send("Try a vegetable-focused recipe")}><Leaf size={14} />Explore an example</button></div>}
+          {focusedRecipe ? <>
+            <div className={styles.recipeHero}><span className={styles.recipeTag}>{recipeIsSaved ? "Saved recipe" : focusedRecipe.provenance?.source === "import" ? "Imported recipe" : focusedRecipe.provenance?.source === "ai" ? "AI recipe candidate" : "Authored example"}</span><h2>{focusedRecipe.name}</h2><div className={styles.recipeMeta}><span><Clock3 size={12} />{focusedRecipe.minutes} min</span><span><Users size={12} />{focusedRecipe.servings} base portions</span></div></div>
+            <div className={styles.panelBody}>
+              {!focusedRecipeFits ? <p className={styles.notice}>This recipe conflicts with the current time limit or a recorded kitchen preference. Review it or ask for a revision before planning.</p> : null}
+              <div hidden={stage !== "recipe"}>
+                <p className={styles.recipeDescription}>{focusedRecipe.description}</p>
+                {inspectingDifferentVersion ? <p className={styles.notice}>You’re inspecting a different version from the one kept in groceries. <button className={styles.textButton} onClick={() => replaceSelectedRecipe(focusedRecipe)}>Use this version for groceries</button></p> : null}
+                <div className={styles.decisionActions}>
+                  <button className={styles.quietButton} aria-pressed={shortlist.some((recipe) => recipe.id === focusedRecipe.id)} onClick={() => toggleShortlist(focusedRecipe)}><Bookmark size={14} />{shortlist.some((recipe) => recipe.id === focusedRecipe.id) ? "Kept for this week" : "Keep this recipe"}</button>
+                  {!recipeIsSaved ? <button className={styles.smallButton} onClick={() => saveRecipe(focusedRecipe, focusedRecipe.provenance?.source ?? "demo")}>Save to recipe library</button> : null}
+                  <button className={styles.textButton} onClick={() => { setDraft(`I’d like to revise ${focusedRecipe.name}: `); conversation.current?.scrollIntoView({ block: "start" }); conversation.current?.querySelector("textarea")?.focus({ preventScroll: true }); }}>Talk through a change</button>
+                </div>
+                <RecipeDetail recipe={focusedRecipe} portions={shortlist.some((recipe) => recipe.id === focusedRecipe.id) ? selectedPortions(focusedRecipe) ?? null : state.preferences.servings} />
+                <div className={styles.decisionActions}>
+                  {shortlist.length ? <button className={`${styles.quietButton} ${styles.primary}`} onClick={() => setStage("groceries")}><ShoppingBasket size={14} />Review combined groceries</button> : <p className={styles.subtle}>Keep this recipe to choose total portions and see groceries. Scheduling is optional.</p>}
+                  {shortlist.some((recipe) => recipe.id === focusedRecipe.id) ? <button className={styles.quietButton} disabled={selectedPortions(focusedRecipe) === undefined || Boolean(inspectingDifferentVersion)} onClick={() => setStage("plan")}>Plan this recipe</button> : null}
+                </div>
+              </div>
+              <div hidden={stage !== "plan"}>
+                <RecipeServingPlan key={JSON.stringify(focusedRecipe)} recipe={focusedRecipe} state={state} run={run} portionsDraft={portionDrafts[focusedRecipe.id]} onPortionsChange={(value) => updatePortions(focusedRecipe.id, value)} onPlanned={finishSelectedPlan} renderGroceries={(portions, prepareDate) => <CandidateGroceries state={state} recipe={focusedRecipe} portions={portions} prepareDate={prepareDate} />} />
+              </div>
+              <button className={styles.textButton} onClick={() => void rejectRecipe(focusedRecipe)}>Not this one</button>
+            </div>
+          </> : <div className={styles.empty}><Utensils size={28} /><h3>Choose a meal that sounds good.</h3><p>Your kept recipes are available in Ideas and Groceries.</p><button className={styles.quietButton} onClick={() => setStage("ideas")}>See meal ideas</button></div>}
         </section>
-        {pilot.batches.length ? <ShoppingPreview state={state} run={run} compact /> : null}
       </aside>
-      <section className={`${styles.panel} ${styles.conversation}`} ref={conversation} aria-label="Planning conversation">
-        <div className={styles.panelHeader}><div><h2><MessageCircle size={17} />Talk through the options</h2><p>{focusedRecipe ? `Discussing ${focusedRecipe.name}` : "More ideas, fewer ingredients, a different cuisine — start here."}</p></div><button className={styles.smallButton} onClick={() => { setStage("ideas"); stageContent.current?.scrollIntoView({ block: "start" }); }}><ArrowLeft size={13} />Meal ideas</button></div>
-        <div className={styles.messages} aria-live="polite">
-          {!session.messages.length ? <div className={styles.welcome}><div className={styles.welcomeIcon}><Leaf size={22} /></div><h3>What do you feel like eating?</h3><p>Ask for different meals, keep what sounds good, or talk through an ingredient swap. Your shortlist stays with you.</p><button disabled={busy} className={styles.prompt} onClick={() => void send("Suggest meals using what we have. Ideas only; do not schedule anything.")}>What can I make with what I have? <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Find something from our favorites")}>Find something from our favorites <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Try a new vegetable-focused recipe")}>Use the vegetables we brought home <ArrowRight size={12} /></button><button disabled={busy} className={styles.prompt} onClick={() => void send("Make this quicker")}>Something quicker and easier <ArrowRight size={12} /></button></div> : session.messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === "user" ? styles.userMessage : styles.assistantMessage}`}><div className={styles.messageAuthor}>{message.id.startsWith("job-") && message.id.endsWith("-context") ? "Context refresh" : message.role === "user" ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : pilot.members[0]?.id, members: pilot.members, shared: Boolean(householdId) }) : message.source === "ai" ? message.id.startsWith("job-") ? "Local assistant" : "AI assistant" : "Planning helper · fixture"}</div><p>{message.text}</p>{message.recipes.map((recipe) => <button key={recipe.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(recipe)}><Utensils size={14} /><span>{session.rejectedRecipeIds.includes(recipe.id) ? `Reconsider ${recipe.name}` : recipe.name}</span><ArrowRight size={12} /></button>)}</div>)}
-        </div>
-        {assistantMode === "local" ? <LocalPlanningAssistant key={`${householdId}:${currentMemberId}:${session.id}`} householdId={householdId} actorMemberId={currentMemberId} revision={pilot.revision} session={session} contextFingerprint={planningRefreshFingerprint(state)} onResult={receiveLocalResult} requestRef={localAssistant} draft={draft} onDraftChange={setDraft} onDraftSubmitted={clearSubmittedDraft} storageError={storageError} /> : <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void send(draft); }}>
-          <div className={styles.focusPill}><CalendarDays size={12} />{dateLabel(focusDate, { weekday: "short", month: "short", day: "numeric" })} · {focusSlot}{focusedRecipe ? ` · ${focusedRecipe.name}` : " · choose a recipe"}</div>
-          <label className="sr-only" htmlFor="planning-message">Message the planning helper</label><textarea id="planning-message" className={styles.textarea} placeholder="What would make this week easier?" maxLength={2000} value={draft} onChange={(event) => setDraft(event.target.value)} />
-          <div className={styles.composerFooter}><span>{storageError ? "Draft is not saved" : inventoryExperiment ? "Draft stays in this experiment" : "Draft saved on this device"}</span><button className={`${styles.quietButton} ${styles.primary}`} disabled={busy || !draft.trim()} type="submit"><Send size={14} />{busy ? "Saving…" : "Send"}</button></div>
-        </form>}
-        <SessionSettings session={session} members={pilot.members} onSave={setSession} />
-        <MemberSettings state={state} run={run} />
-      </section>
-
     </div>
+    <details className={styles.profileDetails}><summary>Kitchen preferences, people & equipment</summary><ProfileMemory /><SessionSettings session={session} members={pilot.members} onSave={setSession} /><MemberSettings state={state} run={run} /></details>
+    {pilot.unplacedMeals.length ? <details className={styles.profileDetails}><summary>Earlier undated meals · {pilot.unplacedMeals.length}</summary><p className={styles.subtle}>Preserved from your previous plan. Open a recipe to review it.</p>{pilot.unplacedMeals.map((meal) => <button key={meal.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void focusRecipe(meal.recipe)}>{meal.recipe.name}<ArrowRight size={12} /></button>)}</details> : null}
+    {!inventoryExperiment ? <details className={styles.profileDetails}><summary>Try an example kitchen</summary><div className={styles.experimentLink}><a href="/meals?sampleKitchen=1" target="_blank" rel="noopener noreferrer">Sample inventory</a><a href="/meals?sampleKitchen=random" target="_blank" rel="noopener noreferrer">Random inventory</a><span>Fictional inventory opens separately from your saved kitchen.</span></div></details> : null}
   </div>;
+}
+
+function PlanningMessage({ message, state, householdId, currentMemberId, onRecipe, compact = false }: {
+  message: PlanningSession["messages"][number]; state: HouseholdState; householdId: string | null;
+  currentMemberId: string | null; onRecipe: (recipe: Recipe) => Promise<void>; compact?: boolean;
+}) {
+  const author = message.id.startsWith("job-") && message.id.endsWith("-context") ? "Kitchen update" : message.role === "user"
+    ? planningUserMessageAuthor({ authorMemberId: message.authorMemberId, viewerMemberId: householdId ? currentMemberId : state.pilot?.members[0]?.id, members: state.pilot?.members ?? [], shared: Boolean(householdId) })
+    : message.source === "ai" ? "AI assistant" : "Example reply";
+  return <article className={`${styles.message} ${message.role === "user" ? styles.userMessage : styles.assistantMessage}`}>
+    <div className={styles.messageAuthor}>{author}</div><p>{compact ? message.text.split(/\n\s*\n/)[0] : message.text}</p>
+    {!compact ? message.recipes.map((recipe) => <button key={recipe.id} className={`${styles.quietButton} ${styles.messageRecipe}`} onClick={() => void onRecipe(recipe)}><Utensils size={14} /><span>{state.pilot?.session.rejectedRecipeIds.includes(recipe.id) ? `Reconsider ${recipe.name}` : recipe.name}</span><ArrowRight size={12} /></button>) : null}
+  </article>;
 }
 
 function ProposalReview({ proposal, state, run, focusRecipe }: { proposal: PlanningProposal; state: HouseholdState; run: RunCommand; focusRecipe: (recipe: Recipe) => Promise<void> }) {
@@ -496,8 +617,8 @@ function MemberSettings({ state, run }: { state: HouseholdState; run: RunCommand
   </details>;
 }
 
-function RecipeDetail({ recipe }: { recipe: Recipe }) {
-  return <details className={styles.details} open><summary>Ingredients & steps · {recipe.servings} portions</summary><ul className={styles.ingredients}>{recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.ingredientId}:${ingredient.unit}:${index}`}><span>{ingredient.name}</span><span>{amount(ingredient.quantity, ingredient.unit)}</span></li>)}</ul><ol className={styles.steps}>{recipe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>{recipe.provenance?.sourceUrl ? <a className={styles.textButton} href={recipe.provenance.sourceUrl} target="_blank" rel="noreferrer">Original recipe</a> : null}</details>;
+function RecipeDetail({ recipe, portions = recipe.servings }: { recipe: Recipe; portions?: number | null }) {
+  return <details className={styles.details} open><summary>Ingredients & steps{portions !== null ? ` · ${portions} portions` : ""}</summary>{portions === null ? <p className={styles.formNotice}>Choose a valid portion total in groceries to see ingredient amounts.</p> : <ul className={styles.ingredients}>{recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.ingredientId}:${ingredient.unit}:${index}`}><span>{ingredient.name}</span><span>{amount(ingredient.quantity * portions / recipe.servings, ingredient.unit)}</span></li>)}</ul>}<ol className={styles.steps}>{recipe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>{recipe.provenance?.sourceUrl ? <a className={styles.textButton} href={recipe.provenance.sourceUrl} target="_blank" rel="noreferrer">Original recipe</a> : null}</details>;
 }
 
 function ShoppingPreview({ state, run, compact = false }: { state: HouseholdState; run: RunCommand; compact?: boolean }) {

@@ -22,7 +22,7 @@ test("journey stage and shortlist snapshots round-trip in the existing cache wit
   const storage = memory();
   const state = ensurePilot(createSampleHousehold(), "2026-10-12");
   const original = structuredClone(state);
-  const planningComposer = composer({ stage: "recipe", shortlist: [recipe] });
+  const planningComposer = composer({ stage: "groceries", shortlist: [recipe], portionDrafts: { [recipe.id]: "2.5" } });
   saveHousehold(storage, state, { ownerId: "nate", householdId: "kitchen", planningComposer });
   assert.deepEqual([...storage.values.keys()], [HOUSEHOLD_STORAGE_KEY]);
   assert.deepEqual(readHouseholdCache(storage).planningComposer, planningComposer);
@@ -36,7 +36,7 @@ test("journey stage and shortlist snapshots round-trip in the existing cache wit
 
 test("every journey stage accepts an empty shortlist and ten distinct validated snapshots", () => {
   const shortlist = Array.from({ length: 10 }, (_, index) => ({ ...recipe, id: `recipe-${index}` }));
-  for (const stage of ["ideas", "recipe", "plan", "calendar"] as const) {
+  for (const stage of ["ideas", "recipe", "groceries", "plan", "calendar"] as const) {
     for (const snapshots of [[], shortlist]) {
       const input = composer({ stage, shortlist: snapshots });
       assert.deepEqual(readPlanningComposer(input, input.sessionId), input);
@@ -52,6 +52,43 @@ test("older composer caches remain valid and do not invent a journey", () => {
   const original = composer();
   assert.deepEqual(readPlanningComposer(original, original.sessionId), original);
   assert.equal(readPlanningComposer(original, original.sessionId)?.journey, undefined);
+  const oldJourney = composer({ stage: "recipe", shortlist: [recipe] });
+  assert.deepEqual(readPlanningComposer(oldJourney, oldJourney.sessionId), oldJourney);
+  assert.equal(readPlanningComposer(oldJourney, oldJourney.sessionId)?.journey?.portionDrafts, undefined);
+});
+
+test("raw portion drafts round-trip without treating incomplete or invalid text as quantities", () => {
+  const storage = memory();
+  const state = ensurePilot(createSampleHousehold(), "2026-10-12");
+  const original = structuredClone(state);
+  for (const draft of ["", "0", "2.5", "1e3", "-", "not a quantity", "9".repeat(32)]) {
+    const input = composer({ stage: "groceries", shortlist: [recipe], portionDrafts: { [recipe.id]: draft } });
+    saveHousehold(storage, state, { ownerId: "nate", householdId: "kitchen", planningComposer: input });
+    const parsed = readHouseholdCache(storage).planningComposer!;
+    assert.deepEqual(parsed, input);
+    parsed.journey!.portionDrafts![recipe.id] = "changed";
+    assert.equal(input.journey!.portionDrafts![recipe.id], draft);
+    assert.deepEqual(loadHousehold(storage), original);
+  }
+  assert.deepEqual([...storage.values.keys()], [HOUSEHOLD_STORAGE_KEY]);
+});
+
+test("malformed optional portion drafts preserve the journey and unsent composer", () => {
+  const input = composer({ stage: "groceries", shortlist: [recipe] });
+  for (const portionDrafts of [null, "4", 4, false, [], ["4"], { [recipe.id]: 4 }, { [recipe.id]: "4".repeat(33) }]) {
+    const parsed = readPlanningComposer({ ...input, journey: { ...input.journey, portionDrafts } }, input.sessionId);
+    assert.deepEqual(parsed, input);
+  }
+});
+
+test("portion drafts retain valid entries while pruning malformed, unknown and removed recipe IDs", () => {
+  const otherRecipe = { ...recipe, id: "other-recipe" };
+  const input = composer({ stage: "groceries", shortlist: [recipe, otherRecipe], portionDrafts: { [recipe.id]: "", [otherRecipe.id]: "6" } });
+  const malformed = { ...input, journey: { ...input.journey, portionDrafts: { [recipe.id]: "", [otherRecipe.id]: null, unknown: "2" } } };
+  assert.deepEqual(readPlanningComposer(malformed, input.sessionId)?.journey, { stage: "groceries", shortlist: [recipe, otherRecipe], portionDrafts: { [recipe.id]: "" } });
+  const removed = { ...input, journey: { ...input.journey, shortlist: [otherRecipe] } };
+  assert.deepEqual(readPlanningComposer(removed, input.sessionId)?.journey, { stage: "groceries", shortlist: [otherRecipe], portionDrafts: { [otherRecipe.id]: "6" } });
+  assert.equal(input.journey!.portionDrafts![recipe.id], "");
 });
 
 test("invalid optional journeys preserve the unsent draft and mode", () => {
@@ -70,7 +107,7 @@ test("invalid optional journeys preserve the unsent draft and mode", () => {
 test("shortlist recovery follows the account and session instead of leaking into a partner's journey", () => {
   const storage = memory();
   const state = ensurePilot(createSampleHousehold(), "2026-10-12");
-  const nateComposer = composer({ stage: "plan", shortlist: [recipe] });
+  const nateComposer = composer({ stage: "groceries", shortlist: [recipe], portionDrafts: { [recipe.id]: "" } });
   saveHousehold(storage, state, { ownerId: "nate", householdId: "kitchen", planningComposer: nateComposer });
   preserveHouseholdRecovery(storage, "Before partner sign-in");
   const partnerComposer = composer({ stage: "ideas", shortlist: [] });
@@ -84,7 +121,7 @@ test("shortlist recovery follows the account and session instead of leaking into
 test("a failed journey cache write retains the previous saved shortlist", () => {
   const storage = memory();
   const state = ensurePilot(createSampleHousehold(), "2026-10-12");
-  const original = composer({ stage: "recipe", shortlist: [recipe] });
+  const original = composer({ stage: "groceries", shortlist: [recipe], portionDrafts: { [recipe.id]: "1e3" } });
   saveHousehold(storage, state, { ownerId: "nate", householdId: "kitchen", planningComposer: original });
   assert.throws(() => saveHousehold({ setItem: () => { throw new Error("Quota exceeded"); } }, state, {
     ownerId: "nate", householdId: "kitchen", planningComposer: composer({ stage: "ideas", shortlist: [] }),

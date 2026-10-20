@@ -44,6 +44,8 @@ Read [the living recipe journey brief](RECIPE_JOURNEY_DESIGN.md) for quick onboa
 
 The **2026-10-13 desktop pilot follow-up** in [PR #31](https://github.com/B4CKlash/Lunchbox/pull/31), based on main `4667b6f`, implements: pantry-ranked ideas and a temporary shortlist precede recipe inspection, total portions and calendar allocation. Sample/random kitchens stay in tab memory and use authored examples. See [dated implementation evidence and limits](RECIPE_FIRST_REVIEW_2026-10-13.md). The follow-up has local checks and browser evidence; production household enablement remains gated on HP-10 participant acceptance.
 
+The **2026-10-19 chat-first follow-up** on `codex/chat-first-meal-planning` moves conversation before concise saved-first ideas, adds combined groceries and raw portion drafts before dates, and transfers selected demand into saved batches across manual/chat/proposal paths. See [implementation, local verification and retained limits](CHAT_FIRST_MEALS_2026-10-19.md). This covers B4C-96/97; live-assistant routing/reliability and household acceptance remain separate review gates.
+
 ## Ownership and first tasks
 
 | Person | Owns | First task | Done when |

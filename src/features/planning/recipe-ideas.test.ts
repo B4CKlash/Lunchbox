@@ -4,7 +4,7 @@ import { createInventoryExperiment } from "@/features/pantry/sample-inventory";
 import { buildRecommendationContext } from "@/features/meals/recommendation-context";
 import { buildRecipeIdeas, recipeFitsIdeaContext, recipeIdeaFit } from "./recipe-ideas";
 import { profileFactId } from "./profile";
-import { householdStateSchema, type ProfileFactValue } from "@/lib/contracts";
+import { householdStateSchema, type ProfileFactValue, type Recipe } from "@/lib/contracts";
 
 test("discovery ranks known-stock recipes before shortages, without changing household state", () => {
   const state = createInventoryExperiment(false);
@@ -13,6 +13,94 @@ test("discovery ranks known-stock recipes before shortages, without changing hou
   assert.ok(ideas.length > 3 && ideas.length <= 10);
   assert.equal(recipeIdeaFit(state, ideas[0]).ready, true);
   assert.ok(ideas.every((recipe) => recipe.provenance?.source === "demo"));
+  assert.deepEqual(state, before);
+});
+
+test("suitable saved recipes precede stock-covered candidates and starters without losing alternatives", () => {
+  const state = createInventoryExperiment(false);
+  const starters = buildRecipeIdeas(state);
+  const ready = starters.find((recipe) => recipeIdeaFit(state, recipe).ready)!;
+  const saved: Recipe = { ...ready, id: "saved-with-shortages", provenance: { source: "ai" },
+    ingredients: [{ ingredientId: "rice", name: "Rice", quantity: 10000, unit: "g" }] };
+  const candidate = { ...ready, id: "current-stock-covered", provenance: { source: "ai" as const } };
+  state.workspace.recipeBox = [{ recipe: saved, source: "ai" }];
+  state.pilot!.session.candidates = [candidate];
+  const before = structuredClone(state);
+  const ideas = buildRecipeIdeas(state);
+  assert.equal(recipeIdeaFit(state, saved).ready, false);
+  assert.equal(ideas[0].id, saved.id);
+  assert.equal(ideas[0].provenance?.source, "ai");
+  assert.ok(ideas.some((recipe) => recipe.id === candidate.id));
+  for (const starter of starters) assert.ok(ideas.some((recipe) => recipe.id === starter.id));
+  assert.deepEqual(state, before);
+});
+
+test("a saved ID keeps its affinity while its newest candidate snapshot and provenance win", () => {
+  const state = createInventoryExperiment(false);
+  const original = buildRecipeIdeas(state)[0];
+  const saved: Recipe = { ...original, id: "saved-current", name: "Earlier imported recipe", provenance: { source: "import", sourceUrl: "https://example.com/earlier-recipe" } };
+  const earlierCandidate = { ...saved, name: "Earlier candidate" };
+  const latestCandidate: Recipe = { ...saved, name: "Latest candidate", provenance: { source: "ai" },
+    ingredients: [{ ingredientId: "rice", name: "Rice", quantity: 10000, unit: "g" }] };
+  state.workspace.recipeBox = [{ recipe: saved, source: "import" }];
+  state.pilot!.session.candidates = [earlierCandidate, latestCandidate];
+  const before = structuredClone(state);
+  const ideas = buildRecipeIdeas(state);
+  assert.strictEqual(ideas[0], latestCandidate);
+  assert.equal(ideas.filter((recipe) => recipe.id === saved.id).length, 1);
+  assert.deepEqual(state, before);
+});
+
+test("an ineligible current snapshot cannot fall back to an older saved version", () => {
+  const cases: Array<{ label: string; patch: Partial<Recipe> }> = [
+    { label: "time", patch: { minutes: 60 } },
+    { label: "ingredient exclusion", patch: { ingredients: [{ ingredientId: "custom-peanut", name: "Peanut butter", quantity: 100, unit: "g" }] } },
+    { label: "equipment", patch: { steps: ["Bake in the oven until tender."] } },
+  ];
+  for (const { label, patch } of cases) {
+    const state = createInventoryExperiment(false);
+    const saved: Recipe = { ...buildRecipeIdeas(state)[0], id: "saved-older-fitting", minutes: 15, steps: ["Stir and serve."],
+      ingredients: [{ ingredientId: "rice", name: "Rice", quantity: 100, unit: "g" }] };
+    state.preferences.maxMinutes = 35;
+    state.preferences.allergies = ["peanut"];
+    const value: ProfileFactValue = { kind: "equipment", equipment: "oven", availability: "unavailable" };
+    state.pilot!.profileFacts = [{ id: profileFactId(value), value,
+      source: { kind: "manual", sourceText: "No oven", commandId: "setup", recordedAt: "2026-10-13T00:00:00.000Z" } }];
+    state.workspace.recipeBox = [{ recipe: saved, source: "demo" }];
+    state.pilot!.session.candidates = [{ ...saved, ...patch }];
+    const before = structuredClone(state);
+    assert.equal(recipeFitsIdeaContext(saved, buildRecommendationContext(state)), true, label);
+    assert.ok(!buildRecipeIdeas(state).some((recipe) => recipe.id === saved.id), label);
+    assert.deepEqual(state, before, label);
+  }
+});
+
+test("saved affinity never bypasses rejected recipes or current make-again feedback", () => {
+  const state = createInventoryExperiment(false);
+  const original = buildRecipeIdeas(state)[0];
+  const saved = ["passed-over", "not-again", "still-welcome"].map((id) => ({ ...original, id }));
+  state.workspace.recipeBox = saved.map((recipe) => ({ recipe, source: "demo" }));
+  state.pilot!.session.rejectedRecipeIds = [saved[0].id];
+  const memberId = state.pilot!.session.memberIds[0];
+  state.pilot!.feedback = [
+    { id: "earlier-feedback", recipeId: saved[1].id, memberId, rating: 4, makeAgain: true, notes: "" },
+    { id: "current-feedback", recipeId: saved[1].id, memberId, rating: 1, makeAgain: false, notes: "" },
+  ];
+  const before = structuredClone(state);
+  const ideas = buildRecipeIdeas(state);
+  assert.equal(ideas[0].id, saved[2].id);
+  assert.ok(ideas.every((recipe) => recipe.id !== saved[0].id && recipe.id !== saved[1].id));
+  assert.deepEqual(state, before);
+});
+
+test("saved discovery stays deterministic and bounded to ten eligible recipes", () => {
+  const state = createInventoryExperiment(false);
+  const original = buildRecipeIdeas(state)[0];
+  state.workspace.recipeBox = Array.from({ length: 12 }, (_, index) => ({ recipe: { ...original, id: `saved-${index}` }, source: "demo" as const }));
+  const before = structuredClone(state);
+  const expected = state.workspace.recipeBox.slice(0, 10).map(({ recipe }) => recipe.id);
+  assert.deepEqual(buildRecipeIdeas(state).map((recipe) => recipe.id), expected);
+  assert.deepEqual(buildRecipeIdeas(state).map((recipe) => recipe.id), expected);
   assert.deepEqual(state, before);
 });
 
