@@ -17,13 +17,17 @@ type RecipeServingPlanProps = {
   state: HouseholdState;
   run: (operation: PilotOperation) => Promise<boolean>;
   onPlanned: () => void;
+  portionsDraft?: string;
+  onPortionsChange?: (value: string) => void;
   renderGroceries?: (portions: number, prepareDate: string) => ReactNode;
 };
 
-export function RecipeServingPlan({ recipe, state, run, onPlanned, renderGroceries }: RecipeServingPlanProps) {
+export function RecipeServingPlan({ recipe, state, run, onPlanned, portionsDraft, onPortionsChange, renderGroceries }: RecipeServingPlanProps) {
   const [today, setToday] = useState(() => localDate(new Date()));
   const [intent, setIntent] = useState<"tonight" | "ahead" | null>(null);
-  const [draft, setDraft] = useState<ServingPlanDraft>(() => ({ totalPortions: recipe.servings, prepareDate: today, allocations: [] }));
+  const [planDraft, setDraft] = useState<ServingPlanDraft>(() => ({ totalPortions: recipe.servings, prepareDate: today, allocations: [] }));
+  const totalText = portionsDraft ?? (Number.isNaN(planDraft.totalPortions) ? "" : String(planDraft.totalPortions));
+  const draft = { ...planDraft, totalPortions: totalText.trim() ? Number(totalText) : NaN };
   const [batchId, setBatchId] = useState(() => crypto.randomUUID());
   const [reviewedKey, setReviewedKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -62,7 +66,7 @@ export function RecipeServingPlan({ recipe, state, run, onPlanned, renderGroceri
     if (!nextMeal) { setNotice("Choose another preparation date to find an open meal."); return; }
     const meal = nextMeal;
     setNotice("");
-    setDraft((current) => ({ ...current, allocations: [...current.allocations, { id: crypto.randomUUID(), ...meal, portions: Math.min(1, Math.max(0, current.totalPortions - allocated)) || 1 }] }));
+    setDraft((current) => ({ ...current, allocations: [...current.allocations, { id: crypto.randomUUID(), ...meal, portions: Math.min(1, Math.max(0, draft.totalPortions - allocated)) || 1 }] }));
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -98,7 +102,7 @@ export function RecipeServingPlan({ recipe, state, run, onPlanned, renderGroceri
       {intent ? <>
         <p className={styles.formNotice}>{intent === "tonight" ? `Plan preparation for today, ${dateLabel(today)}.` : "Choose when you intend to prepare this batch."} You’ll confirm cooking after you’ve made it.</p>
         {intent === "ahead" ? <label className={styles.field}>Prepare on<input className={styles.input} type="date" required value={draft.prepareDate} onChange={(event) => { setNotice(""); setDraft((current) => ({ ...current, prepareDate: event.target.value })); }} /></label> : null}
-        <label className={styles.field}>How many portions will you make in total?<input className={styles.input} type="number" required min={0.001} max={1000} step="any" value={Number.isNaN(draft.totalPortions) ? "" : draft.totalPortions} onChange={(event) => { setNotice(""); setDraft((current) => ({ ...current, totalPortions: event.target.value === "" ? NaN : Number(event.target.value) })); }} /></label>
+        <label className={styles.field}>How many portions will you make in total?<input className={styles.input} type="number" required min={0.001} max={1000} step="any" value={totalText} onChange={(event) => { const value = event.target.value; setNotice(""); setDraft((current) => ({ ...current, totalPortions: value === "" ? NaN : Number(value) })); onPortionsChange?.(value); }} /></label>
         <p className={styles.subtle}>Start with the whole batch. Then decide who will eat it and when.</p>
         <h4 className={servingStyles.heading}>Distribute portions</h4>
         {draft.allocations.length ? draft.allocations.map((row, index) => <fieldset className={servingStyles.allocation} key={row.id}>

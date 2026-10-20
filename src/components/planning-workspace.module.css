@@ -17,45 +17,75 @@
 .statusBar p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .mobileNav { display: none; }
 .columns { display: flex; flex-direction: column; align-items: stretch; gap: 22px; max-width: 1120px; margin: 0 auto; }
-.journeyNav { display: flex; gap: 7px; padding: 5px; margin: 22px 0; border: 1px solid var(--line); border-radius: 13px; background: #f0f2e9; }
-.journeyNav button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 9px; background: transparent; color: var(--muted); padding: 12px 9px; border-radius: 9px; font: inherit; font-size: 13px; }
-.journeyNav button span { width: 23px; height: 23px; border: 1px solid #cdd6bf; border-radius: 50%; display: grid; place-items: center; font-size: 11px; }
-.journeyNav button[aria-current="step"] { background: var(--white); color: var(--green); font-weight: 700; box-shadow: 0 2px 6px #193f3509; }
-.journeyNav button[aria-current="step"] span { background: var(--green); color: white; border-color: var(--green); }
-.journeyNav button:disabled { opacity: .5; cursor: default; }
-.ideaGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
-.ideaCard { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 13px; padding: 18px; background: #fffefa; min-width: 0; }
-.ideaCard h3 { font-size: 21px; line-height: 1.2; letter-spacing: -.6px; margin: 15px 0 10px; }
-.ideaCard > p { color: var(--muted); font-size: 12px; line-height: 1.6; }
-.ideaCard .buttonRow { margin-top: auto; padding-top: 7px; }
+/* Conversation and recipe discovery stay light until someone chooses a next step. */
+.heading, .conversation, .profileDetails { max-width: 1120px; margin-left: auto; margin-right: auto; }
+.conversation { margin-bottom: 26px; }
+.conversationHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 18px 20px 0; }
+.conversationHeading h2 { font-size: 17px; letter-spacing: -.4px; margin: 0; }
+.assistantOptions { max-width: 360px; font-size: 11px; text-align: right; }
+.assistantOptions > summary { cursor: pointer; color: var(--muted); }
+.assistantOptions p { margin: 12px 0; }
+.assistantOptions .modePicker { justify-content: center; }
+.conversation .composer { padding: 16px 20px; border-top: 0; background: transparent; }
+.conversation .textarea { min-height: 82px; font-size: 15px; padding: 12px 14px; }
+.conversationPrompts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.conversationPrompts button { background: transparent; color: var(--green); font-size: 11px; padding: 4px 0; text-align: left; }
+.latestReply { padding: 0 20px 17px; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.latestReply > p { margin: 0; }
+.latestReply .message { max-width: 100%; font-size: 13px; }
+.transcript { border-top: 1px solid var(--line); font-size: 11px; }
+.transcript > summary { padding: 12px 20px; cursor: pointer; color: var(--muted); }
+.conversation .messages { min-height: 0; max-height: 320px; }
+.contextNavigation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.contextNavigation .textButton { display: inline-flex; gap: 7px; align-items: center; }
+.discoveryHeading, .selectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.discoveryHeading h2, .selectionHeading h2 { font-size: 21px; letter-spacing: -.6px; margin: 0; }
+.discoveryHeading p { margin: 0; font-size: 11px; color: var(--muted); }
+.ideaGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.ideaCard { display: flex; align-items: center; gap: 16px; justify-content: space-between; border: 1px solid var(--line); border-radius: 13px; padding: 18px; background: #fffefa; min-width: 0; }
+.ideaContent { min-width: 0; }
+.ideaSource { display: flex; gap: 7px; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
+.ideaCard h3 { font-size: 19px; line-height: 1.25; letter-spacing: -.5px; margin: 9px 0; }
+.ideaTitle { padding: 0; background: transparent; text-align: left; font: inherit; color: var(--ink); }
+.ideaTitle:hover { color: var(--green); text-decoration: underline; text-underline-offset: 3px; }
+.ideaCard > button { flex-shrink: 0; }
 .keptIdea { border-color: #8ba968; background: #f5f8ec; }
-.fitLabel { margin-top: 12px; color: var(--green) !important; font-weight: 650; }
-.shortlist { border-top: 1px solid var(--line); padding-top: 22px; margin-top: 24px; }
-.shortlist h3 { display: flex; align-items: center; gap: 9px; font-size: 20px; }
-.shortlistRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding: 10px 0; }
-.experimentLink { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 25px; padding: 14px 0 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.fitLabel { margin: 0; color: var(--green); font-size: 11px; line-height: 1.6; }
+.selectionTray { padding: 18px 20px; margin-bottom: 26px; background: #eff4e5; border: 1px solid #c4d3ad; border-radius: 13px; }
+.selectionHeading h2 { font-size: 17px; }
+.keptRecipes { display: flex; flex-wrap: wrap; gap: 7px 12px; margin-top: 12px; }
+.keptRecipes > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.keptRecipes .textButton { text-align: left; }
+.removeSelection { background: transparent; color: var(--muted); font-size: 19px; padding: 3px 7px; }
+.selectionTray > p { margin-bottom: 0; }
+.experimentLink { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 0; font-size: 12px; color: var(--muted); }
 .experimentLink a { color: var(--green); text-underline-offset: 3px; }
-.profileDetails { margin: 12px 0; font-size: 12px; }
+.profileDetails { margin-top: 20px; margin-bottom: 12px; font-size: 12px; }
 .profileDetails > summary { cursor: pointer; color: var(--muted); padding: 5px 0; }
-.decisionActions { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+.decisionActions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 16px 0; }
 .recipeStage { display: block !important; }
 .recipeStage > section { margin-bottom: 18px; }
-.recipeStage .recipeHero h3 { font-size: 32px; }
+.recipeStage .recipeHero h2 { font-size: 30px; line-height: 1.15; letter-spacing: -.9px; margin: 14px 0; }
 .recipeStage .recipeDescription { font-size: 15px; }
 .recipeStage .ingredients li, .recipeStage .steps { font-size: 14px; }
 .recipeStage .steps li { margin-bottom: 12px; }
-.conversation .messages { min-height: 0; max-height: 300px; }
-.conversation .welcome { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 13px; }
-.conversation .welcomeIcon { display: none; }
-.conversation .welcome h3, .conversation .welcome p { grid-column: 1 / -1; }
-.conversation .welcome p { margin-bottom: 3px; }
-.conversation .message { font-size: 14px; }
-.conversation .textarea { min-height: 75px; font-size: 14px; }
 .calendarPanel .day { min-height: 82px; }
 .calendarPanel .occasionTitle { font-size: 13px; }
 .calendarPanel .person { font-size: 11px; }
-@media (max-width: 1000px) { .ideaGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 600px) { .ideaGrid { grid-template-columns: 1fr; } .journeyNav { gap: 2px; } .journeyNav button { flex-direction: column; gap: 5px; padding: 9px 3px; font-size: 11px; } .discovery .panelHeader { flex-direction: column; } .conversation .welcome { grid-template-columns: 1fr; } .recipeStage .recipeHero h3 { font-size: 26px; } }
+@media (max-width: 600px) {
+  .ideaGrid { grid-template-columns: minmax(0, 1fr); }
+  .discoveryHeading { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .conversationHeading { padding: 16px 15px 0; align-items: flex-start; }
+  .conversationHeading h2 { font-size: 15px; }
+  .assistantOptions { max-width: 150px; }
+  .conversation .composer { padding: 14px 15px; }
+  .conversationPrompts { gap: 3px; flex-direction: column; align-items: flex-start; }
+  .latestReply { padding: 0 15px 15px; }
+  .ideaCard { padding: 15px; gap: 10px; }
+  .ideaCard h3 { font-size: 18px; }
+  .recipeStage .recipeHero h2 { font-size: 25px; }
+  .selectionTray { padding: 15px; }
+}
 .panel { min-width: 0; background: var(--white); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 .panelHeader { padding: 18px 18px 15px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .panelHeader h2 { font-size: 16px; letter-spacing: -.4px; margin: 0; display: flex; align-items: center; gap: 8px; }

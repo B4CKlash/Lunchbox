@@ -5,7 +5,12 @@ export const HOUSEHOLD_STORAGE_KEY = "lunchbox.household.v1";
 export const HOUSEHOLD_RECOVERY_KEY = "lunchbox.household.recovery.v1";
 export type ProposalReviewSelection = { excludedAllocationIds: string[]; includeOtherChanges: boolean };
 export type CachedProposalReview = ProposalReviewSelection & { proposalId: string; fingerprint: string };
-export type PlanningJourney = { stage: "ideas" | "recipe" | "plan" | "calendar"; shortlist: Recipe[] };
+export type PlanningJourney = {
+  stage: "ideas" | "recipe" | "groceries" | "plan" | "calendar";
+  shortlist: Recipe[];
+  /** Raw number-field text, not a validated quantity for previews or planning. */
+  portionDrafts?: Record<string, string>;
+};
 export type PlanningComposer = { draft: string; mode: "fixture" | "local"; proposalReviews?: CachedProposalReview[]; journey?: PlanningJourney };
 export type CachedPlanningComposer = PlanningComposer & { sessionId: string };
 export type HouseholdCache = { ownerId: string | null; householdId: string | null; pending?: unknown; planningComposer?: CachedPlanningComposer };
@@ -33,7 +38,7 @@ export function readProposalReview(value: unknown, proposal: PlanningProposal): 
  */
 function readPlanningJourney(value: unknown): PlanningJourney | undefined {
   if (!value || typeof value !== "object" || !("stage" in value)
-    || (value.stage !== "ideas" && value.stage !== "recipe" && value.stage !== "plan" && value.stage !== "calendar")
+    || (value.stage !== "ideas" && value.stage !== "recipe" && value.stage !== "groceries" && value.stage !== "plan" && value.stage !== "calendar")
     || !("shortlist" in value) || !Array.isArray(value.shortlist) || value.shortlist.length > 10) return undefined;
   const shortlist: Recipe[] = [];
   const ids = new Set<string>();
@@ -43,7 +48,11 @@ function readPlanningJourney(value: unknown): PlanningJourney | undefined {
     ids.add(recipe.data.id);
     shortlist.push(recipe.data);
   }
-  return { stage: value.stage, shortlist };
+  const drafts = "portionDrafts" in value ? value.portionDrafts : undefined;
+  const portionDrafts = drafts && typeof drafts === "object" && !Array.isArray(drafts)
+    ? Object.fromEntries(Object.entries(drafts).filter(([id, draft]) => ids.has(id) && typeof draft === "string" && draft.length <= 32))
+    : {};
+  return { stage: value.stage, shortlist, ...(Object.keys(portionDrafts).length ? { portionDrafts } : {}) };
 }
 
 export function readPlanningComposer(value: unknown, sessionId: string, proposals: readonly PlanningProposal[] = []): CachedPlanningComposer | undefined {

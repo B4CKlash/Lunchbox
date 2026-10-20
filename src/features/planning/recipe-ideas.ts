@@ -30,9 +30,11 @@ export function recipeIdeaFit(state: HouseholdState, recipe: Recipe) {
 
 /** Keep labeled starter options available while actual snapshots accumulate.
  * Current dislikes, declared ingredient exclusions, equipment and time filter
- * cards; existing stock commitments determine their displayed pantry fit. */
+ * cards. Suitable saved recipes come first, then pantry fit within each group.
+ * Recent candidates retain their snapshots and provenance even when saved. */
 export function buildRecipeIdeas(state: HouseholdState, actorId?: string): Recipe[] {
   const context = buildRecommendationContext(state, actorId);
+  const savedIds = new Set(state.workspace.recipeBox.map(({ recipe }) => recipe.id));
   const actual = [
     ...(state.pilot?.session.candidates ?? []).slice().reverse(),
     ...state.workspace.recipeBox.map(({ recipe, source }) => ({ ...recipe, provenance: recipe.provenance ?? { source } })),
@@ -49,9 +51,13 @@ export function buildRecipeIdeas(state: HouseholdState, actorId?: string): Recip
     }),
   ];
   const unique = new Map<string, Recipe>();
-  for (const recipe of [...actual, ...examples]) if (!unique.has(recipe.id) && recipeFitsIdeaContext(recipe, context)) unique.set(recipe.id, recipe);
-  return [...unique.values()].map((recipe, index) => ({ recipe, index, fit: recipeIdeaFit(state, recipe) }))
-    .sort((a, b) => Number(b.fit.ready) - Number(a.fit.ready)
+  // Choose the current snapshot before checking eligibility: an older saved
+  // version must not replace a current candidate that no longer fits.
+  for (const recipe of [...actual, ...examples]) if (!unique.has(recipe.id)) unique.set(recipe.id, recipe);
+  return [...unique.values()].filter((recipe) => recipeFitsIdeaContext(recipe, context))
+    .map((recipe, index) => ({ recipe, index, saved: savedIds.has(recipe.id), fit: recipeIdeaFit(state, recipe) }))
+    .sort((a, b) => Number(b.saved) - Number(a.saved)
+      || Number(b.fit.ready) - Number(a.fit.ready)
       || a.fit.shortages - b.fit.shortages || a.fit.checks - b.fit.checks || a.index - b.index)
     .slice(0, 10).map(({ recipe }) => recipe);
 }
