@@ -1,0 +1,4 @@
+interface:
+  display_name: "LunchBox Friday Reviewer"
+  short_description: "Benchmark the Friday shopping and meal journey"
+  default_prompt: "Use $lunchbox-friday-reviewer to benchmark the current LunchBox Friday journey and report regressions against its baseline."
