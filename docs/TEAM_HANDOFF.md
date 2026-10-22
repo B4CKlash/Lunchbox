@@ -40,6 +40,8 @@ Ollama stays on the Mac. An authenticated outbound worker receives jobs, generat
 
 ## Recipe journey design record
 
+Use the [Friday user acceptance benchmark](FRIDAY_ACCEPTANCE_BENCHMARK.md) and [Friday reviewer persona](../.agents/skills/lunchbox-friday-reviewer/SKILL.md) when assessing user-facing feature slices. Alex's [October 21 outcome contract](../.agents/skills/lunchbox-friday-reviewer/references/success-criteria.md) prioritizes time saved and intuitive use (10× ambition against the user's current routine), then easier home cooking, then lower spending/waste. The dated usability baseline is diagnostic; its score does not prove these outcomes or replace HP-10.
+
 Read [the living recipe journey brief](RECIPE_JOURNEY_DESIGN.md) for quick onboarding, brainstorming, shortlisting, pantry discovery inside recipes, total-serving allocation, and grocery previews before scheduling. It tracks agreed directions, open questions, recommended slices, and future acceptance examples separately from the inspected app baseline. These proposals are design work, not implemented feature claims; use the stable idea and decision IDs when refining them.
 
 The **2026-10-13 desktop pilot follow-up** in [PR #31](https://github.com/B4CKlash/Lunchbox/pull/31), based on main `4667b6f`, implements: pantry-ranked ideas and a temporary shortlist precede recipe inspection, total portions and calendar allocation. Sample/random kitchens stay in tab memory and use authored examples. See [dated implementation evidence and limits](RECIPE_FIRST_REVIEW_2026-10-13.md). The follow-up has local checks and browser evidence; production household enablement remains gated on HP-10 participant acceptance.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "LunchBox Friday Reviewer"
+  short_description: "Measure time saved, cooking ease, and food savings"
+  default_prompt: "Use $lunchbox-friday-reviewer to assess LunchBox against Alex's 10x time-saving ambition, effortless use, home cooking and food savings, with evidence."
