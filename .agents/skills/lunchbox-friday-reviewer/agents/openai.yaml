@@ -1,4 +1,4 @@
 interface:
   display_name: "LunchBox Friday Reviewer"
-  short_description: "Benchmark the Friday shopping and meal journey"
-  default_prompt: "Use $lunchbox-friday-reviewer to benchmark the current LunchBox Friday journey and report regressions against its baseline."
+  short_description: "Measure time saved, cooking ease, and food savings"
+  default_prompt: "Use $lunchbox-friday-reviewer to assess LunchBox against Alex's 10x time-saving ambition, effortless use, home cooking and food savings, with evidence."

@@ -1,5 +1,7 @@
 # Friday user acceptance benchmark
 
+**Success criteria update — October 21, 2026:** Alex now prioritizes time saved through effortless, intuitive use, with a 10× ambition against the user's existing routine; home cooking from real ingredients comes second, food spending and waste third. Read the [v2 product outcome contract](../.agents/skills/lunchbox-friday-reviewer/references/success-criteria.md) for baselines, total-work timing and evidence requirements. The assessment below remains the unchanged **v1 historical usability baseline**. Its 61/100 score and proposed 85/100 interface target do not establish the time advantage, cooking or savings outcomes; those are unmeasured here.
+
 Assessment date: **October 19, 2026 (Pacific)**. Scored source: **`28b2935dd8c6a279f1b0fc9feb28012af8579627`**, merged PR #31. The concurrent `codex/chat-first-meal-planning` implementation and its prototype are excluded. This is a **provisional expert review, not measured user acceptance**.
 
 The reusable [Friday reviewer skill](../.agents/skills/lunchbox-friday-reviewer/SKILL.md) defines Alex, the fixed tasks F-01–F-08, scoring anchors, reporting rules and proposed acceptance targets. It can be used directly from this repository or installed in a personal Codex skills directory. The installed personal copy is an installation snapshot; update it from the repository version when the rubric changes.
@@ -78,3 +80,5 @@ Example invocation: `Use $lunchbox-friday-reviewer to review this LunchBox featu
 - [Household delivery gates](HOUSEHOLD_PILOT_DELIVERY.md): implementation versus participant and release acceptance.
 
 Validation: fresh pinned-runtime `npm ci`, `npm run check` (lint, type checking, 473 tests passed; one optional database test skipped), and `npm run build` passed. The skill validator passed for repository and installed copies; local links, score arithmetic and installation parity were checked. An independent forward-test correctly rejected converting a beautiful prototype and helper tests into human acceptance or an unsupported three-minute mobile claim. Local fixture browser scope and its limitations are recorded above. No application behavior is changed by this benchmark.
+
+October 21 criteria update: fresh install, check (473 passed, one optional skip) and build passed again on this documentation branch. Updated repository/installed skills validate and match; 22 local links resolve. A fresh independent skill trial counted two UI minutes plus eight required pantry-entry minutes as ten total, rejected unobserved food/money benefits, and identified a regression against a four-minute alternative. This validates the review instructions, not app performance. No new application or human-session score was produced.
